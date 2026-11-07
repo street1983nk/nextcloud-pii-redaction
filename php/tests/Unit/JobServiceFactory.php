@@ -16,6 +16,7 @@ use OCP\Files\File;
 use OCP\Files\Folder;
 use OCP\Files\IRootFolder;
 use OCP\Files\Storage\IStorage;
+use OCP\Http\Client\IResponse;
 use OCP\IDBConnection;
 use OCP\IUser;
 use OCP\IUserManager;
@@ -59,6 +60,15 @@ trait JobServiceFactory {
 	/** @var list<array{0: int, 1: int, 2: string}> the page calls (job, page, uid) */
 	private array $pageCalls = [];
 	private ExAppService $exApp;
+	/** What ExAppService::output() returns. */
+	private ?IResponse $outputResponse = null;
+	/** The folder of file 42: writable, names already taken, files created. */
+	private bool $folderWritable = true;
+	/** @var list<string> */
+	private array $takenNames = [];
+	/** @var list<array{name: string, bytes: string}> */
+	private array $created = [];
+	private ?\Throwable $newFileFails = null;
 
 	/** @var list<array{user: string, object: string, subject: string}> */
 	private array $sent = [];
@@ -87,6 +97,7 @@ trait JobServiceFactory {
 			$this->pageCalls[] = [$jobId, $n, $uid];
 			return $this->pagePng;
 		});
+		$exApp->method('output')->willReturnCallback(fn (int $jobId, string $uid): ?IResponse => $this->outputResponse);
 		$this->exApp = $exApp;
 
 		$users = $this->createMock(IUserManager::class);
@@ -145,6 +156,7 @@ trait JobServiceFactory {
 		$file->method('getMimetype')->willReturnCallback(fn (): string => $this->mime);
 		$file->method('getName')->willReturn('Bescheid.pdf');
 		$file->method('getId')->willReturn(42);
+		$file->method('getParent')->willReturnCallback(fn (): Folder => $this->parentFolder());
 		$file->method('fopen')->willReturnCallback(function (string $mode): mixed {
 			$this->openedAs[] = $mode;
 			return $this->content;
@@ -162,6 +174,32 @@ trait JobServiceFactory {
 		}
 		$file->method('getStorage')->willReturn($storage);
 		return $file;
+	}
+
+	/**
+	 * The folder of file 42. getNonExistingName answers like the server: a
+	 * taken name gets " (2)" before the extension.
+	 */
+	private function parentFolder(): Folder {
+		$folder = $this->createMock(Folder::class);
+		$folder->method('isCreatable')->willReturnCallback(fn (): bool => $this->folderWritable);
+		$folder->method('getNonExistingName')->willReturnCallback(function (string $name): string {
+			if (!in_array($name, $this->takenNames, true)) {
+				return $name;
+			}
+			$dot = strrpos($name, '.');
+			return $dot === false ? $name . ' (2)' : substr($name, 0, $dot) . ' (2)' . substr($name, $dot);
+		});
+		$folder->method('newFile')->willReturnCallback(function (string $name, mixed $content = null): File {
+			if ($this->newFileFails !== null) {
+				throw $this->newFileFails;
+			}
+			$this->created[] = ['name' => $name, 'bytes' => is_resource($content) ? (string)stream_get_contents($content) : (string)$content];
+			$copy = $this->createMock(File::class);
+			$copy->method('getId')->willReturn(99);
+			return $copy;
+		});
+		return $folder;
 	}
 
 	private function notificationManager(): IManager {
