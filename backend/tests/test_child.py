@@ -5,7 +5,6 @@ behavioural tests run on Linux only (python.yml on Ubuntu); the environment
 and argument rules are checked everywhere.
 """
 
-import asyncio
 import json
 import os
 import sys
@@ -72,10 +71,7 @@ async def test_a_hanging_child_and_its_grandchild_are_killed(tmp_path: Path) -> 
         await child.run_child([sys.executable, "-I", "-c", script], timeout_s=2, cwd=tmp_path)
 
     grandchild = int(pid_file.read_text(encoding="utf-8"))
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and _alive(grandchild):
-        await asyncio.sleep(0.1)
-    assert not _alive(grandchild), "the grandchild survived the group kill"
+    assert _gone_within(grandchild, seconds=5), "the grandchild survived the group kill"
 
 
 @POSIX_ONLY
@@ -87,6 +83,15 @@ async def test_a_failing_child_reports_only_its_exit_code(tmp_path: Path) -> Non
 
     assert failure.value.exit_code == 3
     assert "secret" not in str(failure.value)
+
+
+def _gone_within(pid: int, *, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if not _alive(pid):
+            return True
+        time.sleep(0.1)
+    return not _alive(pid)
 
 
 def _alive(pid: int) -> bool:
