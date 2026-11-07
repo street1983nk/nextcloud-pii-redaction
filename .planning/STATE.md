@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 01-11-PLAN.md"
-last_updated: "2026-11-07T14:12:19.495Z"
+stopped_at: Completed 01-12-PLAN.md
+last_updated: "2026-11-07T14:38:54.099Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 11
+  completed_plans: 12
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 11 of 21 in current phase (01-01 bis 01-11 abgeschlossen, Welle 5 fertig, lokal ungepusht; phase-01 auf a1ace24; nächster Schritt Owner-Freigabe für Push bzw. Welle 6)
+Plan: 12 of 21 in current phase (01-01 bis 01-12 abgeschlossen, Welle 6 läuft seriell, lokal ungepusht; phase-01 auf 3fb9706)
 Status: Ready to execute
 Last activity: 2026-11-07
 
-Progress: [█████░░░░░] 52%
+Progress: [██████░░░░] 57%
 
 ## Performance Metrics
 
@@ -62,6 +62,7 @@ Progress: [█████░░░░░] 52%
 | Phase 01 P09 | 55 min | 3 tasks | 15 files |
 | Phase 01 P10 | 45 min | 2 tasks | 12 files |
 | Phase 01 P11 | 25 min | 2 tasks | 10 files |
+| Phase 01 P12 | 30 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,7 @@ Recent decisions affecting current work:
 - [01-09]: Frontend nur mit Owner-freigegebenen npm-Pins (keine direkte typescript-Abhängigkeit), npm immer mit --ignore-scripts; Admin-Banner serverseitig, admin.ts schaltet nur hidden
 - [01-10]: Runner unterscheidet abgelehnten Bericht (Auftrag endet) von fehlender Antwort (ack bis dreimal); Gateway ohne Antwort ergibt kein ack, der Lease regelt die Wiederholung
 - [01-11]: Admin-Sektion serverseitig mit sieben Bannern; Apps-Link nach AVS-Form (Orchestrator-Entscheid 3) in Template und admin/state gleich
+- [Phase 01-12]: ack nur über Claim-Token; ack review mit Etag-Abweichung wird stale und antwortet 409 {reason}; Gateway 503 bei nicht zu öffnender Datei ohne Zustandswechsel
 
 ### Pending Todos
 
@@ -109,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T13:48:44.932Z
-Stopped at: Completed 01-11-PLAN.md
+Last session: 2026-11-07T14:38:54.077Z
+Stopped at: Completed 01-12-PLAN.md
 Resume file: None
