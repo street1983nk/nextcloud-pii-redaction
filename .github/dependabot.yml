@@ -1,6 +1,7 @@
-# Weekly updates for the three pinned supply chains, as in Findling: the action
-# SHAs, the base image digests of the Dockerfile and the uv lock file. Minor and
-# patch updates arrive grouped, majors one by one.
+# Weekly updates for the pinned supply chains, as in Findling: the action SHAs,
+# the base image digests of the Dockerfile, the uv lock file and the two npm
+# trees (php/ for the browser bundle, ci/playwright/ for the end-to-end tests).
+# Minor and patch updates arrive grouped, majors one by one.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -21,7 +22,8 @@ updates:
           - minor
           - patch
   - package-ecosystem: docker
-    directory: "/"
+    # The Dockerfile and the uv lock file live in the backend half.
+    directory: "/backend"
     schedule:
       interval: weekly
       day: monday
@@ -31,7 +33,7 @@ updates:
     commit-message:
       prefix: "chore(docker)"
   - package-ecosystem: uv
-    directory: "/"
+    directory: "/backend"
     schedule:
       interval: weekly
       day: monday
@@ -48,3 +50,37 @@ updates:
         update-types:
           - minor
           - patch
+  - package-ecosystem: npm
+    directory: "/php"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    # vite stays on the major nextcloud/server and @nextcloud/vite-config use
+    # (7.x); a major jump breaks the bundle config (RESEARCH pitfall E).
+    ignore:
+      - dependency-name: "vite"
+        update-types:
+          - version-update:semver-major
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: "/ci/playwright"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"

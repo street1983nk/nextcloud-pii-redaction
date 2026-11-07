@@ -1,17 +1,17 @@
-# Nothing that must not reach the build context. A local .venv copied into the
-# image would shadow the one built from the lock file.
-.git/
-.github/
+# The build context is backend/. Nothing that must not reach it: a local .venv
+# copied into the image would shadow the one built from the lock file, and the
+# tests and caches have no business in the runtime image.
 .venv/
 .pytest_cache/
 .ruff_cache/
-.planning/
+.coverage
+coverage.xml
+htmlcov/
 __pycache__/
 *.pyc
 *.key
 *.pem
+.env
+.env.*
 dist/
 tests/
-scripts/
-docs/
-store/
