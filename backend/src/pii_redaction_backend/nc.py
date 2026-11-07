@@ -42,6 +42,7 @@ from base64 import b64encode
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, BinaryIO, Final
 
@@ -298,25 +299,45 @@ def _count(value: int | None) -> int | None:
     return value
 
 
-async def _report(client: httpx.AsyncClient, path: str, job: Claim, body: dict[str, object]) -> bool:
+class Outcome(StrEnum):
+    """How a report to the queue ended.
+
+    ``refused`` is an answer of the PHP app (409 for a lost token or lease, 400,
+    anything but 200): the runner stops working on the job. ``unreachable`` is
+    no answer at all: the lease may still be alive, so the runner may try again.
+    """
+
+    OK = "ok"
+    REFUSED = "refused"
+    UNREACHABLE = "unreachable"
+
+
+async def _report(client: httpx.AsyncClient, path: str, job: Claim, body: dict[str, object]) -> Outcome:
     response = await _post(client, path.format(job_id=job.job_id), body)
     if response is None:
-        return False
+        return Outcome.UNREACHABLE
     if response.status_code != _OK:
         LOGGER.info("queue report refused", extra={"job_id": job.job_id, "http_status": response.status_code})
-        return False
-    return True
+        return Outcome.REFUSED
+    return Outcome.OK
 
 
 async def progress(
     client: httpx.AsyncClient, claim: Claim, stage: Stage, pages_done: int | None, pages_total: int | None
 ) -> bool:
+    """True when the PHP app took the report; see :func:`progress_outcome`."""
+    return await progress_outcome(client, claim, stage, pages_done, pages_total) is Outcome.OK
+
+
+async def progress_outcome(
+    client: httpx.AsyncClient, claim: Claim, stage: Stage, pages_done: int | None, pages_total: int | None
+) -> Outcome:
     """Report the stage of a running task and extend the lease.
 
-    False when the PHP app answered 409 (the token is no longer the one of the
-    job, the lease ran out or the job left its state) or any other refusal; the
-    runner then stops working on the job. A value outside its list raises
-    before anything is sent.
+    ``refused`` when the PHP app answered 409 (the token is no longer the one of
+    the job, the lease ran out or the job left its state) or any other refusal;
+    the runner then stops working on the job. ``unreachable`` when no answer
+    came. A value outside its list raises before anything is sent.
     """
     body: dict[str, object] = {
         "token": claim.token,
@@ -374,6 +395,24 @@ async def ack(
     output: tuple[str, int] | None = None,
 ) -> bool:
     """Close a claimed task. False on 409 or any other refusal; a value outside its shape raises before sending."""
+    outcome = await ack_outcome(
+        client, claim, result, reason=reason, pages_total=pages_total, etag_seen=etag_seen, image=image, output=output
+    )
+    return outcome is Outcome.OK
+
+
+async def ack_outcome(
+    client: httpx.AsyncClient,
+    claim: Claim,
+    result: AckResult,
+    *,
+    reason: Reason | None = None,
+    pages_total: int | None = None,
+    etag_seen: str | None = None,
+    image: tuple[int, int] | None = None,
+    output: tuple[str, int] | None = None,
+) -> Outcome:
+    """Close a claimed task and say how the report ended (:class:`Outcome`)."""
     body = _ack_body(
         claim, result, reason=reason, pages_total=pages_total, etag_seen=etag_seen, image=image, output=output
     )

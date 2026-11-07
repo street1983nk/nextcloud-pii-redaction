@@ -59,3 +59,19 @@ def get_job(connection: sqlite3.Connection, job_id: int) -> sqlite3.Row | None:
 
 def delete_job(connection: sqlite3.Connection, job_id: int) -> None:
     connection.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+
+
+def set_source(connection: sqlite3.Connection, job_id: int, *, sha256: str, size: int, now: int) -> None:
+    """Remember hash and size of the fetched source (never its name)."""
+    connection.execute(
+        "UPDATE jobs SET src_sha256 = ?, src_bytes = ?, updated_at = ? WHERE job_id = ?",
+        (sha256, size, now, job_id),
+    )
+
+
+def set_output(connection: sqlite3.Connection, job_id: int, *, sha256: str, size: int, now: int) -> None:
+    """Remember hash and size of the finished output; /jobs/{id}/output serves only then."""
+    connection.execute(
+        "UPDATE jobs SET output_sha256 = ?, output_bytes = ?, updated_at = ? WHERE job_id = ?",
+        (sha256, size, now, job_id),
+    )
