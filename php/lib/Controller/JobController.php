@@ -38,7 +38,7 @@ final class JobController extends Controller {
 	/** The fields of the status answer (01-SKELETON.md, PHP-Routen). */
 	private const STATUS_FIELDS = [
 		'jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal',
-		'backendReady', 'outputFileId', 'outputName',
+		'backendReady', 'outputFileId', 'outputName', 'recheck',
 	];
 
 	public function __construct(

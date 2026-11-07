@@ -359,6 +359,10 @@ function apply(data: Record<string, unknown>): void {
 	job.backendReady = data.backendReady === true
 	job.outputFileId = int(data.outputFileId)
 	job.outputName = text(data.outputName)
+	// The status route reports a download block added after the page loaded.
+	if (data.recheck === 'download_blocked') {
+		blocked.value = true
+	}
 }
 
 function schedule(delay: number): void {
@@ -431,8 +435,15 @@ async function requestCopy(): Promise<void> {
 		await nextTick()
 		stateRegion.value?.focus()
 		schedule(POLL_MS)
-	} catch {
-		postFailed.value = true
+	} catch (error) {
+		const reason = (error as { response?: { data?: { reason?: unknown } } }).response?.data?.reason
+		if (reason === 'download_blocked') {
+			blocked.value = true
+		} else if (reason === 'original_changed') {
+			void poll()
+		} else {
+			postFailed.value = true
+		}
 	} finally {
 		posting.value = false
 	}

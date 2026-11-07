@@ -80,7 +80,7 @@ Verboten in allen `pii_*`-Tabellen (Gate in `test_php_gates.py`): Spaltennamen, 
 | Verb | URL | Attribut | Antwort |
 |---|---|---|---|
 | POST | `/apps/pii_redaction/api/v1/jobs` `{fileId}` | `FrontpageRoute`, `NoAdminRequired` | 201 neu / 200 offen: `{jobId, status, ahead, reviewUrl}`; Fehler `{reason}` mit 503 `backend_unavailable`, 403 `download_blocked`, 404 `not_readable`, 415 `unsupported_format` |
-| GET | `/apps/pii_redaction/api/v1/jobs/{jobId}` | `FrontpageRoute`, `NoAdminRequired`, `NoCSRFRequired` | `{jobId, status, stage, reason, ahead, pagesDone, pagesTotal, backendReady, outputFileId, outputName}` mit `Cache-Control: private, no-store`; 404 ohne Namen |
+| GET | `/apps/pii_redaction/api/v1/jobs/{jobId}` | `FrontpageRoute`, `NoAdminRequired`, `NoCSRFRequired` | `{jobId, status, stage, reason, ahead, pagesDone, pagesTotal, backendReady, outputFileId, outputName, recheck}` (`recheck`: `ok`, `download_blocked` oder `changed`, Plan 13) mit `Cache-Control: private, no-store`; 404 ohne Namen |
 | GET | `/apps/pii_redaction/review/{jobId}` | `FrontpageRoute`, `NoAdminRequired`, `NoCSRFRequired` | `TemplateResponse('pii_redaction', 'review')` + `IInitialState` `review`; 404-Zustand ohne Dateinamen |
 | GET | `/apps/pii_redaction/review/{jobId}/page/{n}` | dito, `n` `\d{1,3}` | PNG, `no-store`, `nosniff`; 404/403/409/502 |
 | POST | `/apps/pii_redaction/review/{jobId}/placeholder` | `FrontpageRoute`, `NoAdminRequired` | 202 `{status: approved}`; 409 `{reason}` wenn nicht `review` oder Backend nicht bereit |

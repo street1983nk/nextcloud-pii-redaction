@@ -135,12 +135,21 @@ final class JobControllerTest extends TestCase {
 		self::assertSame(Http::STATUS_OK, $response->getStatus());
 		$body = $this->body($response);
 		self::assertSame(
-			['jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal', 'backendReady', 'outputFileId', 'outputName'],
+			['jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal', 'backendReady', 'outputFileId', 'outputName', 'recheck'],
 			array_keys($body),
 		);
 		self::assertSame('queued', $body['status']);
 		self::assertTrue($body['backendReady']);
 		self::assertNoStore($response);
+	}
+
+	public function testTheStatusReportsADownloadBlockAddedAfterTheStart(): void {
+		$jobId = $this->body($this->controller()->create(42))['jobId'];
+		$this->downloadAllowed = false;
+		$body = $this->body($this->controller()->show($jobId));
+
+		self::assertSame('download_blocked', $body['recheck']);
+		self::assertSame('queued', $body['status']);
 	}
 
 	public function testAForeignJobAnswersAnEmpty404(): void {
