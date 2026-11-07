@@ -4,10 +4,16 @@ declare(strict_types=1);
 
 namespace OCA\PiiRedaction\AppInfo;
 
+use OCA\Files\Event\LoadAdditionalScriptsEvent;
+use OCA\PiiRedaction\Listener\FileLifecycleListener;
+use OCA\PiiRedaction\Listener\LoadFilesScriptsListener;
+use OCA\PiiRedaction\Notification\Notifier;
 use OCP\AppFramework\App;
 use OCP\AppFramework\Bootstrap\IBootContext;
 use OCP\AppFramework\Bootstrap\IBootstrap;
 use OCP\AppFramework\Bootstrap\IRegistrationContext;
+use OCP\Files\Events\Node\BeforeNodeDeletedEvent;
+use OCP\Files\Events\Node\NodeWrittenEvent;
 
 final class Application extends App implements IBootstrap {
 	public const APP_ID = 'pii_redaction';
@@ -23,11 +29,15 @@ final class Application extends App implements IBootstrap {
 	}
 
 	/**
-	 * Empty for now. Plan 14 registers the notifier and the listeners for file
-	 * writes and deletions here; register() and not boot(), because boot()
-	 * runs too late for registrations (Findling finding).
+	 * The notifier, the file action in Files and the two file events that end
+	 * open jobs. Here and not in boot(), because boot() runs too late for
+	 * registrations (Findling finding).
 	 */
 	public function register(IRegistrationContext $context): void {
+		$context->registerNotifierService(Notifier::class);
+		$context->registerEventListener(LoadAdditionalScriptsEvent::class, LoadFilesScriptsListener::class);
+		$context->registerEventListener(NodeWrittenEvent::class, FileLifecycleListener::class);
+		$context->registerEventListener(BeforeNodeDeletedEvent::class, FileLifecycleListener::class);
 	}
 
 	public function boot(IBootContext $context): void {
