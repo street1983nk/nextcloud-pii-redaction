@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: "Phase 1 geplant: 21 Pläne in 10 Wellen, Plan-Checker bestanden, Texte vom Owner freigegeben"
-last_updated: "2026-11-07T12:45:50.485Z"
-last_activity: 2026-11-07, Roadmap erstellt (15 Phasen, 79/79 Anforderungen zugeordnet)
+status: executing
+stopped_at: "Completed 01-02-PLAN.md"
+last_updated: "2026-11-07T12:55:53.387Z"
+last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 1 of 21 in current phase (01-01 abgeschlossen)
-Status: In progress
-Last activity: 2026-11-07, Roadmap erstellt (15 Phasen, 79/79 Anforderungen zugeordnet)
+Plan: 2 of 21 in current phase (01-01, 01-02 abgeschlossen)
+Status: Ready to execute
+Last activity: 2026-11-07
 
-Progress: [█░░░░░░░░░] 5%
+Progress: [█░░░░░░░░░] 10%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [█░░░░░░░░░] 5%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P02 | 35 min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Recent decisions affecting current work:
 - [01-01]: Owner-Paketfreigabe 07.11.: alles wie gelistet, aber vue 3.5.44 und @playwright/test 1.64.1 (Cool-down); pymupdf 2.1 samt Pflichtabhängigkeiten und @nextcloud/dialogs 8.0.0 freigegeben
 - [01-01]: Backend ohne Browser-Routen (leeres routes-Element), deploy-harp prüft unsignierten Zugriff auf /status negativ
 - [01-01]: Env-Präfix bleibt PII_REDACTION_ (config.ENV_PREFIX); httpx nur einmal als Laufzeit-Pin
+- [01-02]: Ein Auftrag zur Zeit über Sperrzeile pii_slot (bedingte UPDATE, Token-Rücklesen); QueueMapperTest gegen echte CI-DB, php.yml aktiviert die App vorher
 
 ### Pending Todos
 
@@ -88,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T12:45:50.456Z
-Stopped at: Phase 1 geplant: 21 Pläne in 10 Wellen, Plan-Checker bestanden, Texte vom Owner freigegeben
+Last session: 2026-11-07T12:55:45.563Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None
