@@ -87,7 +87,7 @@ Eine Datei aus Nextcloud wird mit einem Klick lokal auf personenbezogene Daten g
 | Vier-Augen-Freigabe in v1, per Admin abschaltbar | Owner 07.11. | Offen |
 | Rechtsgrundlagen-Labels in v1, je Behörde anpassbar | Owner 07.11. | Offen |
 | Einstieg Dateiaktion + eigene Prüfseite | Owner 07.11. | Offen |
-| FAU/ALeKS-Goldstandard anfragen (Entwurf, Owner sendet) | Owner 07.11.; echte Zielmaterial-Messung | Offen |
+| FAU/ALeKS-Goldstandard anfragen (Entwurf, Owner sendet) | Owner 07.11.; echte Zielmaterial-Messung | Abgelehnt 07.11. (Prof. Adrian), andere Quelle nötig |
 
 ## Evolution
 

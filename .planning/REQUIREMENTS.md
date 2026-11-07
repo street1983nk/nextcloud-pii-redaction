@@ -138,7 +138,7 @@ Quellen: PROJECT.md, research/SUMMARY.md (mit Konfliktauflösung), Spike 06.11.2
 
 ### Erweiterungen
 
-- **V2-01**: Eigenes feinjustiertes deutsches Erkennungsmodell auf Behörden- und Urteilstexten (Owner 07.11.; braucht Goldstandard, FAU/ALeKS angefragt)
+- **V2-01**: Eigenes feinjustiertes deutsches Erkennungsmodell auf Behörden- und Urteilstexten (Owner 07.11.; braucht Goldstandard, FAU/ALeKS am 07.11. abgelehnt, andere Quelle nötig)
 - **V2-02**: Rollen-Pseudonyme aus dem Rubrum ("Kläger", "Beklagte 1", "Zeuge 1")
 - **V2-03**: Gleiche Pseudonyme über einen Vorgang mit mehreren Dateien
 - **V2-04**: Stapel-Analyse eines Ordners (Prüfung weiter je Datei)

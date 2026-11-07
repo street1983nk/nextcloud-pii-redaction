@@ -103,7 +103,7 @@ Plans:
   3. Der Harness berichtet Leckrate (Zeichen), Anteil Dokumente mit Leck, Recall je Kategorie, Format und Dokumenttyp sowie Recall nach Namensherkunft; ein Holdout-Teil stammt von anderer Hand und wird nur zum Gate geöffnet.
   4. Ein kleines lizenzfreies CI-Korpus liegt im Repo, große Korpora nur lokal mit sha256-Manifest.
 **Plans**: TBD
-**Research flag**: Keiner in der Recherche; Herkunft und Lizenz der Zoo-Dateien und des Holdouts (FAU/ALeKS-Goldstandard angefragt) vor dem Plan klären.
+**Research flag**: Keiner in der Recherche; Herkunft und Lizenz der Zoo-Dateien und des Holdouts (FAU/ALeKS-Goldstandard am 07.11. abgelehnt, eigene oder andere Quelle) vor dem Plan klären.
 
 ### Phase 5: Unabhängiger Leck-Prüfer
 **Goal**: Jede Ausgabe wird von einem eigenständigen Prüfer kontrolliert, der andere Werkzeuge als die Schwärzung nutzt und bei jedem Fund die Ausgabe verhindert; er ist fertig und gegen den Leck-Zoo kalibriert, bevor die Schwärzung entsteht.
