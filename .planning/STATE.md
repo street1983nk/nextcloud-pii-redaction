@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 01-06-PLAN.md"
-last_updated: "2026-11-07T13:25:26.586Z"
+stopped_at: "01-07 Task 3: Korrektur-Push wartet auf Owner-Freigabe"
+last_updated: "2026-11-07T13:35:29.930Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 6 of 21 in current phase (01-01 bis 01-06 abgeschlossen, Welle 3 fertig; nächster Schritt 01-07 Owner-Push-Checkpoint)
-Status: Ready to execute
+Plan: 7 of 21 in current phase (01-07 läuft: phase-01 gepusht, python.yml grün, PHPUnit rot, Korrektur lokal, zweiter Push wartet auf Owner)
+Status: Waiting for owner (checkpoint 01-07 Task 3)
 Last activity: 2026-11-07
 
 Progress: [███░░░░░░░] 29%
@@ -90,6 +90,7 @@ None yet.
 - Zertifikat `pii_redaction_backend` beantragt (#1419), noch nicht erteilt
 - Scans und arm64-Tempo ungemessen (Phase 12, 15)
 - Länder-Label-Sätze brauchen juristisches Gegenlesen vor Store (Phase 11)
+- 01-07: PHPUnit auf phase-01 rot (expires_at ohne DB-Default), Korrektur 8f06c86 und ad2c4b8 lokal, wartet auf Owner-Freigabe für zweiten Push main:phase-01
 
 ## Deferred Items
 
@@ -99,6 +100,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T13:25:21.013Z
-Stopped at: Completed 01-06-PLAN.md
-Resume file: None
+Last session: 2026-11-07T13:35:26.019Z
+Stopped at: 01-07 Task 3, Korrektur-Push (8f06c86, ad2c4b8) wartet auf Owner-Freigabe
+Resume file: .planning/phases/01-zwei-app-ger-st-und-integrationsbeweis/01-07-SUMMARY.md
