@@ -1,0 +1,147 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Khaled Cherif
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The review page (UI-SPEC Fläche 2). Server variables only, no colour of its
+ * own; the page image is never inverted in the dark theme.
+ */
+#pii-review {
+	padding: calc(var(--default-grid-baseline) * 4);
+	color: var(--color-main-text);
+}
+
+@media (min-width: 768px) {
+	#pii-review {
+		padding: calc(var(--default-grid-baseline) * 8) calc(var(--default-grid-baseline) * 6) calc(var(--default-grid-baseline) * 6);
+	}
+}
+
+#pii-review .pii-review__column {
+	max-width: calc(var(--default-grid-baseline) * 240);
+}
+
+#pii-review .pii-review__name {
+	margin: 0;
+	font-size: 20px;
+	font-weight: 700;
+	line-height: var(--default-line-height);
+	overflow-wrap: anywhere;
+}
+
+#pii-review .pii-review__meta,
+#pii-review .pii-review__counter,
+#pii-review .pii-review__caption {
+	margin: calc(var(--default-grid-baseline) * 2) 0 0;
+	font-size: var(--font-size-small);
+	line-height: var(--default-line-height);
+	color: var(--color-text-maxcontrast);
+	font-variant-numeric: tabular-nums;
+}
+
+#pii-review .pii-review__state {
+	margin-top: calc(var(--default-grid-baseline) * 4);
+}
+
+#pii-review .pii-review__state:focus {
+	outline: none;
+}
+
+#pii-review .pii-review__state:focus-visible {
+	outline: 2px solid var(--color-main-text);
+	outline-offset: 2px;
+}
+
+#pii-review .pii-review__line {
+	display: flex;
+	align-items: flex-start;
+	gap: calc(var(--default-grid-baseline) * 2);
+	padding: calc(var(--default-grid-baseline) * 4);
+	border-radius: var(--border-radius-container);
+	background-color: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+#pii-review .pii-line__title,
+#pii-review .pii-note__title {
+	margin: 0;
+	font-weight: 700;
+	color: inherit;
+	max-width: none;
+}
+
+#pii-review .pii-line__text,
+#pii-review .pii-note__text {
+	margin: var(--default-grid-baseline) 0 0;
+	font-weight: 400;
+	color: inherit;
+	max-width: none;
+}
+
+#pii-review .pii-note__title + .pii-note__text,
+#pii-review .pii-line__title + .pii-line__text {
+	margin-top: var(--default-grid-baseline);
+}
+
+#pii-review .pii-review__link {
+	text-decoration: underline;
+	color: inherit;
+}
+
+#pii-review .pii-review__progress {
+	margin-top: calc(var(--default-grid-baseline) * 2);
+}
+
+#pii-review .pii-review__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: calc(var(--default-grid-baseline) * 2);
+	margin-top: calc(var(--default-grid-baseline) * 4);
+}
+
+#pii-review .pii-review__page {
+	margin: calc(var(--default-grid-baseline) * 4) 0 0;
+}
+
+#pii-review .pii-review__frame {
+	position: relative;
+}
+
+#pii-review .pii-review__loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: calc(var(--default-grid-baseline) * 40);
+	border-radius: var(--border-radius-small);
+	background-color: var(--color-background-hover);
+}
+
+#pii-review .pii-review__image {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	border: 1px solid var(--color-border);
+	border-radius: var(--border-radius-small);
+}
+
+#pii-review .pii-review__image--loading {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+}
+
+#pii-review [hidden] {
+	display: none !important;
+}
+
+@media (pointer: coarse) {
+	#pii-review .pii-review__link,
+	#pii-review button,
+	#pii-review a {
+		min-height: calc(var(--default-grid-baseline) * 11);
+	}
+
+	#pii-review .pii-review__link {
+		display: inline-flex;
+		align-items: center;
+	}
+}
