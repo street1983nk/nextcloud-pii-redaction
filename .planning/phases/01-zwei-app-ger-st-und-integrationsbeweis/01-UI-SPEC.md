@@ -564,16 +564,16 @@ npm-Pakete nur aus der Research-Liste (`@nextcloud/files` 4.1.1, `@nextcloud/vue
 
 ---
 
-## Offene Owner-Fragen (mit Empfehlung)
+## Owner-Fragen (alle beantwortet, Owner 07.11.2026, jeweils wie empfohlen)
 
-Die Vorgaben oben folgen jeweils der Empfehlung; ändert der Owner etwas, passt der Planer nur die betroffene Zeile an.
+Der Vertrag oben folgt diesen Antworten unverändert.
 
-1. **Nach dem Start in Dateien bleiben (Toast mit Link) statt direkt auf die Prüfseite zu springen?** Empfehlung: in Dateien bleiben. Die Analyse läuft im Hintergrund, die Benachrichtigung holt den Nutzer zurück; ein Sprung unterbräche die Arbeit in Dateien.
-2. **Icon `eye-off-outline` für die Dateiaktion?** Empfehlung: ja, allgemein verstandenes Zeichen für "verbergen", passt zu Schwärzen und Pseudonymisieren; Alternative `shield-account-outline`.
-3. **`de` und `de_DE` mit demselben unpersönlichen Text?** Empfehlung: ja (AVS- und Findling-Muster). Keine Anrede, also in der du- und in der Sie-Fassung korrekt, und ein Text für beide Kataloge.
-4. **Text des Platzhalters "Vorschau ohne Erkennung" auf der Prüfseite** (statt das Fehlen der Erkennung zu verschweigen)? Empfehlung: ja, ehrliche Zustände; Phase 1 geht nicht in den Store.
-5. **Kopie bei DOCX/ODT in Phase 1 als `.pdf`?** Empfehlung: ja, die Platzhalter-Kopie ist eine PDF; die DOCX/ODT-Ausgabe mit gleicher Endung kommt mit der echten Schwärzung (Phase 7), die zusätzliche PDF-Ausgabe bleibt dann `.pdf`.
-6. **Fehler-Toasts bleiben bis zum Schließen stehen?** Empfehlung: ja (BITV, Fehlertexte sind zwei Sätze lang).
+1. **Nach dem Start in Dateien bleiben (Toast mit Link) statt direkt auf die Prüfseite zu springen?** Beantwortet: in Dateien bleiben, Erfolgs-Toast mit Link "Prüfseite öffnen" (10 s, Schließen-Knopf).
+2. **Icon für die Dateiaktion?** Beantwortet: `eye-off-outline`.
+3. **Fehler-Toasts bleiben bis zum Schließen stehen?** Beantwortet: ja.
+4. **Prüfseite sagt offen "Vorschau ohne Erkennung"?** Beantwortet: ja.
+5. **Kopie bei DOCX/ODT in Phase 1 als `.pdf`?** Beantwortet: ja.
+6. **`de` und `de_DE` mit demselben unpersönlichen Text?** Beantwortet: ja.
 
 ---
 

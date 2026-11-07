@@ -21,7 +21,7 @@ Wie ROADMAP.md Phase 1: beide Apps installierbar (NC 33 bis 35, amd64 und arm64,
 - CI bekommt zusätzlich ein MariaDB-Bein (NC 35, amd64), damit Warteschlange und Lease-Claim unter MySQL-Semantik belegt sind.
 
 ### Owner 07.11.2026, UI-Fragen aus 01-UI-SPEC.md (einzeln bestätigt)
-- Nach dem Start bleibt der Nutzer in Dateien; Hinweis mit Link "Prüfseite öffnen".
+- Nach dem Start bleibt der Nutzer in Dateien; Hinweis mit Link "Prüfseite öffnen" (Owner folgt am 07.11. nach Rückfrage der Empfehlung: gründlicher Modus dauert Minuten, mehrere Dateien nacheinander, Benachrichtigung meldet Bereitschaft).
 - Icon der Dateiaktion: `eye-off-outline`.
 - Fehlerhinweise bleiben bis zum Schließen stehen; Erfolg 10 s mit Schließen-Knopf.
 - Die Platzhalter-Prüfseite sagt offen "Vorschau ohne Erkennung".
