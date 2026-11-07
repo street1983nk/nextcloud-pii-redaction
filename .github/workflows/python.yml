@@ -75,6 +75,11 @@ jobs:
           shellcheck --version
           shellcheck docker/entrypoint.sh docker/healthcheck.sh ../scripts/release/store-archive.sh ../scripts/ci/head_green.sh
 
+      # The CI scripts source ci/lib.sh; -x follows it from the repository root.
+      - name: Shell check of the CI scripts
+        working-directory: .
+        run: shellcheck -x ci/*.sh
+
       # The Dockerfile linter, as a pinned PyPI wheel so it runs without Docker.
       # tests/test_dockerfile.py holds the project rules on top of it.
       - name: Dockerfile lint
