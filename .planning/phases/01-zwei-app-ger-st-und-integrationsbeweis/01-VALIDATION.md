@@ -47,7 +47,7 @@ created: 2026-11-07
 | 1-02-02 | 02 | 2 | JOB-06 | T-01-02-05 | höchstens ein aktiver Lease | unit (php, CI) | `QueueMapperTest` in `php.yml` | ❌ im Task | ⬜ pending |
 | 1-03-01 | 03 | 2 | JOB-02 | T-01-03-05 | Kataloge ohne Namensplatzhalter | unit | `uv run python ../scripts/l10n_js.py --root ../php/l10n --check` | ❌ im Task | ⬜ pending |
 | 1-03-02 | 03 | 2 | PLAT-05 | T-01-03-01..04 | Recheck-, Transport-, Log-Gates | unit | `uv run pytest -q tests/test_php_gates.py tests/test_log_calls.py -x` | ❌ im Task | ⬜ pending |
-| 1-03-03 | 03 | 2 | JOB-02 | T-01-03-06 | U+00A0, keine Striche/Emojis, höchstens 2 Sätze und 130 Zeichen je Wert | unit | `uv run pytest -q tests/test_trilingual.py tests/test_public_texts.py -x` | ✅ erweitern | ⬜ pending |
+| 1-03-03 | 03 | 2 | JOB-02 | T-01-03-06 | U+00A0, keine Striche/Emojis, höchstens 3 Sätze und 240 Zeichen je Wert (Richtwert 2 Sätze) | unit | `uv run pytest -q tests/test_trilingual.py tests/test_public_texts.py -x` | ✅ erweitern | ⬜ pending |
 | 1-04-01 | 04 | 2 | JOB-03 | T-01-04-01, -02 | Recheck, Download-Sperre fail closed | unit (php, CI) | `FileAccessTest`; lokal `test_php_gates.py` | ❌ im Task | ⬜ pending |
 | 1-04-02 | 04 | 2 | PLAT-02 | T-01-04-03 | sieben Zustände, PNG-Magic, Deckel | unit (php, CI) | `BackendStateTest`, `ExAppServiceTest` | ❌ im Task | ⬜ pending |
 | 1-04-03 | 04 | 2 | PLAT-02 | T-01-04-04 | Fremd-ExApp 403 | unit (php, CI) | `HandshakeControllerTest` | ❌ im Task | ⬜ pending |
