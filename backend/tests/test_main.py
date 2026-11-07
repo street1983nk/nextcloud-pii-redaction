@@ -134,7 +134,7 @@ async def test_a_failing_enable_returns_a_message_and_logs_the_type(caplog: pyte
     answer = await main.enabled_handler(True, _fake_nc(_FakeSettingsApi(fail=True)))
 
     assert answer == main.ENABLE_FAILED
-    assert any(getattr(record, "error_type", "") == "RuntimeError" for record in caplog.records)
+    assert any(getattr(record, "exc_type", "") == "RuntimeError" for record in caplog.records)
 
 
 async def test_shutdown_lets_a_short_task_finish_and_cancels_a_hanging_one() -> None:

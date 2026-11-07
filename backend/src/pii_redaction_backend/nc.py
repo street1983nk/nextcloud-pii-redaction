@@ -53,7 +53,7 @@ async def close_nc(nc: object) -> None:
         try:
             await close()
         except Exception as exc:  # closing must never disturb the caller
-            LOGGER.debug("nextcloud session not closed", extra={"error_type": type(exc).__name__})
+            LOGGER.debug("nextcloud session not closed", extra={"exc_type": type(exc).__name__})
 
 
 @asynccontextmanager

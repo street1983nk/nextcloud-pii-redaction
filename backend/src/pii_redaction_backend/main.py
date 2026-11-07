@@ -72,9 +72,9 @@ async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
         else:
             await settings.unregister(nc)
     except Exception as exc:
-        LOGGER.exception("enable handler failed", extra={"enabled": enabled, "error_type": type(exc).__name__})
+        LOGGER.error("enable handler failed", extra={"enabled": enabled, "exc_type": type(exc).__name__})
         return ENABLE_FAILED
-    LOGGER.info("app %s", "enabled" if enabled else "disabled")
+    LOGGER.info("enable state changed", extra={"enabled": enabled})
     return ""
 
 
