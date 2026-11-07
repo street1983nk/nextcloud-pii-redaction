@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 01-04-PLAN.md"
-last_updated: "2026-11-07T13:09:29.883Z"
+stopped_at: "Completed 01-05-PLAN.md"
+last_updated: "2026-11-07T13:15:08.930Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 4 of 21 in current phase (01-01 bis 01-04 abgeschlossen)
+Plan: 5 of 21 in current phase (01-01 bis 01-05 abgeschlossen, Welle 2 fertig)
 Status: Ready to execute
 Last activity: 2026-11-07
 
-Progress: [██░░░░░░░░] 19%
+Progress: [██░░░░░░░░] 24%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [██░░░░░░░░] 19%
 | Phase 01 P02 | 35 min | 2 tasks | 16 files |
 | Phase 01 P03 | 45 min | 3 tasks | 15 files |
 | Phase 01 P04 | 35 min | 3 tasks | 10 files |
+| Phase 01 P05 | 40 min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,7 @@ Recent decisions affecting current work:
 - [01-02]: Ein Auftrag zur Zeit über Sperrzeile pii_slot (bedingte UPDATE, Token-Rücklesen); QueueMapperTest gegen echte CI-DB, php.yml aktiviert die App vorher
 - [01-03]: Kataloge php/l10n stehen (94 Einträge); PHP-Gates 1 bis 20 und Log-AST-Gate gelten ab jetzt für alle Pläne
 - [01-04]: Download-Sperre fail closed in FileAccess; backendState prüft unter dem ersten aktiven Admin, ohne Admin kein Start
+- [01-05]: Kindprozesse mit SAFE_ENV, eigener Gruppe und killpg; LibreOffice ungepinnt über trixie-security im Image
 
 ### Pending Todos
 
@@ -94,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T13:09:29.865Z
-Stopped at: Completed 01-04-PLAN.md
+Last session: 2026-11-07T13:15:08.905Z
+Stopped at: Completed 01-05-PLAN.md
 Resume file: None
