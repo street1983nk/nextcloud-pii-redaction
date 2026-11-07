@@ -74,6 +74,7 @@ LOG_PREFIX = "PII Redaction: "
 LOG_CONTEXT_KEYS = frozenset({"jobId", "fileId", "status", "reason", "app", "exception", "class"})
 OVERRIDE_ATTRIBUTE = "#[\\Override]"
 NOTIFIER_FORBIDDEN = ("getName(", "getPath(", "getInternalPath(")
+_NOTIFIER_NAME_DECLARATION = re.compile(r"\bfunction\s+getName\s*\(")
 NEW_FILE_CALL = "newFile("
 NEW_FILE_HOME = "php/lib/Service/PublishService.php"
 DOWNLOAD_EXCEPTIONS = ("shareapi_allow_view_without_download", "ViewOnly")
@@ -335,6 +336,9 @@ def message_calls(source: str) -> int:
 
 def notifier_leaks(source: str) -> list[str]:
     """Rule 17."""
+    # INotifier itself demands a method getName() (the app name); declaring it
+    # reads nothing, so only the declaration is taken out before the search.
+    source = _NOTIFIER_NAME_DECLARATION.sub("", source)
     return [needle for needle in NOTIFIER_FORBIDDEN if needle in source]
 
 
@@ -623,6 +627,9 @@ def test_self_rule17_fires_on_a_name_in_the_notifier() -> None:
     assert notifier_leaks("$subject = $node->getName();") == ["getName("]
     assert notifier_leaks("$n->getInternalPath();") == ["getInternalPath("]
     assert notifier_leaks("$n->setParsedSubject($l->t('A review is ready'));") == []
+    # The interface method may be declared, but nothing may call a getName().
+    assert notifier_leaks("public function getName(): string { return 'PII Redaction'; }") == []
+    assert notifier_leaks("public function getName(): string { return $file->getName(); }") == ["getName("]
 
 
 def test_self_rule18_fires_on_new_file_outside_publish_service() -> None:
