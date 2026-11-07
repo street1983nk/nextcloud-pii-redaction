@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 01-07-PLAN.md"
-last_updated: "2026-11-07T13:35:29.930Z"
+stopped_at: "Completed 01-08-PLAN.md"
+last_updated: "2026-11-07T13:48:44.950Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 7 of 21 in current phase (01-01 bis 01-07 abgeschlossen; phase-01 auf a1ace24 mit grüner CI; nächster Schritt Welle 5)
+Plan: 8 of 21 in current phase (01-01 bis 01-08 abgeschlossen; phase-01 auf a1ace24 mit grüner CI; Welle 5 läuft)
 Status: Ready to execute
 Last activity: 2026-11-07
 
-Progress: [███░░░░░░░] 29%
+Progress: [████░░░░░░] 38%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [███░░░░░░░] 29%
 | Phase 01 P05 | 40 min | 3 tasks | 18 files |
 | Phase 01 P06 | 10 min | 3 tasks | 17 files |
 | Phase 01 P07 | 25 min | 3 tasks | 3 files |
+| Phase 01 P08 | 30 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,7 @@ Recent decisions affecting current work:
 - [01-06]: nc.py ist einziger HTTP-Ort (auch Handshake über httpx); Antworten feldweise geprüft, ohne X-Pii-Etag kein Erfolg
 - [01-06]: RAM-Bedarf render 512 MiB, soffice 1 GiB, Reserve 256 MiB vorläufig bis zur Messung
 - [01-07]: Ganzzahlspalten NOT NULL, die mit dem Entity-Default 0 geschrieben werden, brauchen einen DB-Default (Entity-Setter überspringt gleiche Werte); phase-01 CI grün auf a1ace24
+- [01-08]: Alle Zustandswechsel über JobService (Ereignis, Lease-Freigabe, Benachrichtigung ohne Parameter, purge nach Endzustand); erster Leser holt job_failed für repeatedly_stuck nach
 
 ### Pending Todos
 
@@ -101,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T13:35:26.019Z
-Stopped at: Completed 01-07-PLAN.md
+Last session: 2026-11-07T13:48:44.932Z
+Stopped at: Completed 01-08-PLAN.md
 Resume file: None
