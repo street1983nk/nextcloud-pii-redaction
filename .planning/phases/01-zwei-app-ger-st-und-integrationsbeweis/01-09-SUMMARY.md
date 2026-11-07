@@ -122,3 +122,17 @@ Owner-Freigabe "Ja, Zwischen-Push (Empfohlen)". Ein Push `git push origin main:p
 - Deploy through HaRP stable33/34/35: success, je `unsigned /status: anonymous 404, admin login 404`.
 - PHP gates: `php -l` success, composer success, Lint-Job baut mit `tsc --noEmit` und `vite build` grün. **PHPUnit failure** vor der Suite im Schritt "Build the browser bundle": `Error: Cannot find module '@nextcloud/browserslist-config'`. Ursache: Der Job baut `app-src/php` innerhalb des nextcloud/server-Checkouts; browserslist sucht die nächste Konfiguration aufwärts und findet `extends @nextcloud/browserslist-config` in der `package.json` des Servers.
 - Korrektur lokal, ungepusht (`465ade1`): `php/package.json` bekommt eine eigene `browserslist`-Liste, wörtlich die drei Abfragen aus `@nextcloud/browserslist-config` 3.1.2, ohne neues Paket. Der Korrektur-Push braucht eine neue Owner-Freigabe.
+
+## Korrektur-Push und CI (2026-11-07)
+
+Owner-Freigabe "Ja, Korrektur pushen". Vorher geprüft: HEAD `3fb9706`, vor origin/phase-01 genau `465ade1` und `3fb9706`, beide `street1983nk`, 0 verbotene Zeilen, Diff-Scan ohne Treffer. Ein Push `git push origin main:phase-01`, fast-forward `0283937..3fb9706`; main auf GitHub unverändert `1f95af7`.
+
+| Workflow | Job | Ergebnis | Auszug |
+|---|---|---|---|
+| PHP gates | PHPUnit over the PHP app | success | `OK (132 tests, 816 assertions)`, `the suite executed 132 tests` (vorher 80; neu JobService, EtagBinding, JobController, AdminSettings, SettingsController) |
+| PHP gates | php -l (mit tsc und Build) | success | `> tsc --noEmit -p tsconfig.json`, `✓ built in 4.19s` |
+| PHP gates | composer validate and audit | success | |
+| Python gates | ruff, format, pyright, vulture, pytest, shellcheck | success | `416 passed in 6.40s` (inkl. POSIX) |
+| Deploy through HaRP | stable33/34/35 | success | je `unsigned /status: anonymous 404, admin login 404` |
+
+Runs: PHP 42381735406, Python 42381735252, HaRP 42381735231.
