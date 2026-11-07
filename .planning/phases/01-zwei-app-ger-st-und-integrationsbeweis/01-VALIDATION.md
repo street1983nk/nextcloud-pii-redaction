@@ -2,14 +2,14 @@
 phase: 1
 slug: zwei-app-ger-st-und-integrationsbeweis
 status: planned
-nyquist_compliant: false
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-11-07
 ---
 
 # Phase 1: Validation Strategy
 
-> Vertrag für Rückmeldungen während der Ausführung. Grundlage: 01-RESEARCH.md "Validation Architecture", Pläne 01-01 bis 01-20.
+> Vertrag für Rückmeldungen während der Ausführung. Grundlage: 01-RESEARCH.md "Validation Architecture", Pläne 01-01 bis 01-21.
 
 ---
 
@@ -29,9 +29,9 @@ created: 2026-11-07
 
 - **After every task commit:** `cd backend && uv run pytest -q -x` (enthält die statischen PHP-, Log-, Sprach-, Workflow- und Asset-Gates)
 - **After every plan wave:** volle Python-Gates plus `npm run build`
-- **CI-Stichproben (je Push eine Owner-Freigabe):** nach Welle 3 (Plan 07: `php.yml`, `python.yml` mit POSIX-Tests), nach Welle 8 (Plan 20: alle Workflows)
+- **CI-Stichproben (je Push eine Owner-Freigabe):** nach Welle 3 (Plan 07: `php.yml`, `python.yml` mit POSIX-Tests), nach Welle 6 (Plan 21: `php.yml` mit allen Controllern und Diensten, Vite-Build, `python.yml`; Owner-Entscheid 07.11.), nach Welle 9 (Plan 20: alle Workflows inklusive Integration und Playwright)
 - **Before `/gsd:verify-work`:** alle Workflows auf `phase-01` grün, Owner-Abnahme per Playwright
-- **Max feedback latency:** lokal unter 60 s; PHP-Verhalten der Wellen 5 und 6 erst in Plan 20 (siehe Sign-Off)
+- **Max feedback latency:** lokal unter 60 s für alle Python-, Sprach-, Workflow- und statischen PHP-Gates; PHP-Verhalten spätestens eine Welle nach seiner Entstehung in CI (Plan 07 nach Welle 3, Plan 21 nach Welle 6); Integration und Playwright sind ihrer Natur nach nur in CI prüfbar und laufen in Plan 20
 
 ---
 
@@ -47,7 +47,7 @@ created: 2026-11-07
 | 1-02-02 | 02 | 2 | JOB-06 | T-01-02-05 | höchstens ein aktiver Lease | unit (php, CI) | `QueueMapperTest` in `php.yml` | ❌ im Task | ⬜ pending |
 | 1-03-01 | 03 | 2 | JOB-02 | T-01-03-05 | Kataloge ohne Namensplatzhalter | unit | `uv run python ../scripts/l10n_js.py --root ../php/l10n --check` | ❌ im Task | ⬜ pending |
 | 1-03-02 | 03 | 2 | PLAT-05 | T-01-03-01..04 | Recheck-, Transport-, Log-Gates | unit | `uv run pytest -q tests/test_php_gates.py tests/test_log_calls.py -x` | ❌ im Task | ⬜ pending |
-| 1-03-03 | 03 | 2 | JOB-02 | T-01-03-06 | U+00A0, keine Striche/Emojis | unit | `uv run pytest -q tests/test_trilingual.py tests/test_public_texts.py -x` | ✅ erweitern | ⬜ pending |
+| 1-03-03 | 03 | 2 | JOB-02 | T-01-03-06 | U+00A0, keine Striche/Emojis, höchstens 2 Sätze und 130 Zeichen je Wert | unit | `uv run pytest -q tests/test_trilingual.py tests/test_public_texts.py -x` | ✅ erweitern | ⬜ pending |
 | 1-04-01 | 04 | 2 | JOB-03 | T-01-04-01, -02 | Recheck, Download-Sperre fail closed | unit (php, CI) | `FileAccessTest`; lokal `test_php_gates.py` | ❌ im Task | ⬜ pending |
 | 1-04-02 | 04 | 2 | PLAT-02 | T-01-04-03 | sieben Zustände, PNG-Magic, Deckel | unit (php, CI) | `BackendStateTest`, `ExAppServiceTest` | ❌ im Task | ⬜ pending |
 | 1-04-03 | 04 | 2 | PLAT-02 | T-01-04-04 | Fremd-ExApp 403 | unit (php, CI) | `HandshakeControllerTest` | ❌ im Task | ⬜ pending |
@@ -73,18 +73,19 @@ created: 2026-11-07
 | 1-14-01 | 14 | 6 | JOB-02 | T-01-14-01 | Benachrichtigung ohne Namen | unit (php, CI) | `NotifierTest`, `SuffixTest` | ❌ im Task | ⬜ pending |
 | 1-14-02 | 14 | 6 | JOB-02 | T-01-14-02..04 | sha256, newFile, kein Überschreiben | unit (php, CI) | `PublishServiceTest` | ❌ im Task | ⬜ pending |
 | 1-14-03 | 14 | 6 | JOB-04 | T-01-14-05 | Schreiben/Löschen macht ungültig | unit (php, CI) | `FileLifecycleListenerTest` | ❌ im Task | ⬜ pending |
-| 1-15-01 | 15 | 7 | JOB-02 | T-01-15-01 | Kanarie nur im Textkörper | unit | `uv run pytest -q tests/test_ci_fixtures.py -x` | ❌ im Task | ⬜ pending |
-| 1-15-02 | 15 | 7 | JOB-01, JOB-02 | T-01-15-04 | Kernweg je Format | integration | `bash -n ci/seed.sh ci/flow.sh`; echt in `deploy-harp.yml` | ❌ im Task | ⬜ pending |
-| 1-15-03 | 15 | 7 | PLAT-03, JOB-06 | T-01-15-02, -03 | sieben Beine, MariaDB | unit + integration | `uv run pytest -q tests/test_workflows.py tests/test_lockstep_versions.py -x` | ✅ erweitern | ⬜ pending |
-| 1-16-01..03 | 16 | 7 | JOB-01, JOB-02, JOB-03, PLAT-02 | T-01-16-01..03 | UI-SPEC-Pflicht-Assertions | e2e (CI) | `npx playwright test --list`; `uv run pytest -q tests/test_playwright_contract.py -x` | ❌ im Task | ⬜ pending |
-| 1-17-01 | 17 | 7 | JOB-03, JOB-04, JOB-06 | T-01-17-04, -05 | Rechte, Etag, Einzelauftrag im Lauf | integration (CI) | `bash -n ci/rights.sh ci/stale.sh ci/queue.sh` | ❌ im Task | ⬜ pending |
-| 1-17-02 | 17 | 7 | PLAT-05, (Krit. 5) | T-01-17-01..03 | keine Browser-Route, Kanarie mit Positivkontrolle, Messung | integration (CI) | `bash -n ci/routes.sh ci/canary.sh ci/measure.sh` | ❌ im Task | ⬜ pending |
-| 1-17-03 | 17 | 7 | PLAT-05 | T-01-17-01 | Gates auf Skripte und Dateibaum | unit | `cd backend && uv run pytest -q` | ❌ im Task | ⬜ pending |
-| 1-18-01 | 18 | 8 | PLAT-01, PLAT-02 | T-01-18-03, -04 | Upgrade, Drift, Companion | integration (CI) | `uv run pytest -q tests/test_workflows.py -x` | ✅ erweitern | ⬜ pending |
-| 1-18-02 | 18 | 8 | PLAT-01 | T-01-18-01, -02 | zwei Archive, Pins | unit | `uv run pytest -q tests/test_release_archives.py -x` | ❌ im Task | ⬜ pending |
-| 1-19-01 | 19 | 8 | PLAT-01, PLAT-02 | T-01-19-01, -02 | Doku dreisprachig | unit | `uv run pytest -q tests/test_public_texts.py tests/test_trilingual.py -x` | ✅ erweitern | ⬜ pending |
-| 1-19-02 | 19 | 8 | (Sprache) | T-01-19-01 | Umlaut-Audit mit Positivkontrolle | audit + unit | `cd backend && uv run pytest -q` | n. a. | ⬜ pending |
-| 1-20-01..04 | 20 | 9 | alle | T-01-20-01..04 | voller CI-Beweis, Abnahme | CI + manual | `gh run list --branch phase-01 ...` | n. a. | ⬜ pending |
+| 1-21-01..03 | 21 | 7 | PLAT-02, PLAT-05, JOB-01..04, JOB-06 | T-01-21-01..03 | zweiter Push nur auf phase-01 nach Freigabe | CI | `gh run list --branch phase-01` (php.yml mit allen Klassen der Wellen 5 und 6) | n. a. | ⬜ pending |
+| 1-15-01 | 15 | 8 | JOB-02 | T-01-15-01 | Kanarie nur im Textkörper | unit | `uv run pytest -q tests/test_ci_fixtures.py -x` | ❌ im Task | ⬜ pending |
+| 1-15-02 | 15 | 8 | JOB-01, JOB-02 | T-01-15-04 | Kernweg je Format | integration | `bash -n ci/seed.sh ci/flow.sh`; echt in `deploy-harp.yml` | ❌ im Task | ⬜ pending |
+| 1-15-03 | 15 | 8 | PLAT-03, JOB-06 | T-01-15-02, -03 | sieben Beine, MariaDB | unit + integration | `uv run pytest -q tests/test_workflows.py tests/test_lockstep_versions.py -x` | ✅ erweitern | ⬜ pending |
+| 1-16-01..03 | 16 | 8 | JOB-01, JOB-02, JOB-03, PLAT-02 | T-01-16-01..03 | UI-SPEC-Pflicht-Assertions | e2e (CI) | `npx playwright test --list`; `uv run pytest -q tests/test_playwright_contract.py -x` | ❌ im Task | ⬜ pending |
+| 1-17-01 | 17 | 8 | JOB-03, JOB-04, JOB-06 | T-01-17-04, -05 | Rechte, Etag, Einzelauftrag im Lauf | integration (CI) | `bash -n ci/rights.sh ci/stale.sh ci/queue.sh` | ❌ im Task | ⬜ pending |
+| 1-17-02 | 17 | 8 | PLAT-05, (Krit. 5) | T-01-17-01..03 | keine Browser-Route, Kanarie mit Positivkontrolle, Messung | integration (CI) | `bash -n ci/routes.sh ci/canary.sh ci/measure.sh` | ❌ im Task | ⬜ pending |
+| 1-17-03 | 17 | 8 | PLAT-05 | T-01-17-01 | Gates auf Skripte und Dateibaum | unit | `cd backend && uv run pytest -q` | ❌ im Task | ⬜ pending |
+| 1-18-01 | 18 | 9 | PLAT-01, PLAT-02 | T-01-18-03, -04 | Upgrade, Drift, Companion | integration (CI) | `uv run pytest -q tests/test_workflows.py -x` | ✅ erweitern | ⬜ pending |
+| 1-18-02 | 18 | 9 | PLAT-01 | T-01-18-01, -02 | zwei Archive, Pins | unit | `uv run pytest -q tests/test_release_archives.py -x` | ❌ im Task | ⬜ pending |
+| 1-19-01 | 19 | 9 | PLAT-01, PLAT-02 | T-01-19-01, -02 | Doku dreisprachig | unit | `uv run pytest -q tests/test_public_texts.py tests/test_trilingual.py -x` | ✅ erweitern | ⬜ pending |
+| 1-19-02 | 19 | 9 | (Sprache) | T-01-19-01 | Umlaut-Audit mit Positivkontrolle | audit + unit | `cd backend && uv run pytest -q` | n. a. | ⬜ pending |
+| 1-20-01..04 | 20 | 10 | alle | T-01-20-01..04 | voller CI-Beweis, Abnahme | CI + manual | `gh run list --branch phase-01 ...` | n. a. | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -123,7 +124,8 @@ Kein eigener Wave-0-Plan: jede Testdatei entsteht im Task, der das Verhalten lie
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
 | Paket-Legitimität | PLAT-01 (Lieferkette) | Owner-Regel, nie automatisch freigebbar | Plan 01 Task 1 |
-| Push und Korrektur-Pushes | alle | Owner-Regel "vor jedem Push fragen" | Plan 07 und Plan 20 |
+| Push und Korrektur-Pushes | alle | Owner-Regel "vor jedem Push fragen" | Plan 07, Plan 21 und Plan 20 |
+| Textlängen-Durchsicht | JOB-01, JOB-02, PLAT-02 | Owner-Rückmeldung 07.11. "Text ist zu lang und wirkt AI generiert"; Gate prüft nur Satz- und Zeichenzahl | Plan 20 Task 4 Schritt 7 |
 | UI-Abnahme gemeinsam | JOB-01, JOB-02, PLAT-02 | Owner-Regel, Screenshots aus CI | Plan 20 Task 4, Raster laut UI-SPEC |
 | Zertifikatsstatus #1419 | PLAT-01 | nur lesen, kein Kommentar | Plan 20 Task 2 |
 
@@ -135,7 +137,7 @@ Kein eigener Wave-0-Plan: jede Testdatei entsteht im Task, der das Verhalten lie
 - [x] Sampling continuity: no 3 consecutive tasks without automated verify
 - [x] Wave 0 covers all MISSING references (Testdateien entstehen im jeweiligen Task)
 - [x] No watch-mode flags
-- [ ] Feedback latency < 60 s für PHP-Verhalten: **nicht erfüllt.** PHP läuft lokal nicht; Verhalten der Wellen 2 und 3 wird in Plan 07 gesampelt, das der Wellen 5 und 6 (Pläne 08, 11 bis 14) erst in Plan 20. Lokal greifen nur die statischen PHP-Gates. Option für den Owner: zusätzlicher früher Push nach Welle 6 (gleiche Form wie Plan 07).
-- [ ] `nyquist_compliant: true`: bewusst `false`, Grund siehe vorige Zeile.
+- [x] Feedback latency: lokal unter 60 s; PHP-Verhalten je Welle in CI gesampelt (Plan 07 nach Welle 3, Plan 21 nach Welle 6), bevor eine abhängige Welle darauf aufbaut. Restgrenze: PHP läuft lokal nicht, die Stichprobe kostet je einen Push mit Owner-Freigabe.
+- [x] `nyquist_compliant: true` nach Einfügen von Plan 21 (Owner-Entscheid 07.11.2026).
 
 **Approval:** pending

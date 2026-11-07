@@ -337,6 +337,7 @@ Keine eigene Oberfläche außer einem statischen Beschreibungssatz in den deklar
 ## Copywriting Contract
 
 Regeln:
+- **Kürze (Owner 07.11.2026, nach der Rückmeldung "Text ist zu lang und wirkt AI generiert" zu den Admin-Bannern von Audio & Video Search):** Jeder nutzersichtbare Text (Banner, Karten, Toasts, Benachrichtigungen, Platzhalter-PDF) hat höchstens zwei kurze Sätze nach dem Muster "Zustand. Folge oder Handlung.". Keine Werte wiederholen, die daneben stehen (Versionen nur in der Versionszeile, nie im Banner; Dateiname nur in Überschrift oder Kopienname). Keine Begründungsketten ("deshalb ..., solange ..., und ..."). Der Satz wiederholt den Titel nicht. Je Katalogwert höchstens zwei Satzenden und höchstens 130 Zeichen (Gate in `test_trilingual.py`). Vorbild sind die abgenommenen Admin-Texte in `C:/Users/Student/nextcloud-audio-video-search/php/l10n/{de,en,fr}.json`.
 - Deutsch zuerst. `de` und `de_DE` (Owner: `de_DE` zusätzlich, Sie-Form) bekommen **denselben** Text in unpersönlicher Form: weder "du" noch "Sie" als Anrede, Aufforderungen im Infinitiv ("Die Seite neu laden."). Damit ist der Text in beiden Registern korrekt und beide Kataloge bleiben im Gleichstand (AVS- und Findling-Muster). "Sie" am Satzanfang als Pronomen für "die Datei" ist erlaubt.
 - Französisch mit Infinitiv- bzw. Vous-Form; **geschütztes Leerzeichen U+00A0** vor `:` `;` `?` `!` und innerhalb `« »`. In den Tabellen unten steht dort ein normales Leerzeichen nur aus Darstellungsgründen; im Katalog ist es U+00A0.
 - Echte Umlaute und ß, keine Gedankenstriche (U+2013, U+2014), keine Emojis, kein Ausrufezeichen, Satzanfang groß, Auslassung als `…` (U+2026).
@@ -350,8 +351,8 @@ Regeln:
 |---------|-----------|
 | Primary CTA | Dateien: "Schwärzen / Pseudonymisieren" (Dateiaktion). Prüfseite: "Platzhalter-Kopie anlegen". Admin: "Apps öffnen" im Fehler-Banner |
 | Empty state heading | Prüfseite, Warteschlange: "In der Warteschlange" |
-| Empty state body | "Der Auftrag ist als Nächstes dran." bzw. "%n Auftrag ist vorher dran." / "%n Aufträge sind vorher dran." |
-| Error state | "Diese Prüfung ist nicht verfügbar" / "Sie wurde beendet, oder für die Datei besteht keine Berechtigung mehr. Die Datei in Dateien neu analysieren." |
+| Empty state body | "Sie ist als Nächstes dran." bzw. "%n Auftrag ist vorher dran." / "%n Aufträge sind vorher dran." |
+| Error state | "Diese Prüfung ist nicht verfügbar" / "Sie ist beendet oder die Berechtigung fehlt. Die Datei neu analysieren." |
 | Destructive confirmation | keine: Phase 1 hat keine zerstörende Aktion (die Kopie bekommt immer einen neuen Namen, das Original bleibt unverändert) |
 
 ### Fläche 1: Dateiaktion und Toasts
@@ -359,16 +360,16 @@ Regeln:
 | Schlüssel | DE | EN | FR |
 |-----------|----|----|----|
 | Aktion | Schwärzen / Pseudonymisieren | Redact / pseudonymize | Caviarder / pseudonymiser |
-| Start: als Nächstes | Analyse gestartet. Der Auftrag ist als Nächstes dran. | Analysis started. It is next in line. | Analyse lancée. Elle est la prochaine. |
-| Start: n davor (Singular) | Analyse gestartet. %n Auftrag ist vorher dran. | Analysis started. %n job is ahead of it. | Analyse lancée. %n analyse la précède. |
-| Start: n davor (Plural) | Analyse gestartet. %n Aufträge sind vorher dran. | Analysis started. %n jobs are ahead of it. | Analyse lancée. %n analyses la précèdent. |
-| Start: läuft schon | Für diese Datei läuft bereits eine Analyse. | An analysis is already running for this file. | Une analyse est déjà en cours pour ce fichier. |
+| Start: als Nächstes | Analyse gestartet. Sie ist als Nächstes dran. | Analysis started. It is next. | Analyse lancée. Elle est la prochaine. |
+| Start: n davor (Singular) | Analyse gestartet. %n Auftrag ist vorher dran. | Analysis started. %n job is ahead. | Analyse lancée. %n analyse la précède. |
+| Start: n davor (Plural) | Analyse gestartet. %n Aufträge sind vorher dran. | Analysis started. %n jobs are ahead. | Analyse lancée. %n analyses la précèdent. |
+| Start: läuft schon | Für diese Datei läuft schon eine Analyse. | An analysis is already running for this file. | Une analyse est déjà en cours pour ce fichier. |
 | Toast-Link | Prüfseite öffnen | Open review page | Ouvrir la page de vérification |
-| Start: Backend nicht bereit | PII Redaction ist gerade nicht bereit, deshalb startet keine Analyse. Die Verwaltung dieser Instanz informieren. | PII Redaction is not ready right now, so no analysis starts. Tell the administrators of this instance. | PII Redaction n'est pas prêt pour le moment, aucune analyse ne démarre donc. Prévenez l'administration de cette instance. |
-| Start: Download gesperrt | Die Freigabe erlaubt kein Herunterladen, deshalb ist keine Analyse möglich. Wer die Datei freigegeben hat, kann das Herunterladen erlauben. | This share does not allow downloads, so no analysis is possible. The person who shared the file can allow downloads. | Ce partage n'autorise pas le téléchargement, aucune analyse n'est donc possible. La personne qui a partagé le fichier peut autoriser le téléchargement. |
-| Start: nicht verfügbar | Die Datei ist nicht mehr verfügbar oder nicht lesbar. Die Ansicht neu laden. | The file is no longer available or cannot be read. Reload the view. | Le fichier n'est plus disponible ou ne peut pas être lu. Rechargez la vue. |
-| Start: Format | Analysiert werden nur PDF-, DOCX- und ODT-Dateien. | Only PDF, DOCX and ODT files can be analysed. | Seuls les fichiers PDF, DOCX et ODT peuvent être analysés. |
-| Start: allgemein | Die Analyse konnte nicht gestartet werden. Später erneut versuchen. | The analysis could not be started. Try again later. | L'analyse n'a pas pu être lancée. Réessayez plus tard. |
+| Start: Backend nicht bereit | PII Redaction ist gerade nicht bereit. Die Verwaltung informieren. | PII Redaction is not ready. Tell your administrators. | PII Redaction n'est pas prêt. Prévenez l'administration. |
+| Start: Download gesperrt | Die Freigabe erlaubt kein Herunterladen. Keine Analyse möglich. | This share does not allow downloads. No analysis is possible. | Ce partage n'autorise pas le téléchargement. Aucune analyse n'est possible. |
+| Start: nicht verfügbar | Die Datei ist nicht mehr lesbar. Die Ansicht neu laden. | The file can no longer be read. Reload the view. | Le fichier n'est plus lisible. Rechargez la vue. |
+| Start: Format | Nur PDF, DOCX und ODT lassen sich analysieren. | Only PDF, DOCX and ODT can be analysed. | Seuls les PDF, DOCX et ODT peuvent être analysés. |
+| Start: allgemein | Die Analyse ließ sich nicht starten. Später erneut versuchen. | The analysis could not start. Try again later. | L'analyse n'a pas pu démarrer. Réessayez plus tard. |
 
 ### Fläche 2: Prüfseite
 
@@ -378,20 +379,20 @@ Regeln:
 | Dokumenttitel mit Name | Prüfung: %s | Review: %s | Vérification : %s |
 | Metazeile | Gestartet am %s | Started on %s | Lancée le %s |
 | Warteschlange, Titel | In der Warteschlange | In the queue | En file d'attente |
-| Warteschlange, als Nächstes | Der Auftrag ist als Nächstes dran. | It is next in line. | Elle est la prochaine. |
-| Warteschlange, n davor (Singular) | %n Auftrag ist vorher dran. | %n job is ahead of it. | %n analyse la précède. |
-| Warteschlange, n davor (Plural) | %n Aufträge sind vorher dran. | %n jobs are ahead of it. | %n analyses la précèdent. |
+| Warteschlange, als Nächstes | Sie ist als Nächstes dran. | It is next. | Elle est la prochaine. |
+| Warteschlange, n davor (Singular) | %n Auftrag ist vorher dran. | %n job is ahead. | %n analyse la précède. |
+| Warteschlange, n davor (Plural) | %n Aufträge sind vorher dran. | %n jobs are ahead. | %n analyses la précèdent. |
 | Stufe `waiting`, Titel | Analyse startet | Analysis is starting | L'analyse démarre |
 | Stufe `waiting`, Satz | Der Auftrag wird vorbereitet. | The job is being prepared. | La tâche est en préparation. |
 | Stufe `fetching`, Titel | Datei wird geladen | Loading the file | Chargement du fichier |
-| Stufe `fetching`, Satz | Die Datei wird innerhalb dieses Servers an die Analyse übergeben. | The file is handed to the analysis within this server. | Le fichier est transmis à l'analyse au sein de ce serveur. |
-| Stufe `converting`, Titel | Datei wird in PDF umgewandelt | Converting the file to PDF | Conversion du fichier en PDF |
-| Stufe `converting`, Satz | Das dauert bei großen Dokumenten etwas länger. | This takes a little longer for large documents. | Cela prend un peu plus de temps pour les documents volumineux. |
+| Stufe `fetching`, Satz | Die Datei bleibt auf diesem Server. | The file stays on this server. | Le fichier reste sur ce serveur. |
+| Stufe `converting`, Titel | Umwandlung in PDF | Converting to PDF | Conversion en PDF |
+| Stufe `converting`, Satz | Große Dokumente brauchen etwas länger. | Large documents take a little longer. | Les gros documents prennent un peu plus de temps. |
 | Stufe `rendering`, Titel | Seitenbild wird erstellt | Creating the page image | Création de l'image de la page |
-| Stufe `rendering`, Satz | Seite 1 wird für die Prüfung vorbereitet. | Page 1 is being prepared for review. | La page 1 est préparée pour la vérification. |
+| Stufe `rendering`, Satz | Seite 1 erscheint gleich. | Page 1 appears shortly. | La page 1 s'affiche bientôt. |
 | Seitenzähler | %1$s von %2$s Seiten | %1$s of %2$s pages | %1$s sur %2$s pages |
 | Platzhalter, Titel | Vorschau ohne Erkennung | Preview without detection | Aperçu sans détection |
-| Platzhalter, Satz | Diese Version zeigt nur Seite 1 und sucht noch keine personenbezogenen Daten. Die Platzhalter-Kopie enthält nichts aus dem Original. | This version only shows page 1 and does not look for personal data yet. The placeholder copy contains nothing from the original. | Cette version n'affiche que la page 1 et ne recherche pas encore de données personnelles. La copie provisoire ne contient rien de l'original. |
+| Platzhalter, Satz | Noch keine Suche nach personenbezogenen Daten. Die Kopie enthält nichts aus dem Original. | No search for personal data yet. The copy contains nothing from the original. | Pas encore de recherche de données personnelles. La copie ne contient rien de l'original. |
 | Knopf Hauptaktion | Platzhalter-Kopie anlegen | Create placeholder copy | Créer une copie provisoire |
 | Knopf während POST | Wird angelegt… | Creating… | Création… |
 | Link Datei | In Dateien anzeigen | Show in Files | Afficher dans Fichiers |
@@ -399,42 +400,42 @@ Regeln:
 | Bild `alt` | Seite 1 von %s (Seitenzahl, nie Dateiname) | Page 1 of %s | Page 1 sur %s |
 | Bildunterschrift bekannt | Seite 1 von %s | Page 1 of %s | Page 1 sur %s |
 | Bildunterschrift unbekannt | Seite 1 | Page 1 | Page 1 |
-| Seite nicht abrufbar, Titel | Seite 1 ist gerade nicht abrufbar | Page 1 cannot be loaded right now | La page 1 n'est pas disponible pour le moment |
-| Seite nicht abrufbar, Satz | Erneut laden. Bleibt der Fehler, die Verwaltung dieser Instanz informieren. | Load it again. If the error stays, tell the administrators of this instance. | Rechargez-la. Si l'erreur persiste, prévenez l'administration de cette instance. |
+| Seite nicht abrufbar, Titel | Seite 1 ist gerade nicht abrufbar | Page 1 cannot be loaded | La page 1 n'est pas disponible |
+| Seite nicht abrufbar, Satz | Erneut laden. Bleibt der Fehler, die Verwaltung informieren. | Load it again. If it persists, tell your administrators. | Rechargez-la. Si l'erreur persiste, prévenez l'administration. |
 | Knopf Erneut laden | Erneut laden | Load again | Recharger |
 | Kopie wird angelegt, Titel | Kopie wird angelegt | Creating the copy | Création de la copie |
-| Kopie wird angelegt, Satz | Die Kopie entsteht im selben Ordner wie das Original. Das Original bleibt unverändert. | The copy is created in the same folder as the original. The original stays unchanged. | La copie est créée dans le même dossier que l'original. L'original reste inchangé. |
+| Kopie wird angelegt, Satz | Das Original bleibt unverändert. | The original stays unchanged. | L'original reste inchangé. |
 | Kopie angelegt, Titel | Kopie angelegt | Copy created | Copie créée |
-| Kopie angelegt, Satz | Die Kopie „%s“ liegt neben dem Original. Die Zwischendaten dieser Prüfung sind gelöscht. | The copy "%s" is next to the original. The intermediate data of this review has been deleted. | La copie « %s » se trouve à côté de l'original. Les données intermédiaires de cette vérification ont été supprimées. |
+| Kopie angelegt, Satz | „%s“ liegt neben dem Original. | "%s" is next to the original. | « %s » se trouve à côté de l'original. |
 | Link Kopie | Kopie in Dateien anzeigen | Show copy in Files | Afficher la copie dans Fichiers |
 | Geändert, Titel | Die Datei wurde geändert | The file has changed | Le fichier a été modifié |
-| Geändert, Satz | Nach dem Start wurde die Datei geändert oder neu eingelesen. Die Analyse galt dem alten Stand und wurde beendet. Die Datei in Dateien neu analysieren. | The file was changed or rescanned after the start. The analysis was for the old version and has been stopped. Analyse the file again in Files. | Le fichier a été modifié ou réanalysé après le lancement. L'analyse portait sur l'ancienne version et a été arrêtée. Relancez l'analyse dans Fichiers. |
+| Geändert, Satz | Die Analyse galt dem alten Stand. Die Datei neu analysieren. | The analysis was for the old version. Analyse the file again. | L'analyse portait sur l'ancienne version. Relancez l'analyse. |
 | Gelöscht, Titel | Die Datei wurde gelöscht | The file was deleted | Le fichier a été supprimé |
-| Gelöscht, Satz | Die Analyse wurde deshalb beendet, ihre Zwischendaten sind gelöscht. | The analysis was therefore stopped and its intermediate data deleted. | L'analyse a donc été arrêtée et ses données intermédiaires supprimées. |
-| Download gesperrt, Titel | Für diese Freigabe ist die Prüfung gesperrt | Review is blocked for this share | La vérification est bloquée pour ce partage |
-| Download gesperrt, Satz | Die Freigabe erlaubt inzwischen kein Herunterladen mehr, deshalb zeigt diese Seite die Datei nicht. Wer die Datei freigegeben hat, kann das Herunterladen erlauben. | The share no longer allows downloads, so this page does not show the file. The person who shared the file can allow downloads. | Le partage n'autorise plus le téléchargement, cette page n'affiche donc pas le fichier. La personne qui a partagé le fichier peut autoriser le téléchargement. |
+| Gelöscht, Satz | Die Analyse wurde beendet. | The analysis was stopped. | L'analyse a été arrêtée. |
+| Download gesperrt, Titel | Prüfung für diese Freigabe gesperrt | Review blocked for this share | Vérification bloquée pour ce partage |
+| Download gesperrt, Satz | Die Freigabe erlaubt kein Herunterladen mehr. Wer freigegeben hat, kann es erlauben. | The share no longer allows downloads. The person who shared it can allow them. | Le partage n'autorise plus le téléchargement. La personne qui l'a partagé peut l'autoriser. |
 | Nicht verfügbar, Titel | Diese Prüfung ist nicht verfügbar | This review is not available | Cette vérification n'est pas disponible |
-| Nicht verfügbar, Satz | Sie wurde beendet, oder für die Datei besteht keine Berechtigung mehr. Die Datei in Dateien neu analysieren. | It has ended, or there is no longer permission for the file. Analyse the file again in Files. | Elle est terminée, ou l'autorisation pour le fichier n'existe plus. Relancez l'analyse dans Fichiers. |
+| Nicht verfügbar, Satz | Sie ist beendet oder die Berechtigung fehlt. Die Datei neu analysieren. | It has ended or permission is missing. Analyse the file again. | Elle est terminée ou l'autorisation manque. Relancez l'analyse. |
 | Abgelaufen, Titel | Diese Prüfung ist abgelaufen | This review has expired | Cette vérification a expiré |
-| Abgelaufen, Satz | Prüfungen werden nach 14 Tagen gelöscht. Die Datei in Dateien neu analysieren. | Reviews are deleted after 14 days. Analyse the file again in Files. | Les vérifications sont supprimées après 14 jours. Relancez l'analyse dans Fichiers. |
-| Backend nicht bereit, Titel | PII Redaction ist gerade nicht bereit | PII Redaction is not ready right now | PII Redaction n'est pas prêt pour le moment |
-| Backend nicht bereit, Satz | Der Auftrag bleibt erhalten und läuft weiter, sobald das Backend wieder bereit ist. Bleibt der Zustand, die Verwaltung dieser Instanz informieren. | The job is kept and continues as soon as the backend is ready again. If this persists, tell the administrators of this instance. | La tâche est conservée et reprend dès que le backend est de nouveau prêt. Si cela persiste, prévenez l'administration de cette instance. |
-| Stand nicht aktualisiert | Der Stand konnte nicht aktualisiert werden. Es wird weiter versucht. | The status could not be updated. Trying again. | L'état n'a pas pu être mis à jour. Nouvelle tentative en cours. |
-| Sitzung abgelaufen | Die Sitzung ist abgelaufen. Die Seite neu laden und erneut anmelden. | The session has expired. Reload the page and log in again. | La session a expiré. Rechargez la page et reconnectez-vous. |
+| Abgelaufen, Satz | Prüfungen werden nach 14 Tagen gelöscht. Die Datei neu analysieren. | Reviews are deleted after 14 days. Analyse the file again. | Les vérifications sont supprimées après 14 jours. Relancez l'analyse. |
+| Backend nicht bereit, Titel | PII Redaction ist gerade nicht bereit | PII Redaction is not ready | PII Redaction n'est pas prêt |
+| Backend nicht bereit, Satz | Der Auftrag wartet und läuft danach weiter. | The job waits and continues afterwards. | La tâche attend et reprend ensuite. |
+| Stand nicht aktualisiert | Stand nicht aktualisiert. Neuer Versuch läuft. | Status not updated. Retrying. | État non mis à jour. Nouvelle tentative en cours. |
+| Sitzung abgelaufen | Die Sitzung ist abgelaufen. Die Seite neu laden. | Your session has expired. Reload the page. | La session a expiré. Rechargez la page. |
 | Knopf Seite neu laden | Seite neu laden | Reload page | Recharger la page |
-| Kopie nicht angefordert (POST-Fehler) | Die Kopie konnte nicht angefordert werden. Erneut versuchen. | The copy could not be requested. Try again. | La copie n'a pas pu être demandée. Réessayez. |
+| Kopie nicht angefordert (POST-Fehler) | Die Kopie ließ sich nicht anfordern. Erneut versuchen. | The copy could not be requested. Try again. | La copie n'a pas pu être demandée. Réessayez. |
 
 Fehlgeschlagen je Grund (Fehlerkarte, Titel / Satz):
 
 | Grund | DE | EN | FR |
 |-------|----|----|----|
-| `render_failed` | Die Datei ließ sich nicht darstellen / Sie ist vielleicht beschädigt oder nutzt Funktionen, die die Umwandlung nicht kennt. Die Datei in ihrem Programm als PDF speichern und diese PDF analysieren. | The file could not be displayed / It may be damaged or use features the conversion does not know. Save the file as PDF in its program and analyse that PDF. | Le fichier n'a pas pu être affiché / Il est peut-être endommagé ou utilise des fonctions que la conversion ne connaît pas. Enregistrez le fichier en PDF dans son programme et analysez ce PDF. |
-| `out_of_memory` | Der Server hatte nicht genug Arbeitsspeicher / Die Analyse wurde abgebrochen. Später neu starten. Bleibt der Fehler, die Verwaltung dieser Instanz informieren. | The server did not have enough memory / The analysis was stopped. Start it again later. If the error stays, tell the administrators of this instance. | Le serveur n'avait pas assez de mémoire / L'analyse a été interrompue. Relancez-la plus tard. Si l'erreur persiste, prévenez l'administration de cette instance. |
-| `repeatedly_stuck` | Die Analyse kam mehrmals nicht voran / Sie wurde nach drei Versuchen beendet. Die Verwaltung dieser Instanz informieren. | The analysis got stuck several times / It was stopped after three attempts. Tell the administrators of this instance. | L'analyse s'est bloquée plusieurs fois / Elle a été arrêtée après trois tentatives. Prévenez l'administration de cette instance. |
-| `backend_state_lost` | Die Zwischendaten der Analyse fehlen / Das Backend wurde vermutlich neu installiert oder zurückgesetzt. Die Datei in Dateien neu analysieren. | The intermediate data of the analysis is missing / The backend was probably reinstalled or reset. Analyse the file again in Files. | Les données intermédiaires de l'analyse sont manquantes / Le backend a probablement été réinstallé ou réinitialisé. Relancez l'analyse dans Fichiers. |
-| `target_not_writable` | Die Kopie konnte nicht angelegt werden / Im Ordner des Originals fehlt die Berechtigung zum Anlegen von Dateien. Die Datei neu analysieren, sobald die Berechtigung besteht. | The copy could not be created / The folder of the original does not allow creating files. Analyse the file again once permission is granted. | La copie n'a pas pu être créée / Le dossier de l'original n'autorise pas la création de fichiers. Relancez l'analyse une fois l'autorisation accordée. |
-| `unsupported_format` | Dieses Format wird nicht unterstützt / Analysiert werden nur PDF-, DOCX- und ODT-Dateien. | This format is not supported / Only PDF, DOCX and ODT files can be analysed. | Ce format n'est pas pris en charge / Seuls les fichiers PDF, DOCX et ODT peuvent être analysés. |
-| jeder andere Grund | Die Analyse ist fehlgeschlagen / Die Datei in Dateien neu analysieren. Bleibt der Fehler, die Verwaltung dieser Instanz informieren. | The analysis failed / Analyse the file again in Files. If the error stays, tell the administrators of this instance. | L'analyse a échoué / Relancez l'analyse dans Fichiers. Si l'erreur persiste, prévenez l'administration de cette instance. |
+| `render_failed` | Die Datei ließ sich nicht darstellen / Sie ist vielleicht beschädigt. Als PDF speichern und diese analysieren. | The file could not be displayed / It may be damaged. Save it as PDF and analyse that. | Le fichier n'a pas pu être affiché / Il est peut-être endommagé. Enregistrez-le en PDF et analysez celui-ci. |
+| `out_of_memory` | Zu wenig Arbeitsspeicher / Die Analyse wurde abgebrochen. Später neu starten. | Not enough memory / The analysis was stopped. Start it again later. | Mémoire insuffisante / L'analyse a été interrompue. Relancez-la plus tard. |
+| `repeatedly_stuck` | Die Analyse kam nicht voran / Nach drei Versuchen beendet. Die Verwaltung informieren. | The analysis got stuck / Stopped after three attempts. Tell your administrators. | L'analyse s'est bloquée / Arrêtée après trois tentatives. Prévenez l'administration. |
+| `backend_state_lost` | Zwischendaten fehlen / Das Backend wurde zurückgesetzt. Die Datei neu analysieren. | Intermediate data missing / The backend was reset. Analyse the file again. | Données intermédiaires manquantes / Le backend a été réinitialisé. Relancez l'analyse. |
+| `target_not_writable` | Kopie nicht angelegt / Im Ordner des Originals fehlt das Schreibrecht. Danach neu analysieren. | Copy not created / The folder of the original is not writable. Analyse again afterwards. | Copie non créée / Le dossier de l'original n'est pas modifiable. Relancez ensuite l'analyse. |
+| `unsupported_format` | Format nicht unterstützt / Nur PDF, DOCX und ODT lassen sich analysieren. | Format not supported / Only PDF, DOCX and ODT can be analysed. | Format non pris en charge / Seuls les PDF, DOCX et ODT peuvent être analysés. |
+| jeder andere Grund | Die Analyse ist fehlgeschlagen / Die Datei neu analysieren. Bleibt der Fehler, die Verwaltung informieren. | The analysis failed / Analyse the file again. If it persists, tell your administrators. | L'analyse a échoué / Relancez l'analyse. Si l'erreur persiste, prévenez l'administration. |
 
 Hinweis: Titel und Satz sind getrennte Katalogeinträge; der Schrägstrich trennt hier nur die Spalten.
 
@@ -442,32 +443,34 @@ Hinweis: Titel und Satz sind getrennte Katalogeinträge; der Schrägstrich trenn
 
 | Betreff | DE Betreff / Nachricht | EN | FR |
 |---------|------------------------|----|----|
-| `review_ready` | Eine Prüfung ist bereit / Die Prüfseite zeigt die Datei. | A review is ready / The review page shows the file. | Une vérification est prête / La page de vérification affiche le fichier. |
-| `job_failed` | Eine Analyse ist fehlgeschlagen / Den Grund zeigt die Prüfseite. | An analysis failed / The review page shows the reason. | Une analyse a échoué / La page de vérification en indique la raison. |
-| `job_stale` | Eine Analyse wurde beendet, weil die Datei geändert wurde / Die Datei in Dateien neu analysieren. | An analysis was stopped because the file changed / Analyse the file again in Files. | Une analyse a été arrêtée car le fichier a été modifié / Relancez l'analyse dans Fichiers. |
-| `copy_created` | Eine Kopie liegt neben dem Original / Die Prüfseite verlinkt die Kopie. | A copy is next to the original / The review page links to the copy. | Une copie se trouve à côté de l'original / La page de vérification renvoie vers la copie. |
+| `review_ready` | Eine Prüfung ist bereit / Die Prüfseite öffnen. | A review is ready / Open the review page. | Une vérification est prête / Ouvrez la page de vérification. |
+| `job_failed` | Eine Analyse ist fehlgeschlagen / Den Grund nennt die Prüfseite. | An analysis failed / The review page shows why. | Une analyse a échoué / La page de vérification indique pourquoi. |
+| `job_stale` | Eine Analyse wurde beendet / Die Datei wurde geändert. Neu analysieren. | An analysis was stopped / The file changed. Analyse it again. | Une analyse a été arrêtée / Le fichier a été modifié. Relancez l'analyse. |
+| `copy_created` | Eine Kopie ist angelegt / Sie liegt neben dem Original. | A copy was created / It is next to the original. | Une copie a été créée / Elle se trouve à côté de l'original. |
 
 ### Fläche 5: Admin-Statusbereich
+
+Versionen stehen nur in der Versionszeile, nie im Banner.
 
 | Schlüssel | DE | EN | FR |
 |-----------|----|----|----|
 | Sektionsname | PII Redaction | PII Redaction | PII Redaction |
 | h2 | Verbindung zum Backend | Connection to the backend | Connexion au backend |
-| `ok` | Beide Apps sind verbunden und haben die Version %s. | Both apps are connected and run version %s. | Les deux applications sont connectées et en version %s. |
-| `version_patch_differs` | Beide Apps sind verbunden. Die Versionen unterscheiden sich nur in der letzten Stelle: diese App %1$s, Backend %2$s. Analysen laufen normal. Beim nächsten Update beide Apps auf dieselbe Version bringen. | Both apps are connected. Their versions differ only in the last part: this app %1$s, backend %2$s. Analyses run normally. Bring both apps to the same version at the next update. | Les deux applications sont connectées. Leurs versions ne diffèrent que par le dernier chiffre : cette application %1$s, backend %2$s. Les analyses fonctionnent normalement. Mettez les deux applications à la même version lors de la prochaine mise à jour. |
-| `version_drift` | Die beiden Apps haben unterschiedliche Versionen: diese App %1$s, Backend %2$s. Solange sie nicht zusammenpassen, startet keine Analyse, und wartende Aufträge warten. Beide Apps auf dieselbe Version bringen. | The two apps run different versions: this app %1$s, backend %2$s. As long as they do not match, no analysis starts and queued jobs wait. Bring both apps to the same version. | Les deux applications ont des versions différentes : cette application %1$s, backend %2$s. Tant qu'elles ne correspondent pas, aucune analyse ne démarre et les tâches en attente patientent. Mettez les deux applications à la même version. |
-| `backend_missing` | Die App „PII Redaction Backend“ ist nicht installiert. Ohne sie startet keine Analyse. Die App unter Apps installieren. | The app "PII Redaction Backend" is not installed. Without it, no analysis starts. Install the app under Apps. | L'application « PII Redaction Backend » n'est pas installée. Sans elle, aucune analyse ne démarre. Installez l'application dans Applications. |
-| `backend_disabled` | Die App „PII Redaction Backend“ ist installiert, aber deaktiviert. Solange startet keine Analyse. Die App unter Apps aktivieren. | The app "PII Redaction Backend" is installed but disabled. Until it is enabled, no analysis starts. Enable the app under Apps. | L'application « PII Redaction Backend » est installée mais désactivée. En attendant, aucune analyse ne démarre. Activez l'application dans Applications. |
-| `backend_unreachable` | Das Backend antwortet nicht. Solange startet keine Analyse. Unter Apps prüfen, ob „PII Redaction Backend“ läuft, und in den AppAPI-Einstellungen, ob der Deploy-Daemon erreichbar ist. | The backend does not answer. Until it does, no analysis starts. Check under Apps that "PII Redaction Backend" is running, and in the AppAPI settings that the deploy daemon can be reached. | Le backend ne répond pas. En attendant, aucune analyse ne démarre. Vérifiez dans Applications que « PII Redaction Backend » fonctionne, et dans les paramètres AppAPI que le démon de déploiement est joignable. |
-| `no_app_api` | Die App AppAPI ist nicht aktiviert. Das Backend dieser App läuft nur über AppAPI. AppAPI unter Apps aktivieren und einen Deploy-Daemon einrichten. | The AppAPI app is not enabled. The backend of this app only runs through AppAPI. Enable AppAPI under Apps and set up a deploy daemon. | L'application AppAPI n'est pas activée. Le backend de cette application ne fonctionne qu'avec AppAPI. Activez AppAPI dans Applications et configurez un démon de déploiement. |
-| Neuprüfung gescheitert | Der Zustand konnte nicht neu geprüft werden. Angezeigt ist der Stand beim Laden der Seite. | The state could not be checked again. Shown is the state from when the page was loaded. | L'état n'a pas pu être vérifié de nouveau. L'affichage correspond à l'état au chargement de la page. |
+| `ok` | Beide Apps sind verbunden. | Both apps are connected. | Les deux applications sont connectées. |
+| `version_patch_differs` | Kleiner Versionsunterschied. Analysen laufen, beim nächsten Update angleichen. | Minor version difference. Analyses run; align both apps at the next update. | Petite différence de version. Les analyses fonctionnent, alignez-les à la prochaine mise à jour. |
+| `version_drift` | Die Versionen passen nicht zusammen. Bis beide gleich sind, startet keine Analyse. | The versions do not match. No analysis starts until both are the same. | Les versions ne correspondent pas. Aucune analyse ne démarre tant qu'elles diffèrent. |
+| `backend_missing` | Das Backend ist nicht installiert. Ohne es startet keine Analyse. | The backend is not installed. Without it, no analysis starts. | Le backend n'est pas installé. Sans lui, aucune analyse ne démarre. |
+| `backend_disabled` | Das Backend ist deaktiviert. Bis es wieder läuft, startet keine Analyse. | The backend is disabled. No analysis starts until it is enabled again. | Le backend est désactivé. Aucune analyse ne démarre tant qu'il n'est pas réactivé. |
+| `backend_unreachable` | Das Backend antwortet nicht. Prüfen, ob es läuft und der Deploy-Daemon erreichbar ist. | The backend does not respond. Check that it is running and that the deploy daemon can be reached. | Le backend ne répond pas. Vérifiez qu'il fonctionne et que le démon de déploiement est joignable. |
+| `no_app_api` | AppAPI ist nicht aktiviert. Das Backend läuft nur über AppAPI. | AppAPI is not enabled. The backend only runs through AppAPI. | AppAPI n'est pas activé. Le backend ne fonctionne qu'avec AppAPI. |
+| Neuprüfung gescheitert | Der Zustand konnte nicht neu geprüft werden. Angezeigt ist der Stand beim Laden der Seite. | The state could not be checked again. Shown is the state from when the page was loaded. | L'état n'a pas pu être vérifié de nouveau. L'affichage correspond au chargement de la page. |
 | Banner-Aktion | Apps öffnen | Open Apps | Ouvrir Applications |
 | Versionszeile | Diese App: %1$s · Backend: %2$s | This app: %1$s · Backend: %2$s | Cette application : %1$s · Backend : %2$s |
 | Version unbekannt | nicht bekannt | unknown | inconnue |
 | Zuletzt geprüft | Zuletzt geprüft: %s | Last checked: %s | Dernière vérification : %s |
 | Knopf Prüfen | Erneut prüfen | Check again | Vérifier à nouveau |
 | Knopf während Prüfung | Wird geprüft… | Checking… | Vérification… |
-| Backend-Beschreibung (ExApp-Einstellungen) | Diese App ist das Backend von PII Redaction und braucht die App „PII Redaction“. Der Zustand beider Apps steht unter Verwaltung, PII Redaction. | This app is the backend of PII Redaction and needs the app "PII Redaction". The state of both apps is shown under Administration, PII Redaction. | Cette application est le backend de PII Redaction et nécessite l'application « PII Redaction ». L'état des deux applications figure dans Administration, PII Redaction. |
+| Backend-Beschreibung (ExApp-Einstellungen) | Backend von PII Redaction. Braucht die App „PII Redaction“. | Backend of PII Redaction. Requires the app "PII Redaction". | Backend de PII Redaction. Nécessite l'application « PII Redaction ». |
 
 Anführungszeichen: DE „…“ (U+201E, U+201C), EN "…", FR « … » mit U+00A0 innen.
 
@@ -548,6 +551,7 @@ Grundlage: AVS `ci/playwright/` (Projekte je Breite und Theme, Sprache über eig
 - **Kopie:** Name je Sprache exakt (`_geschwärzt`, `_redacted`, `_caviardé`, NFC), zweiter Durchlauf ergibt `(2)`; Original unverändert (Etag und sha256 gleich).
 - **Fokus:** nach "Platzhalter-Kopie anlegen" steht der Fokus in `#pii-review-state`; nach "Erneut prüfen" auf `#pii-backend-state`.
 - **Kein Inhalt außer Bild:** kein Text aus dem Dokument im DOM der Prüfseite (Kanarie nicht im DOM).
+- **Textlänge:** jeder sichtbare Banner-, Karten-, Toast- und Benachrichtigungstext hat höchstens zwei Sätze (Regel "Kürze"); kein Admin-Banner enthält eine Versionsnummer. Zusätzlich gemeinsame Textlängen-Durchsicht mit dem Owner (Plan 20).
 
 Danach `impeccable critique` und `impeccable audit`, dann Owner-Abnahme gemeinsam per Playwright. In dieser Recherche wurden kein Browser und kein Docker-Stack gestartet (RAM-Vorgabe).
 

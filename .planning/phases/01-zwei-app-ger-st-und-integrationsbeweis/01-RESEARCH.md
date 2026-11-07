@@ -674,16 +674,22 @@ return FetchResult.ok(digest.hexdigest(), size, etag)
 | A9 | Tabellen-/Indexnamen-Längengrenze von Nextcloud-Migrationen | Entscheid 3 | Migration scheitert in CI, Namen kürzen |
 | A10 | LibreOffice-nogui + Schriften bleiben unter ca. 550 MB zusätzlich | Entscheid 12 | Image größer; Messung in Phase 1 entscheidet, Alternativen in STACK |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **LibreOffice schon in Phase 1?**
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
    - What we know: Erfolgskriterium 2 verlangt Seite 1 für DOCX/ODT; Image-Größe ist ungemessen.
    - Recommendation: ja (Entscheid 12), Härtung in Phase 2. Owner bestätigt, weil Phase 1 damit fremde Office-Dateien vor der vollen Sandbox konvertiert (nur Testinstanzen, kein Store-Release vor Phase 15).
 2. **Dateiname in Benachrichtigungen?** Empfehlung: nein, nur "Eine Prüfung ist bereit" mit Link; Name auf der Prüfseite. Owner entscheidet.
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
 3. **Suffix der Platzhalter-Kopie:** echter Suffix (`_geschwärzt` usw., Inhalt ist nur ein Hinweis) oder `_platzhalter`? Empfehlung: echter Suffix, damit die Suffix-Logik ab Phase 1 im echten Weg läuft.
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
 4. **Startet der Platzhalter-Weg ohne Debug-Schalter?** AVS sperrte die Saat hinter `debug`. Empfehlung: Dateiaktion und Platzhalter-Kopie ohne Debug-Schalter (sie sind der spätere Produktweg), aber der Knopf "Platzhalter-Kopie anlegen" nur, solange es keine echte Freigabe gibt (wird in Phase 10 ersetzt).
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
 5. **MariaDB-Bein in `deploy-harp.yml`?** Claim-Logik und Migrationen sind dialektabhängig. Empfehlung: ein zusätzliches Bein stable35/amd64 mit MariaDB-Dienstcontainer, sonst erst in Phase 15.
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
 6. **de_DE (Sie-Form) zusätzlich zu de?** AVS liefert beide. Empfehlung: ja, Behörden nutzen oft `de_DE`.
+   - RESOLVED: Owner 07.11.2026, siehe 01-CONTEXT.md
 
 ## Environment Availability
 

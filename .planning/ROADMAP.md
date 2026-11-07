@@ -42,7 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Ein Nutzer ohne Leserecht (auch über Gruppenordner-ACL oder entzogene Freigabe) kann weder starten noch die Seite öffnen; eine Freigabe mit Download-Sperre blockiert den Start; der Container hat keine Browser-Routen (Test).
   4. Ändert sich das Original nach dem Start, wird der Auftrag als ungültig gemeldet (Etag-Wechsel im Test).
   5. Es läuft höchstens ein Auftrag zur Zeit je Container; Nextcloud-Tabellen und Logs enthalten nur geschlossene Status- und Grundlisten, ein Kanarienwert aus dem Dummy-Dokument taucht weder in der DB noch in Logs auf.
-**Plans**: 20 plans in 9 Wellen
+**Plans**: 21 plans in 10 Wellen
 
 Plans:
 - [ ] 01-01-PLAN.md: Gerüst: backend/ und php/, Paketfreigabe, Lockstep-Gate, php.yml (Welle 1)
@@ -59,12 +59,13 @@ Plans:
 - [ ] 01-12-PLAN.md: QueueController und auftragsgebundenes Gateway (Welle 6)
 - [ ] 01-13-PLAN.md: ReviewController: Prüfseite, Seitenbild-Proxy, Platzhalter-Aktion (Welle 6)
 - [ ] 01-14-PLAN.md: Notifier, Suffix, PublishService/PublishJob, Listener, Application (Welle 6)
-- [ ] 01-15-PLAN.md: deploy-harp.yml mit sieben Beinen, Saat, Fixtures, Kernweg (Welle 7)
-- [ ] 01-16-PLAN.md: Playwright-Suite nach UI-SPEC-Prüfvertrag (Welle 7)
-- [ ] 01-17-PLAN.md: CI-Prüfskripte Rechte, Etag, Warteschlange, Routen, Kanarie, Messung (Welle 7)
-- [ ] 01-18-PLAN.md: Upgrade-Job, Drift-Schritte, zwei Store-Archive (Welle 8)
-- [ ] 01-19-PLAN.md: Doku DE/EN/FR, DESIGN, PRODUCT, CHANGELOG, Umlaut-Audit (Welle 8)
-- [ ] 01-20-PLAN.md: Owner: Push, CI, Messwerte, Zertifikatsstatus, gemeinsame Playwright-Abnahme (Welle 9)
+- [ ] 01-21-PLAN.md: Zweiter früher Push auf phase-01 mit Owner-Freigabe, phpunit der Wellen 5 und 6 grün (Welle 7)
+- [ ] 01-15-PLAN.md: deploy-harp.yml mit sieben Beinen, Saat, Fixtures, Kernweg (Welle 8)
+- [ ] 01-16-PLAN.md: Playwright-Suite nach UI-SPEC-Prüfvertrag (Welle 8)
+- [ ] 01-17-PLAN.md: CI-Prüfskripte Rechte, Etag, Warteschlange, Routen, Kanarie, Messung (Welle 8)
+- [ ] 01-18-PLAN.md: Upgrade-Job, Drift-Schritte, zwei Store-Archive (Welle 9)
+- [ ] 01-19-PLAN.md: Doku DE/EN/FR, DESIGN, PRODUCT, CHANGELOG, Umlaut-Audit (Welle 9)
+- [ ] 01-20-PLAN.md: Owner: Push, CI, Messwerte, Zertifikatsstatus, gemeinsame Playwright-Abnahme (Welle 10)
 **UI hint**: yes
 **Research flag**: Standardmuster (AVS-Zwei-App-Muster, Gateway, Queue mit Lease, ExAppService). Zu klären: Dateiaktion über `@nextcloud/files` 4.x mit Vite-Build auf NC 33 bis 35, Streaming über HaRP, Zertifikat `pii_redaction_backend` (#1419). Container-Messwerte (RSS, Kaltstart) hier oder in Phase 2 erheben, RAM-Schwellen erst danach festschreiben.
 
@@ -253,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Zwei-App-Gerüst und Integrationsbeweis | 0/20 | Planned | - |
+| 1. Zwei-App-Gerüst und Integrationsbeweis | 0/21 | Planned | - |
 | 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
