@@ -50,6 +50,10 @@ trait JobServiceFactory {
 	private bool $downloadAllowed = true;
 	/** @var array<string, string> */
 	private array $languages = ['alice' => 'en'];
+	/** What fopen() of file 42 returns: a stream the test made, or false. */
+	private mixed $content = false;
+	/** @var list<string> the modes fopen() of file 42 was called with */
+	private array $openedAs = [];
 
 	/** @var list<array{user: string, object: string, subject: string}> */
 	private array $sent = [];
@@ -130,6 +134,11 @@ trait JobServiceFactory {
 		$file->method('getEtag')->willReturnCallback(fn (): string => $this->etag);
 		$file->method('getMimetype')->willReturnCallback(fn (): string => $this->mime);
 		$file->method('getName')->willReturn('Bescheid.pdf');
+		$file->method('getId')->willReturn(42);
+		$file->method('fopen')->willReturnCallback(function (string $mode): mixed {
+			$this->openedAs[] = $mode;
+			return $this->content;
+		});
 
 		if ($this->downloadAllowed) {
 			$storage = $this->createMock(IStorage::class);
