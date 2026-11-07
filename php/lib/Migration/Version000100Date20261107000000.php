@@ -73,7 +73,10 @@ final class Version000100Date20261107000000 extends SimpleMigrationStep {
 			$table->addColumn('image_height', Types::INTEGER, ['notnull' => false]);
 			$table->addColumn('created_at', Types::BIGINT, ['notnull' => true, 'length' => 64]);
 			$table->addColumn('updated_at', Types::BIGINT, ['notnull' => true, 'length' => 64]);
-			$table->addColumn('expires_at', Types::BIGINT, ['notnull' => true, 'length' => 64]);
+			// Entity setters skip a value equal to the property default, so
+			// setExpiresAt(0) leaves the column out of the INSERT: without a
+			// database default the NOT NULL check fails (CI run 42377237827).
+			$table->addColumn('expires_at', Types::BIGINT, ['notnull' => true, 'default' => 0, 'length' => 64]);
 
 			$table->setPrimaryKey(['id'], 'pii_jobs_pk');
 			$table->addIndex(['file_id'], 'pii_jobs_file');

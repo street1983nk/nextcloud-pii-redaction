@@ -79,8 +79,9 @@ final class JobMapper extends QBMapper {
 		$job->setLeaseUntil(0);
 		$job->setCreatedAt($now);
 		$job->setUpdatedAt($now);
-		// Phase 1 enforces no retention yet; the column is set so a later
-		// phase only has to start reading it.
+		// Phase 1 enforces no retention yet; a later phase only has to start
+		// reading the column. 0 equals the entity default, so the INSERT skips
+		// it and the database default 0 of the migration fills it.
 		$job->setExpiresAt(0);
 		return $this->insert($job);
 	}
