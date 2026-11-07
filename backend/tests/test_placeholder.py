@@ -23,7 +23,7 @@ EXPECTED_LINES = (
 def _text(path: Path) -> tuple[int, str, dict[str, str]]:
     document = pymupdf.open(path)
     pages = document.page_count
-    text = "".join(page.get_text() for page in document).replace(NBSP, " ")
+    text = "".join(str(page.get_text()) for page in document).replace(NBSP, " ")
     metadata = {key: value or "" for key, value in (document.metadata or {}).items()}
     document.close()
     return pages, " ".join(text.split()), metadata
