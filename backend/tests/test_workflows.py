@@ -195,7 +195,10 @@ def scanned_files() -> list[Path]:
         for directory in SCANNED_DIRECTORIES
         if (REPO_ROOT / directory).is_dir()
         for path in (REPO_ROOT / directory).rglob("*")
-        if path.is_file() and "node_modules" not in path.parts and path.suffix not in {".png", ".svg"}
+        if path.is_file()
+        and "node_modules" not in path.parts
+        and "__pycache__" not in path.parts
+        and path.suffix not in {".png", ".svg", ".pyc"}
     )
 
 

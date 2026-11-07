@@ -58,7 +58,7 @@ skip_covered = true
 [tool.ruff]
 line-length = 120
 target-version = "py313"
-src = ["src", "tests", "../scripts"]
+src = ["src", "tests", "../scripts", "../ci"]
 
 [tool.ruff.lint]
 # The full rule set of Findling, unchanged.
@@ -71,11 +71,12 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "SIM", "C4", "RUF", "PT", "RET
 [tool.pyright]
 typeCheckingMode = "basic"
 pythonVersion = "3.13"
-include = ["src", "tests", "../scripts"]
+include = ["src", "tests", "../scripts", "../ci"]
 
 [tool.vulture]
 min_confidence = 80
-paths = ["src", "tests", "../scripts"]
+paths = ["src", "tests", "../scripts", "../ci"]
+exclude = ["node_modules"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

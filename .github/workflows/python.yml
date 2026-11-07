@@ -52,11 +52,12 @@ jobs:
       - name: Format check
         run: uv run ruff format --check .
 
-      # ruff takes the directory it is given; the shared scripts sit outside backend/.
+      # ruff takes the directory it is given; the shared scripts and the CI
+      # scripts (fixtures, PDF reader) sit outside backend/.
       - name: Lint and format check of the shared scripts
         run: |
-          uv run ruff check ../scripts
-          uv run ruff format --check ../scripts
+          uv run ruff check ../scripts ../ci
+          uv run ruff format --check ../scripts ../ci
 
       - name: Type check
         env:

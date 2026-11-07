@@ -19,6 +19,9 @@ php/junit.xml
 ci/playwright/node_modules/
 ci/playwright/test-results/
 ci/playwright/playwright-report/
+ci/playwright/screenshots/
+# Outputs of the CI scripts (fixtures, ids, logs, dumps, measurements)
+ci/out/
 
 # Keys never enter the repository. The app key lives outside it, under
 # C:\Users\Student\.nextcloud\certificates\<app_id>.key, and in CI only as the
