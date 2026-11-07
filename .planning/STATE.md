@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-21-PLAN.md
-last_updated: "2026-11-07T15:02:11.372Z"
+stopped_at: Completed 01-14-PLAN.md
+last_updated: "2026-11-07T15:16:53.222Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 15
+  completed_plans: 16
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 15 of 21 in current phase (01-01 bis 01-14 und 01-21 abgeschlossen; phase-01 auf 5a977f6, CI grün; nächster Schritt Welle 7, Pläne 01-15 bis 01-17)
+Plan: 16 of 21 in current phase (01-01 bis 01-15 und 01-21 abgeschlossen; phase-01 auf 5a977f6, 01-15 lokal ungepusht; nächster Schritt 01-16, dann 01-17)
 Status: Ready to execute
 Last activity: 2026-11-07
 
-Progress: [███████░░░] 71%
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [███████░░░] 71%
 | Phase 01 P12 | 30 min | 2 tasks | 5 files |
 | Phase 01 P13 | 30 min | 1 tasks | 8 files |
 | Phase 01 P14 | 40 min | 3 tasks | 13 files |
+| Phase 01 P15 | 45 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,7 @@ Recent decisions affecting current work:
 - [Phase 01-12]: ack nur über Claim-Token; ack review mit Etag-Abweichung wird stale und antwortet 409 {reason}; Gateway 503 bei nicht zu öffnender Datei ohne Zustandswechsel
 - [Phase 01-13]: Status-Route meldet recheck, Prüfseite wechselt bei nachträglicher Download-Sperre in die Sperrkarte; cancelled(original_deleted) zeigt 200 ohne Namen trotz Recheck Missing
 - [Phase 01-14]: Gate-Regel 17 erlaubt die INotifier-Deklaration getName(), Aufrufe bleiben verboten; Ablage: NotPermittedException ergibt target_not_writable, sonstige Ausnahme check_error über PublishJob
+- [Phase 01-15]: ci/lib.sh ist der gemeinsame Skriptvertrag; deploy-harp auf sieben Beinen (MariaDB nur stable35/amd64); php-Build mit --configLoader runner gegen die tsconfig-Warnung
 
 ### Pending Todos
 
@@ -115,6 +117,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-07T15:02:11.353Z
+Last session: 2026-11-07T15:16:45.061Z
 Stopped at: Completed 01-14-PLAN.md
 Resume file: None
