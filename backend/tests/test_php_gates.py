@@ -47,7 +47,8 @@ from tests.conftest import REPO_ROOT
 
 PHP_ROOT = REPO_ROOT / "php"
 LIB = PHP_ROOT / "lib"
-SKIPPED_DIRECTORIES = {"vendor", "node_modules", ".phpunit.cache"}
+# php/js/ is the build output of php/src (git ignored); the sources are judged.
+SKIPPED_DIRECTORIES = {"vendor", "node_modules", ".phpunit.cache", "js"}
 
 GUARD_STATEMENT = "$foreign = $this->rejectForeignCaller();"
 EXAPP_ATTRIBUTE = "ExAppRequired"

@@ -42,6 +42,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # The browser bundle first: the Files action, the review page and the
+      # admin section are built from php/src with the exact pins of
+      # php/package-lock.json. --ignore-scripts: no package gets a shell here.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Build the browser bundle
+        working-directory: php
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          test -s js/pii_redaction-init.mjs
+          test -s js/pii_redaction-review.mjs
+          test -s js/pii_redaction-admin.mjs
+
       - name: Set up PHP
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
@@ -53,7 +70,7 @@ jobs:
       # There is no PHP on the development machine, so this is the first place a
       # syntax error can show. xargs fails as soon as one php -l fails.
       - name: Syntax check every PHP file
-        run: find php -name '*.php' -not -path 'php/vendor/*' -print0 | xargs -0 -n1 php -l
+        run: find php -name '*.php' -not -path 'php/vendor/*' -not -path 'php/node_modules/*' -print0 | xargs -0 -n1 php -l
 
   composer-hygiene:
     name: composer validate and audit
@@ -123,6 +140,20 @@ jobs:
         with:
           path: app-src
           persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # The same build as in the lint job, so the app that PHPUnit enables
+      # carries its scripts.
+      - name: Build the browser bundle
+        working-directory: app-src/php
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          test -s js/pii_redaction-init.mjs
 
       - name: Set up PHP
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0

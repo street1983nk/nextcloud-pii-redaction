@@ -33,3 +33,5 @@ ci/playwright/playwright-report/
 # Tool state
 .claude-active
 .DS_Store
+php/css/pii_redaction-*.css
+php/css/*.chunk.css
