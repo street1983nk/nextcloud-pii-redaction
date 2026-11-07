@@ -107,3 +107,9 @@ Keine neue Fläche außerhalb des Bedrohungsmodells. T-01-09-01 bis -04 mitigier
 
 - Dateien vorhanden: php/package.json, php/package-lock.json, php/vite.config.ts, php/src/{init,startToast,review,admin}.ts, php/src/ReviewPlaceholder.vue, php/src/icon.svg, php/css/review.css, backend/tests/test_ui_assets.py
 - Commits vorhanden: d6843e1, 73e459c, e22b504
+
+## Nachtrag Owner-Freigabe typescript (2026-11-07)
+
+Owner-Antwort im Claude-Code-Terminal, vom Koordinator übermittelt, auf die Frage nach `typescript` als direkter devDependency: "Freigeben (Empfohlen)".
+
+Umsetzung (`9cd4891`): `typescript` 6.0.3 mit `--save-exact --save-dev --ignore-scripts` (Quelle github.com/microsoft/TypeScript, kein postinstall, Integrity `sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==`, dieselbe Version, die vorher transitiv im Lock lag). Neues Skript `npm run typecheck` (`tsc --noEmit -p tsconfig.json`), in `php.yml` im Lint-Job vor dem Build. Damit tsc ohne `@types/node` (nicht freigegeben) prüft, nennt `vite.config.ts` die Einstiege als relative Pfade statt über `node:path`; `src/shims-vue.d.ts` deklariert `.vue`-Importe (die Skriptblöcke der Komponenten prüft weiter nur der Vite-Build, `vue-tsc` ist nicht freigegeben). Lokal: `tsc` ohne Fehler, Gegenprobe mit einer absichtlich falschen Zuweisung ergab einen TS-Fehler. `test_ui_assets.py` liest die Einstiege jetzt aus der neuen Form.
