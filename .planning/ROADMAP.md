@@ -51,7 +51,7 @@ Plans:
 - [x] 01-04-PLAN.md: FileAccess-Recheck mit Download-Sperre, ReaderContext, ExAppService, Handshake (Welle 2)
 - [x] 01-05-PLAN.md: Kindprozesse ohne Geheimnis, Magic-Bytes, Rendering, LibreOffice, Platzhalter-PDF, Image (Welle 2)
 - [x] 01-06-PLAN.md: Container-Kern: Logs ohne Inhalt, Enums, nc.py, Companion, RAM-Wächter (Welle 3)
-- [ ] 01-07-PLAN.md: Früher Push auf phase-01 mit Owner-Freigabe, php.yml und python.yml grün (Welle 4)
+- [x] 01-07-PLAN.md: Früher Push auf phase-01 mit Owner-Freigabe, php.yml und python.yml grün (Welle 4)
 - [ ] 01-08-PLAN.md: JobService, NotificationSender, JobController: Start und Status mit Recheck und Etag (Welle 5)
 - [ ] 01-09-PLAN.md: Dateiaktion, Prüfseite (Vue), Admin-Skript, Vite-Build (Welle 5)
 - [ ] 01-10-PLAN.md: Runner mit Semaphore und Zulassung, signierte Container-Endpunkte, main.py (Welle 5)
@@ -254,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Zwei-App-Gerüst und Integrationsbeweis | 6/21 | In Progress|  |
+| 1. Zwei-App-Gerüst und Integrationsbeweis | 7/21 | In Progress|  |
 | 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |

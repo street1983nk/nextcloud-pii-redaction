@@ -3,12 +3,12 @@ phase: 01-zwei-app-ger-st-und-integrationsbeweis
 plan: 07
 subsystem: ci
 tags: [push, ci, phpunit, posix, deploy-harp]
-status: wartet-auf-owner
+status: complete
 requires: [01-02, 01-03, 01-04, 01-05, 01-06]
 provides:
   - "origin/phase-01 auf ec50bef (Stand nach Welle 3), main auf GitHub unverändert (1f95af7)"
   - "python.yml grün auf Linux inklusive POSIX-Tests (364 passed)"
-  - "lokal vorbereitete Korrekturen 8f06c86 (01-02) und ad2c4b8 (01-01), NICHT gepusht"
+  - "Korrekturen 8f06c86 (01-02) und ad2c4b8 (01-01) auf phase-01 (a1ace24), python.yml, php.yml und deploy-harp 33/34/35 grün"
 affects: [01-02, 01-01, 01-08]
 key-files:
   created: []
@@ -21,12 +21,12 @@ decisions:
   - "deploy-harp: sqlite3 mit Busy-Timeout 15 s statt sofortigem Abbruch bei Schreibsperre"
 metrics:
   completed: 2026-11-07
-  tasks: "Task 1 und 2 erledigt, Task 3 wartet auf Owner-Freigabe"
+  tasks: "3/3, zwei Pushes mit je eigener Owner-Freigabe"
 ---
 
 # Phase 1 Plan 07: Früher Push auf phase-01 Summary
 
-Stand nach Welle 3 liegt auf `phase-01`; Python-Gates grün, PHPUnit rot wegen fehlendem Datenbank-Default für `expires_at` (Korrektur lokal fertig, wartet auf Owner-Freigabe für den zweiten Push).
+Stand nach Welle 3 liegt auf `phase-01`; der erste Lauf zeigte PHPUnit rot (fehlender Datenbank-Default für `expires_at`), nach einer Korrekturrunde mit eigener Owner-Freigabe sind python.yml, php.yml und deploy-harp stable33/34/35 auf a1ace24 grün.
 
 ## Task 1: Prüfungen vor dem Push
 
@@ -68,7 +68,21 @@ Korrektur lokal, Commit `ad2c4b8` `fix(01-01): sqlite3-Abfrage in deploy-harp wa
 
 ## Task 3: Korrekturschleife
 
-Stand: **wartet auf Owner-Freigabe** für genau einen weiteren Push `git push origin main:phase-01` (ec50bef..ad2c4b8, fast-forward, 2 Commits). Kein zweiter Push ohne neue Freigabe. Beide Commits als street1983nk, ohne verbotene Zeilen (Zähler 0); lokale Gates nach den Korrekturen: pytest 361 passed / 3 skipped.
+Runde 1: Owner-Freigabe 07.11. "Ja, Korrektur pushen". Vorher geprüft: HEAD a1ace24, vor origin/phase-01 genau 8f06c86, ad2c4b8, a1ace24, alle als street1983nk, 0 verbotene Zeilen, Diff-Scan ohne Treffer. `git push origin main:phase-01`: `ec50bef..a1ace24  main -> phase-01` (fast-forward). main auf GitHub weiter 1f95af7.
+
+| Workflow | Job | Ergebnis | Dauer | URL |
+|---|---|---|---|---|
+| PHP gates | php -l | success | 10 s | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880460/job/128419124770 |
+| PHP gates | composer validate and audit | success | 10 s | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880460/job/128419124932 |
+| PHP gates | PHPUnit over the PHP app | success, `OK (80 tests, 359 assertions)` | 31 s | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880460/job/128419124941 |
+| Python gates | ruff, format, pyright, vulture, pytest, shellcheck | success, 364 passed | 28 s | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880470/job/128419124780 |
+| Deploy through HaRP | stable33 | success | 1:49 | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880501/job/128419125118 |
+| Deploy through HaRP | stable34 | success | 1:59 | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880501/job/128419124866 |
+| Deploy through HaRP | stable35 | success | 1:46 | https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/42377880501/job/128419125141 |
+
+deploy-harp-Log: `registered forms: pii_redaction_backend:pii_redaction_backend_admin`, `unsigned /status: anonymous 404, admin login 404`.
+
+Schleife beendet: alle Pflichtläufe grün. Dieser SUMMARY-/STATE-Abschluss ist lokal committet und nicht gepusht; jeder weitere Push braucht eine neue Owner-Freigabe.
 
 ## Deviations from Plan
 
@@ -76,5 +90,5 @@ Stand: **wartet auf Owner-Freigabe** für genau einen weiteren Push `git push or
 
 ## Self-Check: PASSED
 
-- FOUND: 8f06c86, ad2c4b8 (lokal), ec50bef (origin/phase-01)
+- FOUND: 8f06c86, ad2c4b8, a1ace24 (origin/phase-01), ec50bef
 - FOUND: php/lib/Migration/Version000100Date20261107000000.php, php/lib/Db/JobMapper.php, .github/workflows/deploy-harp.yml

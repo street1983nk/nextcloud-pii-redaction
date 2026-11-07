@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "01-07 Task 3: Korrektur-Push wartet auf Owner-Freigabe"
+stopped_at: "Completed 01-07-PLAN.md"
 last_updated: "2026-11-07T13:35:29.930Z"
 last_activity: 2026-11-07
 progress:
   total_phases: 15
   completed_phases: 0
   total_plans: 21
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 7 of 21 in current phase (01-07 läuft: phase-01 gepusht, python.yml grün, PHPUnit rot, Korrektur lokal, zweiter Push wartet auf Owner)
-Status: Waiting for owner (checkpoint 01-07 Task 3)
+Plan: 7 of 21 in current phase (01-01 bis 01-07 abgeschlossen; phase-01 auf a1ace24 mit grüner CI; nächster Schritt Welle 5)
+Status: Ready to execute
 Last activity: 2026-11-07
 
 Progress: [███░░░░░░░] 29%
@@ -57,6 +57,7 @@ Progress: [███░░░░░░░] 29%
 | Phase 01 P04 | 35 min | 3 tasks | 10 files |
 | Phase 01 P05 | 40 min | 3 tasks | 18 files |
 | Phase 01 P06 | 10 min | 3 tasks | 17 files |
+| Phase 01 P07 | 25 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -77,6 +78,7 @@ Recent decisions affecting current work:
 - [01-05]: Kindprozesse mit SAFE_ENV, eigener Gruppe und killpg; LibreOffice ungepinnt über trixie-security im Image
 - [01-06]: nc.py ist einziger HTTP-Ort (auch Handshake über httpx); Antworten feldweise geprüft, ohne X-Pii-Etag kein Erfolg
 - [01-06]: RAM-Bedarf render 512 MiB, soffice 1 GiB, Reserve 256 MiB vorläufig bis zur Messung
+- [01-07]: Ganzzahlspalten NOT NULL, die mit dem Entity-Default 0 geschrieben werden, brauchen einen DB-Default (Entity-Setter überspringt gleiche Werte); phase-01 CI grün auf a1ace24
 
 ### Pending Todos
 
@@ -90,7 +92,6 @@ None yet.
 - Zertifikat `pii_redaction_backend` beantragt (#1419), noch nicht erteilt
 - Scans und arm64-Tempo ungemessen (Phase 12, 15)
 - Länder-Label-Sätze brauchen juristisches Gegenlesen vor Store (Phase 11)
-- 01-07: PHPUnit auf phase-01 rot (expires_at ohne DB-Default), Korrektur 8f06c86 und ad2c4b8 lokal, wartet auf Owner-Freigabe für zweiten Push main:phase-01
 
 ## Deferred Items
 
@@ -101,5 +102,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-11-07T13:35:26.019Z
-Stopped at: 01-07 Task 3, Korrektur-Push (8f06c86, ad2c4b8) wartet auf Owner-Freigabe
-Resume file: .planning/phases/01-zwei-app-ger-st-und-integrationsbeweis/01-07-SUMMARY.md
+Stopped at: Completed 01-07-PLAN.md
+Resume file: None
