@@ -1,7 +1,7 @@
 ---
 phase: 1
 slug: zwei-app-ger-st-und-integrationsbeweis
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-11-07
@@ -63,7 +63,7 @@ Alle Abstände als `calc(var(--default-grid-baseline) * n)`, Grundwert 4 px (gle
 Nicht genutzt in Phase 1: 48 px, 64 px.
 
 Exceptions:
-- Klickflächen: mindestens `var(--default-clickable-area)` (34 px), bei `@media (pointer: coarse)` mindestens 44 px (`* 11`). Gilt für Knöpfe, Links in Statuskarten und Bannern. `NcButton` erfüllt das selbst.
+- Klickflächen: mindestens `var(--default-clickable-area)` (34 px, Server-Vorgabe für die Mindest-Klickfläche, kein Wert der 4er-Abstandsskala), bei `@media (pointer: coarse)` mindestens 44 px (`* 11`). Gilt für Knöpfe, Links in Statuskarten und Bannern. `NcButton` erfüllt das selbst.
 - `NcNoteCard` bringt eigenen Innenabstand (8 px) und Außenrand (16 px oben und unten) mit; das passt zur Skala und wird nicht überschrieben. Folgt eine Karte direkt auf eine andere, gilt deren Außenrand (16 px), kein zusätzlicher Abstand.
 - Lesespalte der Prüfseite: `max-width: calc(var(--default-grid-baseline) * 240)` (960 px), linksbündig, kein zentrierter Hero-Block.
 - Seitenbild: `max-width: 100%`, `height: auto`, nie über die natürliche Breite hinaus vergrößert; Platzhalterfläche vor dem Laden mit `aspect-ratio` aus der vom Server gemeldeten Bildgröße (`width`/`height` am `<img>`), damit nichts springt.
@@ -396,7 +396,7 @@ Regeln:
 | Knopf während POST | Wird angelegt… | Creating… | Création… |
 | Link Datei | In Dateien anzeigen | Show in Files | Afficher dans Fichiers |
 | Link Dateien allgemein | Zu Dateien | Go to Files | Aller à Fichiers |
-| Bild `alt` | Seite 1 von %s | Page 1 of %s | Page 1 de %s |
+| Bild `alt` | Seite 1 von %s (Seitenzahl, nie Dateiname) | Page 1 of %s | Page 1 sur %s |
 | Bildunterschrift bekannt | Seite 1 von %s | Page 1 of %s | Page 1 sur %s |
 | Bildunterschrift unbekannt | Seite 1 | Page 1 | Page 1 |
 | Seite nicht abrufbar, Titel | Seite 1 ist gerade nicht abrufbar | Page 1 cannot be loaded right now | La page 1 n'est pas disponible pour le moment |
@@ -481,7 +481,7 @@ Hinweis für den Planer: PHP-Texte in `php/l10n/{de,de_DE,en,fr}.json/.js`, Vue-
 - **Fokus:** Server-Fokusring sichtbar, nie entfernt. Beim Seitenaufruf wird der Fokus nirgends verschoben. Festgelegte Fokuspunkte: nach "Platzhalter-Kopie anlegen" die neue Statuszeile bzw. Ergebniskarte; im Admin nach "Erneut prüfen" `#pii-backend-state`. Abfrage-getriebene Wechsel (ohne Nutzeraktion) verschieben den Fokus nicht, sie werden nur angesagt.
 - **Ansagen:** Statusbereich `role="status"`/`aria-live="polite"` (nur Wechsel von Status oder Stufe); Fehlerkarten der Prüfseite mit `show-alert` nur bei nutzerausgelösten Fehlern (POST), sonst polite; Ladezustand über `aria-busy`.
 - **Toast (2.2.1 Timing):** Erfolg 10 s mit Schließen-Knopf, Fehler bleibt bis zum Schließen; gleichwertige Wege zur Prüfseite (erneuter Klick, Benachrichtigung).
-- **Bild (1.1.1):** `alt` "Seite 1 von {Dateiname}"; der Inhalt der Seite ist in Phase 1 nicht als Text verfügbar, das sagt die Hinweiskarte "Vorschau ohne Erkennung" aus. Ab Phase 9 bekommt die Prüfseite eine Textliste der Funde als gleichwertigen Weg.
+- **Bild (1.1.1):** `alt` "Seite 1 von {Seitenzahl}" wie in der Copy-Tabelle, ohne Dateinamen; der Inhalt der Seite ist in Phase 1 nicht als Text verfügbar, das sagt die Hinweiskarte "Vorschau ohne Erkennung" aus. Ab Phase 9 bekommt die Prüfseite eine Textliste der Funde als gleichwertigen Weg.
 - **Kontrast (1.4.3, 1.4.11):** nur Server-Variablen; Text in Statusflächen nie in `--color-text-maxcontrast`; 1-px-Rahmen des Seitenbilds `--color-border` ist Schmuck, nicht Bedeutungsträger. Hoher-Kontrast-Theme muss lesbar bleiben.
 - **Fortschritt:** `NcProgressBar` mit `aria-label`; Seitenzähler als Text daneben.
 - **Seitentitel (2.4.2):** siehe Fläche 2.
@@ -579,11 +579,11 @@ Die Vorgaben oben folgen jeweils der Empfehlung; ändert der Owner etwas, passt 
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (34 px als Server-Vorgabe erklärt)
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-11-07 (gsd-ui-checker, 4 Empfehlungen: alt ohne Dateinamen und FR vereinheitlicht, 34 px erklärt; Aktionstexte und U+00A0-Nachweis gehen in den Plan)

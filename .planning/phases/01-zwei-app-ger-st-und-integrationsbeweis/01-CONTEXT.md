@@ -20,6 +20,14 @@ Wie ROADMAP.md Phase 1: beide Apps installierbar (NC 33 bis 35, amd64 und arm64,
 - Die Platzhalter-Kopie trägt schon den echten späteren Namenszusatz (Schwärzen und Pseudonymisieren getrennt), damit Ablage und Kollisionsregeln früh getestet werden.
 - CI bekommt zusätzlich ein MariaDB-Bein (NC 35, amd64), damit Warteschlange und Lease-Claim unter MySQL-Semantik belegt sind.
 
+### Owner 07.11.2026, UI-Fragen aus 01-UI-SPEC.md (einzeln bestätigt)
+- Nach dem Start bleibt der Nutzer in Dateien; Hinweis mit Link "Prüfseite öffnen".
+- Icon der Dateiaktion: `eye-off-outline`.
+- Fehlerhinweise bleiben bis zum Schließen stehen; Erfolg 10 s mit Schließen-Knopf.
+- Die Platzhalter-Prüfseite sagt offen "Vorschau ohne Erkennung".
+- Kopie von DOCX/ODT in Phase 1 als `.pdf`; formatgleiche Ausgabe ab Phase 7.
+- `de` und `de_DE` mit demselben unpersönlichen Text.
+
 ### Claude's Discretion (Empfehlung aus der Recherche übernommen)
 - Platzhalter-Weg ohne Debug-Schalter.
 - Zusätzlich `de_DE` (Sie-Form) neben `de`, wie bei Audio & Video Search.
