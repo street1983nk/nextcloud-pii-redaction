@@ -182,7 +182,9 @@ jobs:
       - name: The settings form is registered and no browser route reaches the container
         run: |
           # PUT /enabled registered the form into AppAPI's table ex_settings_forms.
-          forms=$(sqlite3 data/owncloud.db "SELECT appid || ':' || formid FROM oc_ex_settings_forms")
+          # The running server may hold a write lock (stable35 run 42377237730:
+          # "database is locked"); wait for it instead of failing at once.
+          forms=$(sqlite3 -cmd '.timeout 15000' data/owncloud.db "SELECT appid || ':' || formid FROM oc_ex_settings_forms")
           echo "registered forms: ${forms}"
           grep -qx "${BACKEND_APP_ID}:${BACKEND_APP_ID}_admin" <<<"${forms}"
           # The browser only talks to the PHP app. An unsigned call through the
