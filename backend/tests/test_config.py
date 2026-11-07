@@ -1,5 +1,7 @@
 """Environment parsing: broken values fall back, they never stop the container."""
 
+from pathlib import Path
+
 import pytest
 
 from pii_redaction_backend import config
@@ -41,3 +43,27 @@ def test_the_version_is_the_one_appapi_announced(monkeypatch: pytest.MonkeyPatch
 
 def test_the_shutdown_deadline_stays_under_the_docker_stop_timeout() -> None:
     assert 0 < config.GRACEFUL_SHUTDOWN_SECONDS < 10
+
+
+def test_the_storage_root_is_the_persistent_volume(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("APP_PERSISTENT_STORAGE", str(tmp_path))
+
+    assert config.storage_root() == tmp_path
+    assert config.work_dir(7) == tmp_path / "work" / "7"
+    assert config.state_db_path() == tmp_path / "state.db"
+
+
+def test_without_a_volume_the_storage_root_is_a_directory_of_our_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_PERSISTENT_STORAGE", raising=False)
+
+    assert config.storage_root().name == config.FALLBACK_STORAGE_DIRNAME == "pii_redaction_backend"
+
+
+@pytest.mark.parametrize("job_id", [0, -1, True])
+def test_a_job_id_below_one_has_no_work_directory(job_id: int) -> None:
+    with pytest.raises(ValueError, match="job id"):
+        config.work_dir(job_id)
+
+
+def test_the_source_cap_is_256_mib() -> None:
+    assert config.MAX_SOURCE_BYTES == 256 * 1024 * 1024 == 268435456
