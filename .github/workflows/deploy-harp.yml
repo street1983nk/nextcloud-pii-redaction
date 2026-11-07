@@ -1,14 +1,31 @@
 name: Deploy through HaRP
 
-# The integration proof every ExApp needs before a store release: a throwaway
-# Nextcloud with AppAPI, a real HaRP container, the image of this commit pushed
-# into a local registry, and the ExApp installed through the deploy daemon the
-# way an admin installs it. Lean form of Findling's deploy-harp.yml.
+# The integration proof of both halves: a throwaway Nextcloud with AppAPI, the
+# notifications app, the PHP app pii_redaction, a real HaRP container, the
+# backend image of this commit pushed into a local registry and the ExApp
+# installed through the deploy daemon the way an admin installs it. Lean form
+# of the AVS and Findling deploy-harp.yml.
 #
-# What it proves: the container starts behind HaRP with mutual TLS on the FRP
-# tunnel, AppAPI reaches /heartbeat and /init, PUT /enabled registers the
-# declarative settings form, and no browser route reaches the container through
-# the HaRP proxy (backend/appinfo/info.xml carries an empty routes element).
+# Seven legs: Nextcloud 33, 34 and 35, each on amd64 and on arm64 (natively,
+# not emulated) with SQLite, plus stable35 on amd64 with MariaDB, so the slot
+# row of the queue (one job at a time) also runs under MySQL semantics
+# (owner 07.11., JOB-06).
+#
+# What it proves, in this order (01-15-PLAN.md, 01-17-PLAN.md, 01-16-PLAN.md):
+#   - the container starts behind HaRP, AppAPI reaches /heartbeat and /init,
+#     PUT /enabled registers the form, no browser route reaches the container,
+#   - ci/flow.sh: for PDF, DOCX and ODT the core path as alice, and the PDF
+#     as elke (de_DE), fleur (fr) and greta (de): start, progress until
+#     review, page 1 as PNG through PHP, notification without the file name,
+#     placeholder copy next to the original, the second copy with " (2)",
+#   - ci/rights.sh, ci/stale.sh, ci/queue.sh, ci/routes.sh: rights and
+#     download block, etag binding, one job at a time, no browser route,
+#   - Playwright: the screenshots and assertions of the UI-SPEC,
+#   - ci/measure.sh: image size, cold start, idle RSS, peak per child,
+#   - ci/canary.sh, last: the canary of the fixtures, found first in the
+#     uploaded originals (positive control), is in no database, log or copy.
+#
+# The upgrade job and the drift steps follow in plan 18.
 on:
   push:
     branches:
@@ -26,28 +43,85 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The ExApp half; the PHP half joins this proof in a later plan.
+  APP_ID: pii_redaction
   BACKEND_APP_ID: pii_redaction_backend
   HARP_IMAGE: ghcr.io/nextcloud/nextcloud-appapi-harp@sha256:603fdf5ca2802235fd4e40301476dd2fafff409e84a42f8cb3b8f2e17c22ce39
   LOCAL_REGISTRY: 'localhost:5000'
   LOCAL_IMAGE_TAG: 'citest'
-  ADMIN_PASS: 'skeleton-ci-only'
+  NC_URL: 'http://localhost:8080'
+  # Test-only values of a throwaway instance that dies with the runner. No
+  # repository secret enters this job (T-01-15-03).
+  ADMIN_USER: 'admin'
+  ADMIN_PASS: 'pii-ci-admin-2026-11'
+  CI_PASS: 'pii-ci-user-2026-11'
+  DB_NAME: 'nextcloud'
+  DB_USER: 'nextcloud'
+  DB_PASS: 'pii-ci-db-2026-11'
+  HARP_CONTAINER: 'appapi-harp'
 
 jobs:
   deploy-harp:
-    name: deploy-harp ${{ matrix.server-version }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    name: deploy-harp ${{ matrix.server-version }} ${{ matrix.runner }} ${{ matrix.database }}
+    runs-on: ${{ matrix.runner }}
+    # An estimate until the first green run measures it: image build, HaRP,
+    # six core paths twice each, the check scripts and the Playwright grid.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
+        # An include list because every server version brings its own PHP
+        # floor (8.2 for 33 and 34, 8.3 for 35). HARP_IMAGE is pinned by index
+        # digest, so the same line pulls the arm64 half on the arm runner.
         include:
           - server-version: stable33
             php-version: '8.2'
+            runner: ubuntu-24.04
+            database: sqlite
+          - server-version: stable33
+            php-version: '8.2'
+            runner: ubuntu-24.04-arm
+            database: sqlite
           - server-version: stable34
             php-version: '8.2'
+            runner: ubuntu-24.04
+            database: sqlite
+          - server-version: stable34
+            php-version: '8.2'
+            runner: ubuntu-24.04-arm
+            database: sqlite
           - server-version: stable35
             php-version: '8.3'
+            runner: ubuntu-24.04
+            database: sqlite
+          - server-version: stable35
+            php-version: '8.3'
+            runner: ubuntu-24.04-arm
+            database: sqlite
+          - server-version: stable35
+            php-version: '8.3'
+            runner: ubuntu-24.04
+            database: mariadb
+    env:
+      NC_ROOT: ${{ github.workspace }}
+      DB_KIND: ${{ matrix.database }}
+      SERVER_VERSION: ${{ matrix.server-version }}
+    services:
+      # Starts on the MariaDB leg only: an empty image skips the service.
+      # Pinned by index digest of mariadb:11.8 (LTS), read 2026-11-07.
+      mariadb:
+        image: ${{ matrix.database == 'mariadb' && 'mariadb:11.8@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd' || '' }}
+        env:
+          MARIADB_ROOT_PASSWORD: 'pii-ci-root-2026-11'
+          MARIADB_DATABASE: 'nextcloud'
+          MARIADB_USER: 'nextcloud'
+          MARIADB_PASSWORD: 'pii-ci-db-2026-11'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       # The server checkout comes first: actions/checkout empties its target.
       - name: Check out nextcloud/server
@@ -56,6 +130,7 @@ jobs:
           repository: nextcloud/server
           ref: ${{ matrix.server-version }}
           submodules: recursive
+          persist-credentials: false
 
       - name: Check out nextcloud/app_api
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,32 +138,78 @@ jobs:
           repository: nextcloud/app_api
           ref: ${{ matrix.server-version }}
           path: apps/app_api
+          persist-credentials: false
+
+      # The server repository carries no notifications app (01-RESEARCH.md,
+      # pitfall A); without it there is no OCS route to read a notification.
+      - name: Check out nextcloud/notifications
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nextcloud/notifications
+          ref: ${{ matrix.server-version }}
+          path: apps/notifications
+          persist-credentials: false
 
       - name: Check out this app
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: app-src
+          persist-credentials: false
 
       - name: Set up PHP
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php-version }}
-          extensions: mbstring, iconv, fileinfo, intl, sqlite, pdo_sqlite, gd, zip
+          extensions: mbstring, iconv, fileinfo, intl, sqlite, pdo_sqlite, mysql, pdo_mysql, gd, zip
           coverage: none
 
-      - name: Install Nextcloud and enable AppAPI
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      # Eight workers instead of four (pitfall B): container polling, the
+      # gateway stream, the browser and the proxy calls run at the same time.
+      - name: Install Nextcloud and enable AppAPI and notifications
         run: |
           mkdir data
-          ./occ maintenance:install --database=sqlite --admin-user admin --admin-pass "${ADMIN_PASS}"
+          if [ "${DB_KIND}" = "mariadb" ]; then
+            ./occ maintenance:install --database=mysql --database-host=127.0.0.1 --database-port=3306 \
+              --database-name="${DB_NAME}" --database-user="${DB_USER}" --database-pass="${DB_PASS}" \
+              --admin-user "${ADMIN_USER}" --admin-pass "${ADMIN_PASS}"
+          else
+            ./occ maintenance:install --database=sqlite --admin-user "${ADMIN_USER}" --admin-pass "${ADMIN_PASS}"
+          fi
           ./occ config:system:set trusted_domains 1 --value=127.0.0.1
           ./occ config:system:set trusted_domains 2 --value=localhost
-          NEXTCLOUD_HOST=0.0.0.0 composer run serve > "${RUNNER_TEMP}/php-server.log" 2>&1 &
+          # PublishJob is a background job; ci/flow.sh runs cron.php for it.
+          ./occ background:cron
+          NEXTCLOUD_WORKERS=8 NEXTCLOUD_HOST=0.0.0.0 composer run serve > "${RUNNER_TEMP}/php-server.log" 2>&1 &
           for _ in $(seq 1 30); do
-            curl -sf http://localhost:8080/status.php > /dev/null && break
+            curl -sf "${NC_URL}/status.php" > /dev/null && break
             sleep 2
           done
-          curl -sf http://localhost:8080/status.php
+          curl -sf "${NC_URL}/status.php"
           ./occ app:enable -vvv -f app_api
+          ./occ app:enable notifications
+          ./occ app:list --enabled | grep -q 'notifications:'
+
+      - name: The database container of the MariaDB leg
+        if: matrix.database == 'mariadb'
+        run: |
+          echo "DB_CONTAINER=${{ job.services.mariadb.id }}" >> "${GITHUB_ENV}"
+          docker exec "${{ job.services.mariadb.id }}" mariadb -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" -N -e 'SELECT 1'
+
+      # Before the ExApp: the container asks the handshake route of the PHP
+      # app at its start. The bundle is built first, the app directory then
+      # moved under the exact app id.
+      - name: Build and install the PHP app
+        run: |
+          (cd app-src/php && npm ci --ignore-scripts --no-audit --no-fund && npm run build)
+          test -s app-src/php/js/pii_redaction-init.mjs
+          mv app-src/php apps/pii_redaction
+          ./occ app:enable pii_redaction
+          ./occ app:list --enabled | grep -q 'pii_redaction:'
 
       - name: Start a local registry and push the image of this commit
         run: |
@@ -102,9 +223,9 @@ jobs:
           echo "::add-mask::${harp_key}"
           echo "HARP_SHARED_KEY=${harp_key}" >> "${GITHUB_ENV}"
           mkdir -p "${RUNNER_TEMP}/certs"
-          docker run -d --name appapi-harp --net host \
+          docker run -d --name "${HARP_CONTAINER}" --net host \
             -e HP_SHARED_KEY="${harp_key}" \
-            -e NC_INSTANCE_URL="http://localhost:8080" \
+            -e NC_INSTANCE_URL="${NC_URL}" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${RUNNER_TEMP}/certs:/certs" \
             "${HARP_IMAGE}"
@@ -115,7 +236,7 @@ jobs:
             [ "${code}" = "200" ] && exit 0
             sleep 2
           done
-          docker logs appapi-harp || true
+          docker logs "${HARP_CONTAINER}" || true
           exit 1
 
       # Nextcloud and HaRP behind one address, the way a reverse proxy serves
@@ -154,22 +275,44 @@ jobs:
               app-src/backend/appinfo/info.xml > "${RUNNER_TEMP}/info-citest.xml"
           grep -E '<registry>|<image>|<image-tag>' "${RUNNER_TEMP}/info-citest.xml"
 
+      # The cold start for ci/measure.sh: milliseconds before the registration,
+      # after it returned and when the admin state first reads ok (numbers only).
       - name: Register the HaRP daemon and install the ExApp through it
         run: |
+          mkdir -p app-src/ci/out
           timeout 30 ./occ app_api:daemon:register \
             harp_proxy_host "Harp Proxy (Host)" docker-install http localhost:8780 \
             http://localhost:8090 \
             --harp --harp_frp_address localhost:8782 \
             --harp_shared_key "${HARP_SHARED_KEY}" \
             --net host --set-default
+          start_ms=$(date +%s%3N)
           timeout 600 ./occ app_api:app:register "${BACKEND_APP_ID}" harp_proxy_host \
             --info-xml "${RUNNER_TEMP}/info-citest.xml" --wait-finish
+          registered_ms=$(date +%s%3N)
+          ready_ms=null
+          for _ in $(seq 1 60); do
+            state=$(curl -s -u "${ADMIN_USER}:${ADMIN_PASS}" -H 'OCS-APIRequest: true' \
+              "${NC_URL}/index.php/apps/${APP_ID}/admin/state" | jq -r '.state // empty' || true)
+            if [ "${state}" = "ok" ]; then
+              ready_ms=$(date +%s%3N)
+              break
+            fi
+            sleep 1
+          done
+          printf '{"registerStartMs": %s, "registeredMs": %s, "readyMs": %s}\n' \
+            "${start_ms}" "${registered_ms}" "${ready_ms}" > app-src/ci/out/coldstart.json
+          cat app-src/ci/out/coldstart.json
+          test "${ready_ms}" != "null"
 
       - name: The container runs as 10001, is healthy and the app is enabled
         run: |
           container=$(docker ps --filter "name=nc_app_${BACKEND_APP_ID}" --format '{{.Names}}' | head -n 1)
           test -n "${container}" || { docker ps -a; exit 1; }
-          echo "EXAPP_CONTAINER=${container}" >> "${GITHUB_ENV}"
+          {
+            echo "EXAPP_CONTAINER=${container}"
+            echo "BACKEND_CONTAINER=${container}"
+          } >> "${GITHUB_ENV}"
           test "$(docker exec "${container}" id -u)" = "10001"
           for _ in $(seq 1 30); do
             [ "$(docker inspect --format '{{.State.Health.Status}}' "${container}")" = "healthy" ] && break
@@ -179,41 +322,117 @@ jobs:
           timeout 30 ./occ app_api:app:list | tee app-list.txt
           grep -q "${BACKEND_APP_ID}" app-list.txt
 
-      - name: The settings form is registered and no browser route reaches the container
+      - name: The settings form is registered and no unsigned call reaches the container
         run: |
           # PUT /enabled registered the form into AppAPI's table ex_settings_forms.
-          # The running server may hold a write lock (stable35 run 42377237730:
-          # "database is locked"); wait for it instead of failing at once.
-          forms=$(sqlite3 -cmd '.timeout 15000' data/owncloud.db "SELECT appid || ':' || formid FROM oc_ex_settings_forms")
+          query="SELECT CONCAT(appid, ':', formid) FROM oc_ex_settings_forms"
+          if [ "${DB_KIND}" = "mariadb" ]; then
+            forms=$(docker exec "${DB_CONTAINER}" mariadb -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" -N -e "${query}")
+          else
+            # The running server may hold a write lock; wait for it.
+            forms=$(sqlite3 -cmd '.timeout 15000' data/owncloud.db "SELECT appid || ':' || formid FROM oc_ex_settings_forms")
+          fi
           echo "registered forms: ${forms}"
           grep -qx "${BACKEND_APP_ID}:${BACKEND_APP_ID}_admin" <<<"${forms}"
-          # The browser only talks to the PHP app. An unsigned call through the
-          # HaRP proxy, anonymous or with an admin login, must not reach /status.
           anonymous=$(curl -s -o anonymous.txt -w '%{http_code}' \
             "http://localhost:8090/exapps/${BACKEND_APP_ID}/status")
-          admin=$(curl -s -o admin.txt -w '%{http_code}' -u "admin:${ADMIN_PASS}" \
+          admin=$(curl -s -o admin.txt -w '%{http_code}' -u "${ADMIN_USER}:${ADMIN_PASS}" \
             "http://localhost:8090/exapps/${BACKEND_APP_ID}/status")
           echo "unsigned /status: anonymous ${anonymous}, admin login ${admin}"
           test "${anonymous}" != "200"
           test "${admin}" != "200"
-          if grep -q '"app_id"' anonymous.txt admin.txt; then
-            echo "the container answered an unsigned request"
-            exit 1
-          fi
+
+      # Synthetic documents made in the runner; the canary stands in the body
+      # text only (01-RESEARCH.md, decision 10).
+      - name: Make the fixtures
+        run: python3 app-src/ci/make_fixtures.py app-src/ci/out/fixtures
+
+      - name: Seed users, group folder with ACL, share and fixtures
+        run: bash app-src/ci/seed.sh
+
+      - name: Core path, PDF as alice
+        run: bash app-src/ci/flow.sh pdf alice
+
+      - name: Core path, DOCX as alice
+        run: bash app-src/ci/flow.sh docx alice
+
+      - name: Core path, ODT as alice
+        run: bash app-src/ci/flow.sh odt alice
+
+      - name: Core path, PDF as elke (de_DE)
+        run: bash app-src/ci/flow.sh pdf elke
+
+      - name: Core path, PDF as fleur (fr)
+        run: bash app-src/ci/flow.sh pdf fleur
+
+      - name: Core path, PDF as greta (de)
+        run: bash app-src/ci/flow.sh pdf greta
+
+      - name: Rights, download block and revoked shares
+        run: bash app-src/ci/rights.sh
+
+      - name: Etag binding, changed and deleted original
+        run: bash app-src/ci/stale.sh
+
+      - name: One job at a time, sampled in the database
+        run: bash app-src/ci/queue.sh
+
+      - name: No browser route reaches the container
+        run: bash app-src/ci/routes.sh
+
+      # --ignore-scripts: npm ci installs exactly the lock file with its
+      # integrity hashes and runs no install script. The drift tags run in the
+      # steps of plan 18.
+      - name: Playwright on the running instance
+        working-directory: app-src/ci/playwright
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          npx playwright test --grep-invert "@drift|@patch|@missing|@disabled|@unreachable|@noappapi"
+
+      - name: Measurements
+        run: bash app-src/ci/measure.sh
+
+      # Last: every request, log line and copy of the run is there to be scanned.
+      - name: Canary and test file names in no database, log or copy
+        run: bash app-src/ci/canary.sh
 
       - name: Collect the logs
         if: always()
         run: |
           mkdir -p logs
-          docker logs appapi-harp > logs/harp.log 2>&1 || true
+          docker logs "${HARP_CONTAINER}" > logs/harp.log 2>&1 || true
           [ -n "${EXAPP_CONTAINER:-}" ] && docker logs "${EXAPP_CONTAINER}" > logs/exapp.log 2>&1 || true
           cp data/nextcloud.log logs/ 2>/dev/null || true
           cp "${RUNNER_TEMP}/php-server.log" logs/ 2>/dev/null || true
 
-      - name: Upload the logs
+      # Logs, status answers and measurements of synthetic fixtures; the
+      # database and state.db dumps of ci/canary.sh stay in the runner
+      # (T-01-17-06).
+      - name: Upload the logs and the measurements
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: deploy-harp-logs-${{ matrix.server-version }}
-          path: logs/
+          name: deploy-harp-logs-${{ matrix.server-version }}-${{ matrix.runner }}-${{ matrix.database }}
+          path: |
+            logs/
+            app-src/ci/out/*.json
+            app-src/ci/out/*.log
+            !app-src/ci/out/*.sql
+            !app-src/ci/out/*-dump.*
           retention-days: 7
+          if-no-files-found: ignore
+
+      # Synthetic documents, test users of a throwaway instance: nothing in
+      # here is private. The screenshots are what the owner reviews.
+      - name: Upload the Playwright report and the screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-${{ matrix.server-version }}-${{ matrix.runner }}-${{ matrix.database }}
+          path: |
+            app-src/ci/playwright/playwright-report/
+            app-src/ci/playwright/test-results/
+            app-src/ci/playwright/screenshots/
+          retention-days: 14
+          if-no-files-found: ignore

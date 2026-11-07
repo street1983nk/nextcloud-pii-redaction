@@ -9,6 +9,11 @@ import { createAppConfig } from '@nextcloud/vite-config'
 // the admin state section. No node:path import, so tsc checks this file
 // without Node type definitions. Vue styles stay out of the components;
 // css/review.css carries the page layout.
+//
+// npm run build loads this file with --configLoader runner: the default
+// esbuild bundling of the config reads every tsconfig.json above php/ and
+// warned in CI about the one of the nextcloud/server tree (plan 01-15). The
+// output is byte for byte the same.
 export default createAppConfig({
 	init: 'src/init.ts',
 	review: 'src/review.ts',

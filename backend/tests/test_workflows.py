@@ -221,3 +221,156 @@ def test_the_gh_write_rule_fires_on_a_mutated_sample() -> None:
     assert gh_write_findings("s", api_post) == [f"s: {api_post} next to {CERTIFICATE_REPOSITORY}"]
     assert gh_write_findings("s", f"gh pr view 1419 --repo nextcloud/{CERTIFICATE_REPOSITORY}") == []
     assert gh_write_findings("s", "gh pr view 12 --json state") == []
+
+
+# -- deploy-harp.yml: seven legs and a fixed order of checks (plan 15) ------------
+
+DEPLOY = "deploy-harp.yml"
+LEGS = frozenset(
+    {(f"stable{major}", runner, "sqlite") for major in (33, 34, 35) for runner in ("ubuntu-24.04", "ubuntu-24.04-arm")}
+    | {("stable35", "ubuntu-24.04", "mariadb")}
+)
+# Every check of the run, in the order the workflow has to call them: the
+# fixtures and the seed, the core path per format and language, the check
+# scripts of plan 17, Playwright of plan 16, the measurement, the canary last.
+CHECK_ORDER = (
+    "ci/make_fixtures.py",
+    "ci/seed.sh",
+    "ci/flow.sh pdf alice",
+    "ci/flow.sh docx alice",
+    "ci/flow.sh odt alice",
+    "ci/flow.sh pdf elke",
+    "ci/flow.sh pdf fleur",
+    "ci/flow.sh pdf greta",
+    "ci/rights.sh",
+    "ci/stale.sh",
+    "ci/queue.sh",
+    "ci/routes.sh",
+    "npx playwright test",
+    "ci/measure.sh",
+    "ci/canary.sh",
+)
+_LEG_START = re.compile(r"^ {10}- server-version: (\S+)$")
+_LEG_FIELD = re.compile(r"^ {12}([\w-]+): (.+)$")
+
+
+def matrix_legs(source: str) -> list[tuple[str, str, str]]:
+    """(server, runner, database) of every include entry, in file order."""
+    legs: list[dict[str, str]] = []
+    for line in source.splitlines():
+        start = _LEG_START.match(line)
+        if start:
+            legs.append({"server-version": start.group(1)})
+            continue
+        field = _LEG_FIELD.match(line)
+        if field and legs:
+            legs[-1][field.group(1)] = field.group(2).strip("'\"")
+        elif legs and not line.startswith(" " * 12):
+            break
+    return [(leg["server-version"], leg.get("runner", ""), leg.get("database", "")) for leg in legs]
+
+
+def _env_blocks(source: str) -> str:
+    """The workflow env and the job env, the places where the runner context does not exist."""
+    top = re.search(r"^env:\n(.*?)(?=^\S)", source, re.MULTILINE | re.DOTALL)
+    job = re.search(r"^ {4}env:\n((?: {6}.*\n)+)", source, re.MULTILINE)
+    return (top.group(1) if top else "") + (job.group(1) if job else "")
+
+
+def _without_comments(source: str) -> str:
+    """The file without its comment lines: the header names the checks too, in prose."""
+    return "".join(line for line in source.splitlines(keepends=True) if not line.lstrip().startswith("#"))
+
+
+def deploy_findings(source: str) -> list[str]:
+    findings = []
+    source = _without_comments(source)
+    legs = matrix_legs(source)
+    if len(legs) != len(set(legs)) or set(legs) != LEGS:
+        findings.append(f"the matrix runs {sorted(legs)} instead of the six legs plus the MariaDB leg")
+    positions = [source.find(check) for check in CHECK_ORDER]
+    for check, position in zip(CHECK_ORDER, positions, strict=True):
+        if position < 0:
+            findings.append(f"{check} is not called")
+    present = [position for position in positions if position >= 0]
+    if present != sorted(present):
+        findings.append("the checks are not called in the fixed order")
+    scripts = re.findall(r"ci/[a-z_]+\.sh", source)
+    if not scripts or scripts[-1] != "ci/canary.sh":
+        findings.append("ci/canary.sh is not the last check script")
+    if "NEXTCLOUD_WORKERS=8" not in source:
+        findings.append("the server runs without NEXTCLOUD_WORKERS=8")
+    if "repository: nextcloud/notifications\n" not in source:
+        findings.append("nextcloud/notifications is not checked out")
+    build, move = source.find("npm run build"), source.find("mv app-src/php apps/pii_redaction")
+    if build < 0 or move < 0 or build > move:
+        findings.append("the PHP app is not built before it is moved into apps/")
+    if not re.search(r"'mariadb:[0-9.]+@sha256:[0-9a-f]{64}'", source):
+        findings.append("the MariaDB service is not pinned by digest")
+    if "--database=mysql" not in source:
+        findings.append("the MariaDB leg does not install on MySQL")
+    for excluded in ("!app-src/ci/out/*.sql", "!app-src/ci/out/*-dump.*"):
+        if excluded not in source:
+            findings.append(f"the log artifact does not exclude {excluded[1:]}")
+    if "runner." in _env_blocks(source):
+        findings.append("the runner context is used in a workflow or job env block")
+    return findings
+
+
+def deploy_source() -> str:
+    return (WORKFLOWS / DEPLOY).read_text(encoding="utf-8")
+
+
+def test_deploy_harp_runs_seven_legs_and_the_checks_in_order() -> None:
+    assert matrix_legs(deploy_source())
+    assert deploy_findings(deploy_source()) == []
+
+
+def test_self_the_leg_rule_fires_without_the_mariadb_leg() -> None:
+    source = deploy_source()
+    mutated = source.replace("            database: mariadb\n", "            database: sqlite\n")
+
+    assert any("MariaDB leg" in finding for finding in deploy_findings(mutated))
+    assert len(matrix_legs(source)) == 7
+
+
+def test_self_the_order_rule_fires_when_the_canary_runs_before_the_measurement() -> None:
+    mutated = (
+        deploy_source()
+        .replace("bash app-src/ci/measure.sh", "bash app-src/ci/MEASURE")
+        .replace("bash app-src/ci/canary.sh", "bash app-src/ci/canary.sh\n          bash app-src/ci/measure.sh")
+    )
+
+    assert "the checks are not called in the fixed order" in deploy_findings(mutated)
+    assert "ci/canary.sh is not the last check script" in deploy_findings(mutated)
+
+
+def test_self_a_missing_check_is_named() -> None:
+    mutated = deploy_source().replace("bash app-src/ci/queue.sh", "true")
+
+    assert "ci/queue.sh is not called" in deploy_findings(mutated)
+
+
+def test_self_workers_notifications_build_digest_and_artifact_rules_fire() -> None:
+    mutated = (
+        deploy_source()
+        .replace("NEXTCLOUD_WORKERS=8", "NEXTCLOUD_WORKERS=4")
+        .replace("repository: nextcloud/notifications", "repository: nextcloud/viewer")
+        .replace("&& npm run build)", ")")
+        .replace("@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd", "")
+        .replace("            !app-src/ci/out/*.sql\n", "")
+    )
+
+    assert deploy_findings(mutated) == [
+        "the server runs without NEXTCLOUD_WORKERS=8",
+        "nextcloud/notifications is not checked out",
+        "the PHP app is not built before it is moved into apps/",
+        "the MariaDB service is not pinned by digest",
+        "the log artifact does not exclude app-src/ci/out/*.sql",
+    ]
+
+
+def test_self_the_runner_context_in_the_job_env_is_found() -> None:
+    mutated = deploy_source().replace("      NC_ROOT: ${{ github.workspace }}\n", "      NC_ROOT: ${{ runner.temp }}\n")
+
+    assert deploy_findings(mutated) == ["the runner context is used in a workflow or job env block"]

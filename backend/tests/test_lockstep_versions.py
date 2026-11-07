@@ -319,13 +319,24 @@ def test_the_matrix_expression_reads_the_include_list_and_nothing_else() -> None
         "        include:\n"
         "          - server-version: stable33\n"
         "            php-version: '8.2'\n"
+        "            runner: ubuntu-24.04\n"
+        "            database: sqlite\n"
         "          - server-version: stable34\n"
+        "            database: sqlite\n"
         "          - server-version: stable35\n"
+        "            database: sqlite\n"
+        "          - server-version: stable35\n"
+        "            runner: ubuntu-24.04\n"
+        "            database: mariadb\n"
         "        with:\n"
         "          server-version: ${{ matrix.server-version }}\n"
+        "          database: ${{ matrix.database }}\n"
     )
 
-    assert _matrix_of(source) == ["33", "34", "35"]
+    # The database field of the MariaDB leg is no server version, and the
+    # second stable35 entry names no new major.
+    assert _matrix_of(source) == ["33", "34", "35", "35"]
+    assert _window_findings(("33", "35"), ("33", "35"), _matrix_of(source)) == []
 
 
 def test_the_window_expression_reads_the_dependencies_element() -> None:
