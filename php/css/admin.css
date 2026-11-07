@@ -1,0 +1,182 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Khaled Cherif
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The admin section (UI-SPEC Fläche 5, Audio & Video Search admin.css and the
+ * banner rules of its play.css with the prefix pii-). Server variables only,
+ * flat, spacing in steps of the grid baseline (4, 8, 16 px).
+ */
+
+/* -- banners -------------------------------------------------------------------- */
+
+.pii-banner {
+	display: flex;
+	align-items: flex-start;
+	gap: calc(var(--default-grid-baseline) * 2);
+	padding: calc(var(--default-grid-baseline) * 4);
+	border-radius: var(--border-radius-container);
+}
+
+/* Surface and text always as the pair the theme ships; colour is never the
+   only carrier, every banner has an icon and a sentence. */
+.pii-banner--error {
+	background-color: var(--color-error);
+	color: var(--color-error-text);
+}
+
+.pii-banner--warning {
+	background-color: var(--color-warning);
+	color: var(--color-warning-text);
+}
+
+.pii-banner--info {
+	background-color: var(--color-info);
+	color: var(--color-info-text);
+}
+
+.pii-banner--success {
+	background-color: var(--color-success);
+	color: var(--color-success-text);
+}
+
+/* The icon sits on the first text line: a container as high as one line. */
+.pii-banner__icon {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	height: var(--default-line-height);
+}
+
+.pii-banner--error .pii-banner__icon {
+	color: var(--color-element-error);
+}
+
+.pii-banner--warning .pii-banner__icon {
+	color: var(--color-element-warning);
+}
+
+.pii-banner--info .pii-banner__icon {
+	color: var(--color-element-info);
+}
+
+.pii-banner--success .pii-banner__icon {
+	color: var(--color-element-success);
+}
+
+.pii-banner__body {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--default-grid-baseline);
+	min-width: 0;
+}
+
+/* Two classes on purpose: the settings page styles ".section p" with the
+   muted text colour, a margin of 1em and a maximum width, and that selector
+   outranks a single class. The text keeps the colour of its status pair. */
+.pii-banner .pii-banner__title,
+.pii-banner .pii-banner__text {
+	max-width: none;
+	margin: 0;
+	color: inherit;
+	line-height: var(--default-line-height);
+	overflow-wrap: anywhere;
+}
+
+.pii-banner__title {
+	font-weight: 700;
+}
+
+.pii-banner__text {
+	font-weight: 400;
+}
+
+/* The one action of an admin banner is the accent of the page, a link styled
+   like button.primary; hover and focus add the underline as second cue. */
+.pii-admin .pii-banner__action {
+	display: inline-flex;
+	align-items: center;
+	min-height: var(--default-clickable-area);
+	margin-block-start: calc(var(--default-grid-baseline) * 2);
+	padding: var(--default-grid-baseline) calc(var(--default-grid-baseline) * 3);
+	border: 2px solid var(--color-primary-element);
+	border-radius: var(--border-radius-element);
+	background-color: var(--color-primary-element);
+	color: var(--color-primary-element-text);
+	font-weight: 700;
+	text-decoration: none;
+}
+
+.pii-admin .pii-banner__action:hover,
+.pii-admin .pii-banner__action:focus-visible {
+	border-color: var(--color-primary-element-hover);
+	background-color: var(--color-primary-element-hover);
+	color: var(--color-primary-element-text);
+	text-decoration: underline;
+}
+
+/* -- the section ------------------------------------------------------------------ */
+
+.pii-admin__state {
+	display: flex;
+	flex-direction: column;
+	gap: calc(var(--default-grid-baseline) * 2);
+	margin-block: calc(var(--default-grid-baseline) * 4);
+}
+
+.pii-admin__state:focus-visible {
+	outline: 2px solid var(--color-main-text);
+	outline-offset: 2px;
+}
+
+/* Label role: 13 px, muted. Two classes against ".section p"; the two lines
+   read as one block with xs between them. */
+.pii-admin .pii-admin__line {
+	max-width: none;
+	margin: 0;
+	color: var(--color-text-maxcontrast);
+	font-size: var(--font-size-small);
+	line-height: var(--default-line-height);
+	overflow-wrap: anywhere;
+}
+
+.pii-admin .pii-admin__line + .pii-admin__line {
+	margin-block-start: var(--default-grid-baseline);
+}
+
+.pii-admin__time,
+.pii-version-own,
+.pii-version-backend {
+	font-variant-numeric: tabular-nums;
+}
+
+.pii-admin__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: calc(var(--default-grid-baseline) * 2);
+	margin-block-start: calc(var(--default-grid-baseline) * 4);
+}
+
+/* A secondary server button; the loading class of the server sits on it
+   while a check runs. */
+.pii-admin__recheck {
+	display: inline-flex;
+	align-items: center;
+	gap: calc(var(--default-grid-baseline) * 2);
+	min-height: var(--default-clickable-area);
+	margin: 0;
+}
+
+@media (pointer: coarse) {
+	.pii-admin__recheck,
+	.pii-admin .pii-banner__action {
+		min-height: calc(var(--default-grid-baseline) * 11);
+	}
+}
+
+/* The display values above must not reveal what the template or the script
+   hid with the hidden attribute; the id outranks the server rules. */
+#pii-admin [hidden] {
+	display: none;
+}

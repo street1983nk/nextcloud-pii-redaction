@@ -11,7 +11,7 @@
 	window below has to match the backend one and the deploy-harp.yml matrix.
 
 	Routes are PHP attributes on the controllers, so there is no routes.php.
-	The settings block joins in a later plan, together with the classes it names.
+	The settings block names the admin section and its one form (plan 01-11).
 -->
 <info>
 	<id>pii_redaction</id>
@@ -61,4 +61,8 @@ Prérequis :
 		<php min-version="8.2"/>
 		<nextcloud min-version="33" max-version="35"/>
 	</dependencies>
+	<settings>
+		<admin>OCA\PiiRedaction\Settings\Admin</admin>
+		<admin-section>OCA\PiiRedaction\Settings\Section</admin-section>
+	</settings>
 </info>

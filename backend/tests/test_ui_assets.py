@@ -212,6 +212,37 @@ def test_the_admin_script_keeps_its_dom_contract() -> None:
     assert "stateArea.focus()" in script
 
 
+def test_the_admin_section_keeps_its_contract() -> None:
+    template = (TEMPLATES / "admin.php").read_text(encoding="utf-8")
+    style = (STYLES / "admin.css").read_text(encoding="utf-8")
+    # One state area, announced politely and the focus target after a recheck.
+    assert template.count('id="pii-backend-state"') == 1
+    assert 'role="status" aria-live="polite" tabindex="-1"' in template
+    # The seven states and the recheck warning, rendered on the server.
+    for state in (
+        "ok",
+        "version_patch_differs",
+        "version_drift",
+        "backend_missing",
+        "backend_disabled",
+        "backend_unreachable",
+        "no_app_api",
+    ):
+        assert f"'{state}' =>" in template, state
+    assert 'id="pii-recheck-failed"' in template
+    assert 'id="pii-recheck"' in template
+    assert 'id="pii-recheck-label"' in template
+    assert 'id="pii-checked-at"' in template
+    # Orchestrator decision 3: the AVS form of the link to the app management.
+    assert template.count("linkToRoute('appstore.page.viewApps')") == 1
+    assert template.count("linkToRoute('settings.AppSettings.viewApps')") == 1
+    assert "Util::addScript('pii_redaction', 'pii_redaction-admin')" in template
+    assert "Util::addStyle('pii_redaction', 'admin')" in template
+    assert "debug" not in template.lower()
+    assert "#pii-admin [hidden]" in style
+    assert "pointer: coarse" in style
+
+
 # -- the self tests: every rule has to fire on a staged violation --------------------
 
 

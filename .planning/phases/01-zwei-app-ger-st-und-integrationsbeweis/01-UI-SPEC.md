@@ -324,7 +324,7 @@ PDF-Metadaten: Titel "PII Redaction placeholder", kein Autor, kein Originalname.
 | `no_app_api` | Fehler | dito | "Apps öffnen" |
 | Neuprüfung gescheitert | Warnung zusätzlich zum letzten Banner | unverändert | keine |
 
-Link "Apps öffnen": Ziel ist die App-Verwaltung des Servers, **ab NC 34 Route `appstore.page.viewApps`, bis NC 33 `settings.AppSettings.viewApps`** (AVS-Fix 4291faa); Auswahl im PHP über die Serverversion, nicht über Ausprobieren. Öffnet im selben Tab, einziger Akzent im Banner, Gestalt wie `button.primary`, Hover und Fokus mit `--color-primary-element-hover`. **Pflichttest:** In jedem der fünf Fehlerzustände existiert der Link, ist per Tab erreichbar, und sein `href` liefert nach Anmeldung als Admin 200 auf NC 33, 34 und 35.
+Link "Apps öffnen": Ziel ist die App-Verwaltung des Servers, Auswahl wie AVS: zuerst `appstore.page.viewApps`, bei leerem Ergebnis `settings.AppSettings.viewApps` (Orchestrator-Entscheid 3 vom 07.11.). Öffnet im selben Tab, einziger Akzent im Banner, Gestalt wie `button.primary`, Hover und Fokus mit `--color-primary-element-hover`. **Pflichttest:** In jedem der fünf Fehlerzustände existiert der Link, ist per Tab erreichbar, und sein `href` liefert nach Anmeldung als Admin 200 auf NC 33, 34 und 35.
 
 Kein Banner nennt Dateinamen, Pfade oder Auftragszahlen. Versionen werden genannt (für den Admin nötig).
 
@@ -542,7 +542,7 @@ Grundlage: AVS `ci/playwright/` (Projekte je Breite und Theme, Sprache über eig
 
 ### Pflicht-Assertions (zusätzlich zu den Bildern)
 
-- **"Apps öffnen"** existiert in `version_drift`, `backend_missing`, `backend_disabled`, `backend_unreachable`, `no_app_api`; `href` enthält auf NC 33 die Route von `settings.AppSettings.viewApps`, ab NC 34 die von `appstore.page.viewApps`; Aufruf als Admin liefert 200; Link per Tab erreichbar.
+- **"Apps öffnen"** existiert in `version_drift`, `backend_missing`, `backend_disabled`, `backend_unreachable`, `no_app_api`; Ziel ist die App-Verwaltung des Servers (`appstore.page.viewApps`, bei leerem Ergebnis `settings.AppSettings.viewApps`, Orchestrator-Entscheid 3); Aufruf des `href` als Admin liefert 200 auf NC 33, 34 und 35; Link per Tab erreichbar.
 - **Bannertextfarbe:** In jedem Admin-Banner ist `getComputedStyle(title).color` und `getComputedStyle(text).color` gleich dem berechneten Wert von `var(--color-<status>-text)` und ungleich `var(--color-text-maxcontrast)`. Auf der Prüfseite ist der Kartentext gleich `var(--color-main-text)`.
 - **Abstand:** Abstand von Banner-Unterkante bis Versionszeile-Oberkante im Admin = 16 px; Statuskarte bis nächster Block auf der Prüfseite = 16 px (Toleranz 1 px).
 - **Datenschutz im DOM:** Im Zustand "Nicht verfügbar" und "Original gelöscht" kommt der Dateiname weder im DOM noch im Dokumenttitel noch im Initialzustand vor. Benachrichtigungen (OCS `notifications/api/v2`) enthalten weder Dateiname noch Kanarie.
