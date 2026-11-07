@@ -152,6 +152,14 @@ jobs:
         working-directory: apps/pii_redaction
         run: composer install --no-interaction --no-progress --no-scripts
 
+      # QueueMapperTest runs against the real database of this instance, so the
+      # migration has to have created the pii_* tables. Enabling the app runs it
+      # (and proves on SQLite that the migration applies at all).
+      - name: Enable the PHP app so its migration creates the tables
+        run: |
+          ./occ app:enable pii_redaction
+          ./occ app:list --enabled | grep -q 'pii_redaction:'
+
       # The negative probe of the bootstrap, before the suite: a guard nobody
       # ever triggered is a guard nobody knows the wording of.
       - name: Prove the bootstrap refuses a path with no server behind it
