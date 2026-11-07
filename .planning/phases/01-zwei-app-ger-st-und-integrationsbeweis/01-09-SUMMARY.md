@@ -113,3 +113,12 @@ Keine neue Fläche außerhalb des Bedrohungsmodells. T-01-09-01 bis -04 mitigier
 Owner-Antwort im Claude-Code-Terminal, vom Koordinator übermittelt, auf die Frage nach `typescript` als direkter devDependency: "Freigeben (Empfohlen)".
 
 Umsetzung (`9cd4891`): `typescript` 6.0.3 mit `--save-exact --save-dev --ignore-scripts` (Quelle github.com/microsoft/TypeScript, kein postinstall, Integrity `sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==`, dieselbe Version, die vorher transitiv im Lock lag). Neues Skript `npm run typecheck` (`tsc --noEmit -p tsconfig.json`), in `php.yml` im Lint-Job vor dem Build. Damit tsc ohne `@types/node` (nicht freigegeben) prüft, nennt `vite.config.ts` die Einstiege als relative Pfade statt über `node:path`; `src/shims-vue.d.ts` deklariert `.vue`-Importe (die Skriptblöcke der Komponenten prüft weiter nur der Vite-Build, `vue-tsc` ist nicht freigegeben). Lokal: `tsc` ohne Fehler, Gegenprobe mit einer absichtlich falschen Zuweisung ergab einen TS-Fehler. `test_ui_assets.py` liest die Einstiege jetzt aus der neuen Form.
+
+## Zwischen-Push und CI (2026-11-07)
+
+Owner-Freigabe "Ja, Zwischen-Push (Empfohlen)". Ein Push `git push origin main:phase-01`, fast-forward `a1ace24..0283937`; main auf GitHub unverändert `1f95af7`. Vorher: 17 Commits voraus, alle `street1983nk`, 0 verbotene Zeilen, kein `runner`-Kontext in Workflow-/Job-`env`.
+
+- Python gates: success, `416 passed` (POSIX-Tests liefen).
+- Deploy through HaRP stable33/34/35: success, je `unsigned /status: anonymous 404, admin login 404`.
+- PHP gates: `php -l` success, composer success, Lint-Job baut mit `tsc --noEmit` und `vite build` grün. **PHPUnit failure** vor der Suite im Schritt "Build the browser bundle": `Error: Cannot find module '@nextcloud/browserslist-config'`. Ursache: Der Job baut `app-src/php` innerhalb des nextcloud/server-Checkouts; browserslist sucht die nächste Konfiguration aufwärts und findet `extends @nextcloud/browserslist-config` in der `package.json` des Servers.
+- Korrektur lokal, ungepusht (`465ade1`): `php/package.json` bekommt eine eigene `browserslist`-Liste, wörtlich die drei Abfragen aus `@nextcloud/browserslist-config` 3.1.2, ohne neues Paket. Der Korrektur-Push braucht eine neue Owner-Freigabe.
