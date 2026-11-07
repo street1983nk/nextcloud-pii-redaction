@@ -59,6 +59,18 @@ LABEL org.opencontainers.image.source="https://github.com/street1983nk/nextcloud
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+# LibreOffice headless for DOCX and ODT to PDF (owner decision 07.11.2026: in
+# the image from phase 1 on), the -nogui variant without X11 and GTK, no Java
+# runtime (only suggested, never installed) and no formula editor. Unpinned on
+# purpose: the Debian security team maintains LibreOffice in trixie through
+# trixie-security, and a rebuild on a new base digest picks the fixes up; the
+# end to end leak test in CI guards the behaviour. The four font packages are
+# metric compatible with Calibri, Cambria, Arial and Times, which lowers font
+# substitution in the converted PDF.
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-liberation2 fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
+    && rm -rf /var/lib/apt/lists/*
 # A fixed uid without a root moment at run time. start.sh writes /frpc.toml, so
 # that file and the two directories AppAPI and HaRP fill are prepared for it.
 RUN groupadd --gid 10001 exapp \

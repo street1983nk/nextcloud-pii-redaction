@@ -85,3 +85,46 @@ def test_the_digest_rule_fires_on_a_tag() -> None:
     sample = "ARG BASE=python:3.13-slim\nFROM ${BASE} AS build\nCOPY --from=ghcr.io/astral-sh/uv:0.11 /uv /uv\n"
 
     assert unpinned(sample) == ["python:3.13-slim", "ghcr.io/astral-sh/uv:0.11"]
+
+
+LIBREOFFICE_PACKAGES = (
+    "libreoffice-writer-nogui",
+    "fonts-liberation2",
+    "fonts-dejavu-core",
+    "fonts-crosextra-carlito",
+    "fonts-crosextra-caladea",
+)
+FORBIDDEN_PACKAGES = ("default-jre", "openjdk", "libreoffice-math")
+
+
+def libreoffice_findings(dockerfile: str) -> list[str]:
+    """What is wrong with the LibreOffice install: one RUN, no recommends, no Java, no math."""
+    findings = []
+    blocks = re.split(r"(?m)^(?=[A-Z]+ )", dockerfile)
+    runs = [" ".join(block.split()) for block in blocks if block.startswith("RUN ")]
+    holding = [run for run in runs if "libreoffice-writer-nogui" in run]
+    if len(holding) != 1:
+        findings.append(f"{len(holding)} RUN lines install libreoffice-writer-nogui")
+    else:
+        run = holding[0]
+        findings += [f"{name} missing from the install line" for name in LIBREOFFICE_PACKAGES if name not in run]
+        if "--no-install-recommends" not in run:
+            findings.append("recommends are installed")
+    lowered = dockerfile.lower()
+    findings += [f"{name} in the image" for name in FORBIDDEN_PACKAGES if name in lowered]
+    return findings
+
+
+def test_libreoffice_and_the_fonts_are_installed_without_java() -> None:
+    assert libreoffice_findings(DOCKERFILE) == []
+
+
+def test_the_libreoffice_rule_fires() -> None:
+    good = "RUN apt-get install -y --no-install-recommends " + " ".join(LIBREOFFICE_PACKAGES) + "\nUSER 10001\n"
+    assert libreoffice_findings(good) == []
+    assert libreoffice_findings(good.replace("--no-install-recommends ", "")) == ["recommends are installed"]
+    assert libreoffice_findings(good.replace(" fonts-crosextra-carlito", "")) == [
+        "fonts-crosextra-carlito missing from the install line"
+    ]
+    assert libreoffice_findings(good + "RUN apt-get install -y default-jre\n") == ["default-jre in the image"]
+    assert libreoffice_findings("USER 10001\n") == ["0 RUN lines install libreoffice-writer-nogui"]
