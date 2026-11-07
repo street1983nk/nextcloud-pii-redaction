@@ -32,8 +32,8 @@ Eine Datei aus Nextcloud wird mit einem Klick lokal auf personenbezogene Daten g
 - [ ] Ausgabe immer zusätzlich als neu geschriebenes PDF (LibreOffice headless im Container); Modus "Höchste Sicherheit" (Rastern + frische OCR) wählbar; Balkenbreite optional gerundet
 - [ ] Automatische Leck-Nachprüfung jeder Ausgabe: zwei unabhängige Extraktoren mit unscharfem Abgleich, Rohobjekt-Suche, Revisionsprüfung, OCR, LibreOffice als dritter Prüfer; Prüfung über Positionen für kurze Zeichenketten; bei Fund keine Ausgabe
 - [ ] Kopie neben dem Original (`_geschwärzt`, `_redacted`, `_caviardé`), Original nie verändert; Warnung bei Personenbezug im Dateinamen
-- [ ] Schwärzungsprotokoll (PDF + JSON) ohne Klartext-PII: Hashes, Prüfer, Modus, Anzahl je Kategorie und Seite, Rechtsgrundlagen, Nachprüfung, Modellversionen
-- [ ] Prüfzustand mit PII im Klartext nur serverseitig, zugriffsbeschränkt auf Berechtigte der Originaldatei, Lebensdauer begrenzt
+- [ ] Schwärzungsprotokoll (PDF + JSON) ohne Klartext-PII und ohne Hashes einzelner Werte: Dateihashes, Prüfer, Modus, Anzahl je Kategorie und Seite, Rechtsgrundlagen, Nachprüfung, Modellversionen; Begründungsliste für den Bescheid
+- [ ] Prüfzustand mit PII im Klartext nur im Container-Volume, zugriffsbeschränkt auf Berechtigte der Originaldatei, 14 Tage Lebensdauer; Ausgabe erst nach Freigabe und bestandener Nachprüfung
 - [ ] RAM-Wächter (Stapel braucht 3,96 GB), ein Auftrag zur Zeit, ehrlicher Fortschritt und Fehlgründe
 - [ ] Eigener Testsatz mit Leckrate als Hauptkennzahl je Kategorie und Dokumenttyp; Ende-zu-Ende-Lecktest in CI; Release-Gate
 - [ ] amd64 + arm64, nur CPU
