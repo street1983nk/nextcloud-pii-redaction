@@ -8,6 +8,8 @@ stops the container: a typo in a deploy option must not cost the admin the app.
 """
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Final
 
 KNOWN_LOG_LEVELS: Final = frozenset({"debug", "info", "warning", "error"})
@@ -16,6 +18,14 @@ KNOWN_LOG_LEVELS: Final = frozenset({"debug", "info", "warning", "error"})
 ENV_PREFIX: Final = "PII_REDACTION_"
 LOG_LEVEL_VARIABLE: Final = f"{ENV_PREFIX}LOG_LEVEL"
 DEFAULT_LOG_LEVEL: Final = "info"
+
+# Our own directory inside the system temp directory when AppAPI set no volume
+# (tests, a bare local run), so a cleanup never reaches beyond what this app made.
+FALLBACK_STORAGE_DIRNAME: Final = "pii_redaction_backend"
+
+# The largest source file the container reads through the gateway (256 MiB,
+# 01-SKELETON.md). Provisional; phase 2 hardens the limits.
+MAX_SOURCE_BYTES: Final = 268435456
 
 # How long uvicorn waits for running requests after SIGTERM before it closes
 # them. Docker sends SIGKILL after 10 seconds by default, so this stays below.
@@ -56,3 +66,28 @@ def unusable_startup_variables() -> list[str]:
     if behind_harp():
         return []
     return [] if os.environ.get("APP_PORT", "").isdigit() else ["APP_PORT"]
+
+
+def storage_root() -> Path:
+    """The persistent volume (APP_PERSISTENT_STORAGE), or a directory of our own in the temp directory."""
+    configured = os.environ.get("APP_PERSISTENT_STORAGE", "").strip()
+    if configured:
+        return Path(configured)
+    return Path(tempfile.gettempdir()) / FALLBACK_STORAGE_DIRNAME
+
+
+def work_dir(job_id: int) -> Path:
+    """The working directory of one job, ``<storage>/work/<job_id>``; not created here.
+
+    The job id is the only variable part, a whole number of at least one, so
+    the path cannot leave ``work/`` by shape.
+    """
+    if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+        msg = "job id must be a whole number of at least one"
+        raise ValueError(msg)
+    return storage_root() / "work" / str(job_id)
+
+
+def state_db_path() -> Path:
+    """Where the SQLite state of the container lives."""
+    return storage_root() / "state.db"

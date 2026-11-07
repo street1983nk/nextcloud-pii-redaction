@@ -1,8 +1,8 @@
 """The SQLite state of the container ($APP_PERSISTENT_STORAGE/state.db).
 
 One connection per caller, WAL and foreign keys on every connection. Task and
-stage are words of the closed lists; plan 06 moves the two sets to the
-StrEnums of model.py.
+stage are words of the closed lists of model.py; anything else is refused
+before it reaches the database.
 """
 
 import sqlite3
@@ -10,8 +10,10 @@ from importlib import resources
 from pathlib import Path
 from typing import Final
 
-TASKS: Final = frozenset({"analyze", "apply", "purge"})
-STAGES: Final = frozenset({"waiting", "fetching", "converting", "rendering", "done"})
+from pii_redaction_backend.model import Stage, Task
+
+TASKS: Final = frozenset(item.value for item in Task)
+STAGES: Final = frozenset(item.value for item in Stage)
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -30,8 +32,8 @@ def upsert_job(
     connection: sqlite3.Connection,
     job_id: int,
     *,
-    task: str,
-    stage: str,
+    task: Task | str,
+    stage: Stage | str,
     now: int,
     pages_total: int | None = None,
 ) -> None:
