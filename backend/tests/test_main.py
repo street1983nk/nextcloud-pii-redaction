@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pii_redaction_backend import main, settings
+from pii_redaction_backend.runner.runner import Runner
 from tests.conftest import signed_headers
 
 
@@ -55,22 +56,26 @@ def test_a_badly_signed_request_is_refused(client: TestClient, headers: dict[str
     assert client.get("/status", headers=headers).status_code == 401
 
 
-def test_a_signed_status_request_answers_with_version_and_settings(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def saved(_nc: object) -> dict[str, str]:
-        return {"processing_enabled": "0", "max_file_size_mb": "100"}
-
-    monkeypatch.setattr(settings, "read", saved)
-
+def test_a_signed_status_request_answers_with_codes_and_numbers(client: TestClient) -> None:
     response = client.get("/status", headers=signed_headers())
 
     assert response.status_code == 200
-    assert response.json() == {
-        "app_id": "pii_redaction_backend",
-        "version": "0.1.0",
-        "settings": {"processing_enabled": "0", "max_file_size_mb": "100"},
-    }
+    body = response.json()
+    assert set(body) == {"version", "ready", "companion", "busy", "lastChild"}
+    assert body["version"] == "0.1.0"
+    assert body["ready"] is True
+    assert body["companion"] in {"ok", "missing", "unknown"}
+    assert body["busy"] is False
+
+
+def test_the_runner_starts_with_the_lifespan_and_stops_with_it() -> None:
+    with TestClient(main.APP) as running:
+        worker = running.app.state.runner  # pyright: ignore[reportAttributeAccessIssue]
+        assert isinstance(worker, Runner)
+        names = {task.get_name() for task in main._TASKS}
+        assert {"runner", "companion"} <= names
+    assert main.APP.state.runner is None
+    assert not main._TASKS
 
 
 def test_init_acknowledges_at_once(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -178,3 +183,9 @@ def test_main_hands_uvicorn_the_graceful_shutdown_deadline(monkeypatch: pytest.M
     assert seen["target"] == "pii_redaction_backend.main:APP"
     assert seen["timeout_graceful_shutdown"] < 10
     assert seen["log_config"] is None
+    assert seen["access_log"] is False
+
+
+def test_the_application_publishes_no_api_description(client: TestClient) -> None:
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path, headers=signed_headers()).status_code == 404

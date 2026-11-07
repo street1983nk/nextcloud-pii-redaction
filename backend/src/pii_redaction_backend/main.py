@@ -25,12 +25,14 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, Final
+from typing import Any, Final
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 
-from pii_redaction_backend import APP_ID, config, logs, settings
-from pii_redaction_backend.nc import AppAPIAuthMiddleware, AsyncNextcloudApp, nc_app, run_app, set_handlers
+from pii_redaction_backend import APP_ID, companion, config, logs, settings
+from pii_redaction_backend.api import build_router
+from pii_redaction_backend.nc import AppAPIAuthMiddleware, AsyncNextcloudApp, run_app, set_handlers
+from pii_redaction_backend.runner.runner import Runner
 
 LOGGER = logging.getLogger(APP_ID)
 
@@ -88,27 +90,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         set_handlers(app, enabled_handler)  # pyright: ignore[reportArgumentType]
         app.state.handlers_registered = True
     LOGGER.info("starting", extra={"version": config.app_version(), "binding": config.binding_mode()})
+    # Is the PHP app there? Asked now and every five minutes (companion.py);
+    # the runner claims work only while the answer is ok.
+    checker = start_background(companion.run_periodic(), "companion")
+    stop = asyncio.Event()
+    worker = Runner()
+    app.state.runner = worker
+    start_background(worker.run(stop), "runner")
     try:
         yield
     finally:
+        # The companion loop never ends on its own; the runner finishes its
+        # round and leaves at the next pause, or is cancelled at the deadline.
+        checker.cancel()
+        stop.set()
         cancelled = await stop_background()
+        app.state.runner = None
         LOGGER.info("stopped", extra={"cancelled_tasks": cancelled})
 
 
 APP = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 APP.add_middleware(AppAPIAuthMiddleware)
-
-
-async def app_client() -> AsyncIterator[AsyncNextcloudApp]:
-    """A request scoped client in the app context, closed after the response."""
-    async with nc_app() as nc:
-        yield nc
-
-
-@APP.get("/status")
-async def status(nc: Annotated[AsyncNextcloudApp, Depends(app_client)]) -> dict[str, object]:
-    """Version and saved settings, for the admin (route access level ADMIN in info.xml)."""
-    return {"app_id": APP_ID, "version": config.app_version(), "settings": await settings.read(nc)}
+# /status, /jobs/{job_id}/pages/{n}.png, /jobs/{job_id}/output: signed only (api/__init__.py).
+APP.include_router(build_router())
 
 
 def main() -> None:
@@ -120,6 +124,9 @@ def main() -> None:
         f"{APP_ID}.main:APP",
         log_level=config.log_level(),
         log_config=None,
+        # Every request path would land in the log; logs.py silences the
+        # logger as well, this keeps uvicorn from writing it at all.
+        access_log=False,
         timeout_graceful_shutdown=config.GRACEFUL_SHUTDOWN_SECONDS,
     )
 
