@@ -169,7 +169,93 @@ Quellen: PROJECT.md, research/SUMMARY.md (mit Konfliktauflösung), Spike 06.11.2
 
 ## Traceability
 
-(wird bei der Roadmap-Erstellung gefüllt)
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| PLAT-01 | Phase 1 | Pending |
+| PLAT-02 | Phase 1 | Pending |
+| PLAT-03 | Phase 1 | Pending |
+| PLAT-04 | Phase 10 | Pending |
+| PLAT-05 | Phase 1 | Pending |
+| JOB-01 | Phase 1 | Pending |
+| JOB-02 | Phase 1 | Pending |
+| JOB-03 | Phase 1 | Pending |
+| JOB-04 | Phase 1 | Pending |
+| JOB-05 | Phase 2 | Pending |
+| JOB-06 | Phase 1 | Pending |
+| SAFE-01 | Phase 2 | Pending |
+| SAFE-02 | Phase 2 | Pending |
+| SAFE-03 | Phase 2 | Pending |
+| SAFE-04 | Phase 2 | Pending |
+| DOC-01 | Phase 3 | Pending |
+| DOC-02 | Phase 3 | Pending |
+| DOC-03 | Phase 3 | Pending |
+| DOC-04 | Phase 3 | Pending |
+| DET-01 | Phase 8 | Pending |
+| DET-02 | Phase 8 | Pending |
+| DET-03 | Phase 8 | Pending |
+| DET-04 | Phase 8 | Pending |
+| DET-05 | Phase 8 | Pending |
+| DET-06 | Phase 8 | Pending |
+| DET-07 | Phase 8 | Pending |
+| DET-08 | Phase 8 | Pending |
+| DET-09 | Phase 8 | Pending |
+| DET-10 | Phase 14 | Pending |
+| REV-01 | Phase 9 | Pending |
+| REV-02 | Phase 9 | Pending |
+| REV-03 | Phase 9 | Pending |
+| REV-04 | Phase 9 | Pending |
+| REV-05 | Phase 9 | Pending |
+| REV-06 | Phase 9 | Pending |
+| REV-07 | Phase 9 | Pending |
+| REV-08 | Phase 9 | Pending |
+| RED-01 | Phase 6 | Pending |
+| RED-02 | Phase 6 | Pending |
+| RED-03 | Phase 7 | Pending |
+| RED-04 | Phase 7 | Pending |
+| RED-05 | Phase 7 | Pending |
+| RED-06 | Phase 6 | Pending |
+| RED-07 | Phase 6 | Pending |
+| LEAK-01 | Phase 5 | Pending |
+| LEAK-02 | Phase 5 | Pending |
+| LEAK-03 | Phase 5 | Pending |
+| LEAK-04 | Phase 4 | Pending |
+| FLOW-01 | Phase 10 | Pending |
+| FLOW-02 | Phase 10 | Pending |
+| FLOW-03 | Phase 10 | Pending |
+| FLOW-04 | Phase 10 | Pending |
+| FLOW-05 | Phase 10 | Pending |
+| FLOW-06 | Phase 10 | Pending |
+| LEGAL-01 | Phase 11 | Pending |
+| LEGAL-02 | Phase 11 | Pending |
+| LEGAL-03 | Phase 11 | Pending |
+| LEGAL-04 | Phase 11 | Pending |
+| LEGAL-05 | Phase 11 | Pending |
+| SCAN-01 | Phase 12 | Pending |
+| SCAN-02 | Phase 12 | Pending |
+| SCAN-03 | Phase 12 | Pending |
+| SCAN-04 | Phase 12 | Pending |
+| PSEU-01 | Phase 13 | Pending |
+| PSEU-02 | Phase 13 | Pending |
+| PSEU-03 | Phase 13 | Pending |
+| PSEU-04 | Phase 13 | Pending |
+| PSEU-05 | Phase 13 | Pending |
+| RES-01 | Phase 8 | Pending |
+| RES-02 | Phase 2 | Pending |
+| RES-03 | Phase 8 | Pending |
+| ADM-01 | Phase 15 | Pending |
+| ADM-02 | Phase 10 | Pending |
+| REL-01 | Phase 4 | Pending |
+| REL-02 | Phase 7 | Pending |
+| REL-03 | Phase 15 | Pending |
+| REL-04 | Phase 15 | Pending |
+| REL-05 | Phase 15 | Pending |
+| I18N-01 | Phase 15 | Pending |
+
+**Coverage:**
+- v1 requirements: 79 total
+- Mapped to phases: 79
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-11-07*
+*Last updated: 2026-11-07 after roadmap creation (Traceability gefüllt)*
