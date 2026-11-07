@@ -88,7 +88,7 @@ Eine Datei aus Nextcloud wird mit einem Klick lokal auf personenbezogene Daten g
 | Rechtsgrundlagen-Labels in v1, je Behörde anpassbar | Owner 07.11. | Offen |
 | Einstieg Dateiaktion + eigene Prüfseite | Owner 07.11. | Offen |
 | FAU/ALeKS-Goldstandard anfragen (Entwurf, Owner sendet) | Owner 07.11.; echte Zielmaterial-Messung | Abgelehnt 07.11. (Prof. Adrian) |
-| Eigener Goldstandard aus öffentlichen Dokumenten, Holdout durch fremdes Modell mit Owner-Stichproben | Owner 07.11. nach FAU-Absage; unabhängig vom eigenen Erkenner | Entschieden |
+| Eigener Goldstandard aus öffentlichen Dokumenten, Holdout durch Gemini 3.1 Pro + GPT-6.1-sol (API, nicht Claude), Widersprüche entscheidet der Owner | Owner 07.11. nach FAU-Absage; unabhängig vom eigenen Erkenner | Entschieden |
 
 ## Evolution
 

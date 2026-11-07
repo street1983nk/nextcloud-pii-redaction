@@ -71,7 +71,7 @@ None yet.
 ### Blockers/Concerns
 
 - Owner hat am 07.11. alle 14 Empfehlungen aus research/SUMMARY.md übernommen; offen bleibt nur die Messung für den OCR-Zweitkanal je Seite (bei Leckgewinn an)
-- FAU/ALeKS-Goldstandard am 07.11. angefragt (Mail an Evert, CC Adrian); ABGELEHNT am 07.11. (Prof. Adrian: "können Ihrer Bitte nicht nachkommen", ohne Begründung). Owner 07.11.: eigener Goldstandard (öffentliche Urteile/Ratsvorlagen), Holdout durch fremdes Modell (z. B. Gemini) mit Owner-Stichproben, Phase 4
+- FAU/ALeKS-Goldstandard am 07.11. angefragt (Mail an Evert, CC Adrian); ABGELEHNT am 07.11. (Prof. Adrian: "können Ihrer Bitte nicht nachkommen", ohne Begründung). Owner 07.11.: eigener Goldstandard (öffentliche Urteile/Ratsvorlagen), Holdout durch Gemini 3.1 Pro + GPT-6.1-sol über API (nicht Claude), Widersprüche entscheidet der Owner; Nutzungsbedingungen (Training V2-01) vor Plan Phase 4 prüfen, Phase 4
 - Container-Messwerte (RSS des Stapels, LibreOffice-Spitze, Image-Größe, Kaltstart) fehlen; RAM-Schwellen erst nach Messung in Phase 1/2 festschreiben
 - Zertifikat `pii_redaction_backend` beantragt (#1419), noch nicht erteilt
 - Scans und arm64-Tempo ungemessen (Phase 12, 15)
