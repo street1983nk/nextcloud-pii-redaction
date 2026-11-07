@@ -164,3 +164,7 @@ Keine neue Angriffsfläche. Das Backend hat jetzt weniger Fläche als vorher, we
 
 - Dateien vorhanden: backend/src/pii_redaction_backend/main.py, backend/appinfo/info.xml, php/appinfo/info.xml, php/lib/AppInfo/Application.php, backend/tests/test_lockstep_versions.py, .github/workflows/php.yml
 - Commits vorhanden: 265764f, ee7b163, f8e27f6
+
+## Nachtrag Owner-Freigabe (2026-11-07)
+
+Transitive Pakete über onnxruntime (pymupdf-Kette): flatbuffers 25.12.19 und protobuf 7.36.2. Owner-Antwort im Claude-Code-Terminal auf die Frage "Freigeben?": "Freigeben (Empfohlen)".
