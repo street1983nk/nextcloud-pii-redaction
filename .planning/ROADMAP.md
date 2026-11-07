@@ -54,7 +54,7 @@ Plans:
 - [x] 01-07-PLAN.md: Früher Push auf phase-01 mit Owner-Freigabe, php.yml und python.yml grün (Welle 4)
 - [x] 01-08-PLAN.md: JobService, NotificationSender, JobController: Start und Status mit Recheck und Etag (Welle 5)
 - [x] 01-09-PLAN.md: Dateiaktion, Prüfseite (Vue), Admin-Skript, Vite-Build (Welle 5)
-- [ ] 01-10-PLAN.md: Runner mit Semaphore und Zulassung, signierte Container-Endpunkte, main.py (Welle 5)
+- [x] 01-10-PLAN.md: Runner mit Semaphore und Zulassung, signierte Container-Endpunkte, main.py (Welle 5)
 - [ ] 01-11-PLAN.md: Admin-Statusbereich mit sieben Zuständen und Apps-Link (Welle 5)
 - [ ] 01-12-PLAN.md: QueueController und auftragsgebundenes Gateway (Welle 6)
 - [ ] 01-13-PLAN.md: ReviewController: Prüfseite, Seitenbild-Proxy, Platzhalter-Aktion (Welle 6)
@@ -254,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Zwei-App-Gerüst und Integrationsbeweis | 9/21 | In Progress|  |
+| 1. Zwei-App-Gerüst und Integrationsbeweis | 10/21 | In Progress|  |
 | 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
