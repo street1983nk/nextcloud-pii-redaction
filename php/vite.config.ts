@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 import { createAppConfig } from '@nextcloud/vite-config'
-import { join, resolve } from 'node:path'
 
-// Three entries, built to js/pii_redaction-<entry>.mjs: the file action in
-// Files, the review page and the admin state section. Vue styles stay out of
-// the components; css/review.css carries the page layout.
+// Three entries, paths relative to php/ (the Vite root), built to
+// js/pii_redaction-<entry>.mjs: the file action in Files, the review page and
+// the admin state section. No node:path import, so tsc checks this file
+// without Node type definitions. Vue styles stay out of the components;
+// css/review.css carries the page layout.
 export default createAppConfig({
-	init: resolve(join('src', 'init.ts')),
-	review: resolve(join('src', 'review.ts')),
-	admin: resolve(join('src', 'admin.ts')),
+	init: 'src/init.ts',
+	review: 'src/review.ts',
+	admin: 'src/admin.ts',
 }, {
 	appName: 'pii_redaction',
 	extractLicenseInformation: false,

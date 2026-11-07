@@ -50,7 +50,7 @@ NO_OUTLINE = re.compile(r"outline\s*:\s*(?:none|0)\b", re.IGNORECASE)
 SHADOW = re.compile(r"box-shadow|text-shadow", re.IGNORECASE)
 GRADIENT = re.compile(r"gradient", re.IGNORECASE)
 ADD_SCRIPT = re.compile(r"Util::add(?:Init)?Script\(\s*'pii_redaction'\s*,\s*'pii_redaction-([\w-]+)'")
-VITE_ENTRY = re.compile(r"^\s*([A-Za-z_][\w]*)\s*:\s*resolve\(", re.MULTILINE)
+VITE_ENTRY = re.compile(r"^\s*([A-Za-z_][\w]*)\s*:\s*'src/[\w/.-]+\.ts'", re.MULTILINE)
 
 _CLASS_ATTRIBUTE = re.compile(r"\bclass=\"([^\"]*)\"")
 _PHP_BLOCK = re.compile(r"<\?php.*?\?>", re.DOTALL)
@@ -287,7 +287,9 @@ def test_self_force_remove_and_flat_rules_fire() -> None:
 
 
 def test_self_a_script_without_an_entry_fires() -> None:
-    config = "createAppConfig({\n\tinit: resolve(join('src', 'init.ts')),\n\treview: resolve(x),\n})"
+    config = (
+        "createAppConfig({\n\tinit: 'src/init.ts',\n\treview: 'src/review.ts',\n}, {\n\tappName: 'pii_redaction',\n})"
+    )
     assert vite_entries(config) == {"init", "review"}
     php = {"a.php": "\\OCP\\Util::addScript('pii_redaction', 'pii_redaction-admin');"}
     assert scripts_without_entry(php, vite_entries(config)) == ["a.php: admin"]

@@ -44,7 +44,8 @@ jobs:
 
       # The browser bundle first: the Files action, the review page and the
       # admin section are built from php/src with the exact pins of
-      # php/package-lock.json. --ignore-scripts: no package gets a shell here.
+      # php/package-lock.json, after the type check of src/ with tsc.
+      # --ignore-scripts: no package gets a shell here.
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -54,6 +55,7 @@ jobs:
         working-directory: php
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          npm run typecheck
           npm run build
           test -s js/pii_redaction-init.mjs
           test -s js/pii_redaction-review.mjs
