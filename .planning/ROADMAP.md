@@ -59,7 +59,7 @@ Plans:
 - [x] 01-12-PLAN.md: QueueController und auftragsgebundenes Gateway (Welle 6)
 - [x] 01-13-PLAN.md: ReviewController: Prüfseite, Seitenbild-Proxy, Platzhalter-Aktion (Welle 6)
 - [x] 01-14-PLAN.md: Notifier, Suffix, PublishService/PublishJob, Listener, Application (Welle 6)
-- [ ] 01-21-PLAN.md: Zweiter früher Push auf phase-01 mit Owner-Freigabe, phpunit der Wellen 5 und 6 grün (Welle 7)
+- [x] 01-21-PLAN.md: Zweiter früher Push auf phase-01 mit Owner-Freigabe, phpunit der Wellen 5 und 6 grün (Welle 7)
 - [ ] 01-15-PLAN.md: deploy-harp.yml mit sieben Beinen, Saat, Fixtures, Kernweg (Welle 8)
 - [ ] 01-16-PLAN.md: Playwright-Suite nach UI-SPEC-Prüfvertrag (Welle 8)
 - [ ] 01-17-PLAN.md: CI-Prüfskripte Rechte, Etag, Warteschlange, Routen, Kanarie, Messung (Welle 8)
@@ -254,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Zwei-App-Gerüst und Integrationsbeweis | 14/21 | In Progress|  |
+| 1. Zwei-App-Gerüst und Integrationsbeweis | 15/21 | In Progress|  |
 | 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
