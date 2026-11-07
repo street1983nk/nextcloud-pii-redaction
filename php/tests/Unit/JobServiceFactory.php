@@ -54,6 +54,11 @@ trait JobServiceFactory {
 	private mixed $content = false;
 	/** @var list<string> the modes fopen() of file 42 was called with */
 	private array $openedAs = [];
+	/** What ExAppService::page() returns: PNG bytes or null. */
+	private ?string $pagePng = null;
+	/** @var list<array{0: int, 1: int, 2: string}> the page calls (job, page, uid) */
+	private array $pageCalls = [];
+	private ExAppService $exApp;
 
 	/** @var list<array{user: string, object: string, subject: string}> */
 	private array $sent = [];
@@ -78,6 +83,11 @@ trait JobServiceFactory {
 
 		$exApp = $this->createMock(ExAppService::class);
 		$exApp->method('startAllowed')->willReturnCallback(fn (): bool => $this->backendReady);
+		$exApp->method('page')->willReturnCallback(function (int $jobId, int $n, string $uid): ?string {
+			$this->pageCalls[] = [$jobId, $n, $uid];
+			return $this->pagePng;
+		});
+		$this->exApp = $exApp;
 
 		$users = $this->createMock(IUserManager::class);
 		$users->method('get')->willReturnCallback(function (string $uid): IUser {
