@@ -48,7 +48,7 @@ Plans:
 - [x] 01-01-PLAN.md: Gerüst: backend/ und php/, Paketfreigabe, Lockstep-Gate, php.yml (Welle 1)
 - [x] 01-02-PLAN.md: Datenmodell: Migration ohne Klartext, Enums, JobMapper mit Sperrzeile und Lease (Welle 2)
 - [x] 01-03-PLAN.md: Kataloge DE/de_DE/EN/FR, PHP-Gates, Log-AST-Gate, Dreisprachigkeits-Test mit U+00A0 (Welle 2)
-- [ ] 01-04-PLAN.md: FileAccess-Recheck mit Download-Sperre, ReaderContext, ExAppService, Handshake (Welle 2)
+- [x] 01-04-PLAN.md: FileAccess-Recheck mit Download-Sperre, ReaderContext, ExAppService, Handshake (Welle 2)
 - [ ] 01-05-PLAN.md: Kindprozesse ohne Geheimnis, Magic-Bytes, Rendering, LibreOffice, Platzhalter-PDF, Image (Welle 2)
 - [ ] 01-06-PLAN.md: Container-Kern: Logs ohne Inhalt, Enums, nc.py, Companion, RAM-Wächter (Welle 3)
 - [ ] 01-07-PLAN.md: Früher Push auf phase-01 mit Owner-Freigabe, php.yml und python.yml grün (Welle 4)
@@ -254,7 +254,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Zwei-App-Gerüst und Integrationsbeweis | 3/21 | In Progress|  |
+| 1. Zwei-App-Gerüst und Integrationsbeweis | 4/21 | In Progress|  |
 | 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
