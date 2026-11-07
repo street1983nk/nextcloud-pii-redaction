@@ -49,6 +49,7 @@ TRANSCRIBED = (
     "geloescht",
     "loesch",
     "pruef",
+    "schwaerz",
     "schluessel",
     "spaeter",
     "zurueck",
@@ -120,6 +121,10 @@ def german_texts() -> list[tuple[str, str]]:
     ]
     catalogue = json.loads((BACKEND_ROOT / "l10n" / "de.json").read_text(encoding="utf-8"))
     texts.append(("backend/l10n/de.json", "\n".join(catalogue["translations"].values())))
+    for name in ("de", "de_DE"):
+        php = json.loads((REPO_ROOT / "php" / "l10n" / f"{name}.json").read_text(encoding="utf-8"))["translations"]
+        values = [text for value in php.values() for text in (value if isinstance(value, list) else [value])]
+        texts.append((f"php/l10n/{name}.json", "\n".join(values)))
     info = ElementTree.fromstring((BACKEND_ROOT / "appinfo" / "info.xml").read_text(encoding="utf-8"))  # noqa: S314
     texts += [(f"info.xml {element.tag} de", element.text or "") for element in info if element.get("lang") == "de"]
     return texts
@@ -171,3 +176,25 @@ def test_the_umlaut_rule_fires_on_transcriptions_only(sample: str, count: int) -
 def test_the_dash_rule_fires() -> None:
     assert dash_and_emoji_findings("s", "a \u2014 b \u2013 c \U0001f600") == ["s: em dash", "s: en dash", "s: emoji"]
     assert dash_and_emoji_findings("s", "a - b, c: d") == []
+
+
+# The places the owner rule names explicitly (plan 01-03): the scan above
+# covers every tracked file, this holds that these really are among them.
+DASH_SCOPE = ("php/", "backend/l10n/", "README.md", "README.en.md", "README.fr.md", "docs/", "CHANGELOG.md")
+
+
+def test_the_dash_scan_reaches_every_place_the_owner_rule_names() -> None:
+    scanned = [path.relative_to(REPO_ROOT).as_posix() for path in tracked_files()]
+    assert all(any(name.startswith(scope) for name in scanned) for scope in DASH_SCOPE)
+
+
+def test_the_php_catalogues_are_among_the_german_texts() -> None:
+    names = [name for name, _ in german_texts()]
+    assert "php/l10n/de.json" in names
+    assert "php/l10n/de_DE.json" in names
+
+
+def test_self_the_transcription_list_covers_the_app_words() -> None:
+    for word in ("Pr" + "uefung", "Schw" + "aerzen", "gel" + "oescht", "Ae" + "nderung", "f" + "uer", "Str" + "asse"):
+        assert transcription_findings("sample", word), word
+    assert transcription_findings("sample", "Prüfung Schwärzen gelöscht Änderung für Straße") == []
