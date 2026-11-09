@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<!--
+	Store metadata of the External App (the backend half). Taken over from Findling
+	Backend 1.6.x. The PHP half lives in php/appinfo/info.xml; both carry one version.
+
+	The store does not validate this file as it stands: it first runs it through
+	pre-info.xslt, which copies only the elements it knows (inside external-app:
+	docker-install, scopes, system, environment-variables). AppAPI reads the
+	routes back out of the release archive at installation time, so the archive
+	has to carry this file byte for byte (scripts/release/store-archive.sh checks
+	that with cmp).
+
+	No browser routes: the routes element stays empty on purpose. The browser
+	only ever talks to the PHP app, which re-checks every permission and calls the
+	container with signed AppAPI requests; signed requests skip the route check,
+	so an empty list closes every unsigned direct path into the container.
+	tests/test_store_metadata.py holds that.
+
+	Lockstep: <version>, <image-tag>, the version in pyproject.toml and the git
+	tag v<version> are one number, and php/appinfo/info.xml follows it.
+	tests/test_store_metadata.py and tests/test_lockstep_versions.py hold them.
+-->
+<info>
+	<id>pii_redaction_backend</id>
+	<name>PII Redaction Backend</name>
+	<name lang="de">PII Redaction Backend</name>
+	<name lang="fr">PII Redaction Backend</name>
+	<summary>Backend of PII Redaction: local detection and redaction of personal data, needs the app PII Redaction</summary>
+	<summary lang="de">Backend von PII Redaction: lokale Erkennung und Schwärzung personenbezogener Daten, braucht die App PII Redaction</summary>
+	<summary lang="fr">Backend de PII Redaction : détection et caviardage locaux des données personnelles, nécessite l'application PII Redaction</summary>
+	<description><![CDATA[Backend of PII Redaction. Requires the app "PII Redaction". Install both apps; they always carry the same version.
+What PII Redaction is:
+- Detects names, addresses, phone numbers, email addresses, IBANs and similar data
+- Real redaction: the text is removed, not just covered
+- Preview to review before redacting, the original is kept
+- Privacy: everything runs locally, no telemetry, nothing leaves your server
+Requirements:
+- Nextcloud 33 to 35, AppAPI with a deploy daemon (HaRP recommended)
+- CPU: amd64 and arm64]]></description>
+	<description lang="de"><![CDATA[Backend von PII Redaction. Braucht die App „PII Redaction“. Beide Apps installieren; sie tragen immer dieselbe Version.
+Was PII Redaction ist:
+- Erkennt Namen, Adressen, Telefonnummern, E-Mail-Adressen, IBAN und ähnliche Angaben
+- Schwärzt echt: der Text wird entfernt, nicht nur überdeckt
+- Vorschau zum Prüfen vor dem Schwärzen, das Original bleibt erhalten
+- Datenschutz: alles läuft lokal, keine Telemetrie, nichts verlässt den Server
+Anforderungen:
+- Nextcloud 33 bis 35, AppAPI mit Deploy-Daemon (HaRP empfohlen)
+- CPU: amd64 und arm64]]></description>
+	<description lang="fr"><![CDATA[Backend de PII Redaction. Nécessite l'application « PII Redaction ». Installer les deux applications ; elles portent toujours la même version.
+Ce qu'est PII Redaction :
+- Détecte noms, adresses, numéros de téléphone, adresses e-mail, IBAN et données similaires
+- Caviardage réel : le texte est supprimé, pas seulement masqué
+- Aperçu pour vérifier avant le caviardage, l'original est conservé
+- Confidentialité : tout fonctionne localement, aucune télémétrie, rien ne quitte votre serveur
+Prérequis :
+- Nextcloud 33 à 35, AppAPI avec un démon de déploiement (HaRP recommandé)
+- CPU : amd64 et arm64]]></description>
+	<version>0.1.0</version>
+	<licence>AGPL-3.0-or-later</licence>
+	<author>street1983nk</author>
+	<category>tools</category>
+	<website>https://github.com/street1983nk/nextcloud-pii-redaction</website>
+	<bugs>https://github.com/street1983nk/nextcloud-pii-redaction/issues</bugs>
+	<repository type="git">https://github.com/street1983nk/nextcloud-pii-redaction.git</repository>
+	<donation type="paypal">https://paypal.me/KhaledCherifDev</donation>
+	<dependencies>
+		<nextcloud min-version="33" max-version="35"/>
+	</dependencies>
+	<external-app>
+		<docker-install>
+			<registry>ghcr.io</registry>
+			<image>street1983nk/pii_redaction_backend</image>
+			<image-tag>0.1.0</image-tag>
+		</docker-install>
+		<routes/>
+		<environment-variables>
+			<variable>
+				<name>PII_REDACTION_LOG_LEVEL</name>
+				<display-name>Log level</display-name>
+				<description>One of debug, info, warning, error. Anything else falls back to info. Only debug shows the request lines of the HTTP client.</description>
+				<default>info</default>
+			</variable>
+		</environment-variables>
+	</external-app>
+</info>
