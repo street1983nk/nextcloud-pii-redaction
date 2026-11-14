@@ -166,6 +166,14 @@ final class JobMapper extends QBMapper {
 			return $purge;
 		}
 
+		// Read before any write: the container asks every one to ten
+		// seconds, and an empty queue must cost reads only (on SQLite every
+		// write competes with the logins of the instance). A candidate that
+		// a parallel caller takes meanwhile is handled below as before.
+		if ($this->nextCandidate($now) === null) {
+			return null;
+		}
+
 		$this->ensureSlot();
 		if (!$this->takeSlot($now, $token)) {
 			return null;

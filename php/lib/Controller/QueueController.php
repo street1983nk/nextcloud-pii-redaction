@@ -78,7 +78,7 @@ final class QueueController extends OCSController {
 			return $foreign;
 		}
 
-		$this->jobs->ensureSlot();
+		// claimNext creates the slot row itself, only when there is a task.
 		$claim = $this->jobs->claimNext();
 		if ($claim === null) {
 			return new DataResponse([]);
