@@ -125,8 +125,20 @@ def german_texts() -> list[tuple[str, str]]:
         php = json.loads((REPO_ROOT / "php" / "l10n" / f"{name}.json").read_text(encoding="utf-8"))["translations"]
         values = [text for value in php.values() for text in (value if isinstance(value, list) else [value])]
         texts.append((f"php/l10n/{name}.json", "\n".join(values)))
-    info = ElementTree.fromstring((BACKEND_ROOT / "appinfo" / "info.xml").read_text(encoding="utf-8"))  # noqa: S314
-    texts += [(f"info.xml {element.tag} de", element.text or "") for element in info if element.get("lang") == "de"]
+    texts += store_texts("de")
+    return texts
+
+
+# The store metadata of both apps: the ExApp and the PHP app.
+STORE_FILES = (("backend", BACKEND_ROOT / "appinfo" / "info.xml"), ("php", REPO_ROOT / "php" / "appinfo" / "info.xml"))
+
+
+def store_texts(language: str) -> list[tuple[str, str]]:
+    """(name, text) of every store text of both apps in one language."""
+    texts = []
+    for app, info_xml in STORE_FILES:
+        info = ElementTree.fromstring(info_xml.read_text(encoding="utf-8"))  # noqa: S314 - own repo file
+        texts += [(f"{app} info.xml {el.tag} {language}", el.text or "") for el in info if el.get("lang") == language]
     return texts
 
 
@@ -198,3 +210,69 @@ def test_self_the_transcription_list_covers_the_app_words() -> None:
     for word in ("Pr" + "uefung", "Schw" + "aerzen", "gel" + "oescht", "Ae" + "nderung", "f" + "uer", "Str" + "asse"):
         assert transcription_findings("sample", word), word
     assert transcription_findings("sample", "Prüfung Schwärzen gelöscht Änderung für Straße") == []
+
+
+# -- French typography in the documents and store texts (plan 01-19) ---------------
+#
+# test_trilingual.py holds the catalogues to U+00A0 before : ; ? ! and inside
+# guillemets. The audit of plan 01-19 found the French README without a single
+# one (six plain spaces), so the documents and the French store texts of both
+# apps get the same rule here. Code spans, fenced blocks, link targets and URLs
+# are no prose; "![" is markdown image syntax and a colon between digits a time.
+
+NBSP = chr(0x00A0)
+NARROW_NBSP = chr(0x202F)
+_FRENCH_NO_PROSE = (
+    re.compile(r"```.*?```", re.DOTALL),
+    re.compile(r"`[^`\n]*`"),
+    re.compile(r"\]\([^)]*\)"),
+    re.compile(r"https?://\S+"),
+)
+_FRENCH_MARK = re.compile("[:;?!\u00bb]")
+_OPEN_GUILLEMET_BARE = re.compile("\u00ab(?![\u00a0\u202f])")
+
+
+def french_prose_findings(name: str, source: str) -> list[str]:
+    prose = source
+    for pattern in _FRENCH_NO_PROSE:
+        prose = pattern.sub(" ", prose)
+    findings = []
+    for match in _FRENCH_MARK.finditer(prose):
+        before = prose[match.start() - 1 : match.start()]
+        after = prose[match.end() : match.end() + 1]
+        if match.group(0) == "!" and after == "[":
+            continue
+        if match.group(0) == ":" and before.isdigit() and after.isdigit():
+            continue
+        if before not in (NBSP, NARROW_NBSP):
+            findings.append(f"{name}: {match.group(0)!r} without U+00A0 before it")
+    findings += [f"{name}: opening guillemet without U+00A0 after it" for _ in _OPEN_GUILLEMET_BARE.finditer(prose)]
+    return findings
+
+
+def french_texts() -> list[tuple[str, str]]:
+    texts = [("README.fr.md", (REPO_ROOT / "README.fr.md").read_text(encoding="utf-8"))]
+    documents = sorted((REPO_ROOT / "docs").glob("*.fr.md"))
+    texts += [(f"docs/{path.name}", path.read_text(encoding="utf-8")) for path in documents]
+    return texts + store_texts("fr")
+
+
+def test_french_documents_and_store_texts_carry_the_narrow_spacing() -> None:
+    texts = french_texts()
+    assert len(texts) >= 8
+    assert any(NBSP in source for _, source in texts), "positive control: no U+00A0 at all in French"
+
+    assert [finding for name, source in texts for finding in french_prose_findings(name, source)] == []
+
+
+def test_self_the_french_rule_fires_on_plain_and_missing_spaces() -> None:
+    plain = "Statut : en cours ; pr\u00eat ? Oui ! \u00ab x \u00bb"
+    assert len(french_prose_findings("s", plain)) == 6
+    assert len(french_prose_findings("s", "Statut: x")) == 1
+    clean = f"Statut{NBSP}: x{NBSP}; \u00ab{NBSP}y{NBSP}\u00bb ![b](https://a.b/c:d) `a:b` 0:00"
+    assert french_prose_findings("s", clean) == []
+
+
+def test_self_the_german_texts_include_both_store_files() -> None:
+    names = {name.split(" ")[0] for name, _ in german_texts() if "info.xml" in name}
+    assert names == {"backend", "php"}
