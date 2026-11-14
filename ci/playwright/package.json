@@ -1,0 +1,14 @@
+{
+  "name": "pii-redaction-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests of PII Redaction against a throwaway Nextcloud test instance in CI",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "typescript": "6.0.3"
+  }
+}
