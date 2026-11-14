@@ -113,3 +113,26 @@ def test_no_route_answers_with_a_name_or_a_path(client: TestClient, storage: Pat
     body = client.get("/status", headers=signed_headers()).text
     assert str(storage) not in body
     assert "work" not in body
+
+
+def test_status_asks_the_handshake_again_when_its_answer_is_stale(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The PHP app reads /status for the admin state and before a start. After
+    # the PHP app came back from being disabled, the container must not keep
+    # saying missing until its five minute round: /status refreshes a stale
+    # answer first (companion.refresh_if_stale, as in AVS api/status.py).
+    from pii_redaction_backend import companion
+
+    calls: list[str] = []
+
+    async def refreshed() -> companion.CompanionState:
+        calls.append("refresh")
+        return companion.CompanionState(state=companion.OK, version="0.1.0", checked_at=1.0)
+
+    monkeypatch.setattr(companion, "refresh_if_stale", refreshed)
+
+    body = client.get("/status", headers=signed_headers()).json()
+
+    assert calls == ["refresh"]
+    assert body["companion"] == "ok"
