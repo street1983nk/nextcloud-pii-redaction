@@ -3,6 +3,11 @@
 No route in info.xml points here; ExAppService::status() calls it signed
 (01-SKELETON.md "Signierte Container-Endpunkte"). The answer carries no name,
 no path and no job number.
+
+The companion state is asked again first when it is unknown or older than
+companion.STALE_SECONDS (as in AVS): after the PHP app came back from being
+disabled, the admin section and the next start see ok again without waiting
+for the five minute round of companion.run_periodic.
 """
 
 from fastapi import APIRouter, Request
@@ -19,10 +24,11 @@ async def status(request: Request) -> dict[str, object]:
     worker = getattr(request.app.state, "runner", None)
     ready = isinstance(worker, Runner)
     last = last_child()
+    state = await companion.refresh_if_stale()
     return {
         "version": config.app_version(),
         "ready": ready,
-        "companion": companion.current().state,
+        "companion": state.state,
         "busy": worker.busy if isinstance(worker, Runner) else False,
         "lastChild": None if last is None else {"kind": last.kind, "rssKb": last.rss_kb, "ms": last.ms},
     }
