@@ -177,6 +177,24 @@ jobs:
           extensions: mbstring, iconv, fileinfo, intl, sqlite, pdo_sqlite, mysql, pdo_mysql, gd, zip
           coverage: none
 
+      # From stable34 on, apps/notifications/composer/autoload.php requires
+      # ../vendor/autoload.php, and vendor/, lib/Vendor and lib/autoload are
+      # git-ignored: a release tarball carries them, the git checkout does not,
+      # so maintenance:install stopped in installShippedApps with "Failed
+      # opening required .../notifications/composer/../vendor/autoload.php".
+      # Built the way the CI of nextcloud/notifications builds it (plain
+      # composer install, its post-install-cmd runs mozart). stable33 has no
+      # composer/ directory and needs nothing.
+      - name: Install the composer dependencies of notifications
+        working-directory: apps/notifications
+        run: |
+          if [ -f composer/autoload.php ]; then
+            composer install --no-interaction --no-progress
+            test -s vendor/autoload.php
+          else
+            echo "no composer/autoload.php on ${SERVER_VERSION}, nothing to install"
+          fi
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -769,6 +787,24 @@ jobs:
           php-version: ${{ matrix.php-version }}
           extensions: mbstring, iconv, fileinfo, intl, sqlite, pdo_sqlite, gd, zip
           coverage: none
+
+      # From stable34 on, apps/notifications/composer/autoload.php requires
+      # ../vendor/autoload.php, and vendor/, lib/Vendor and lib/autoload are
+      # git-ignored: a release tarball carries them, the git checkout does not,
+      # so maintenance:install stopped in installShippedApps with "Failed
+      # opening required .../notifications/composer/../vendor/autoload.php".
+      # Built the way the CI of nextcloud/notifications builds it (plain
+      # composer install, its post-install-cmd runs mozart). stable33 has no
+      # composer/ directory and needs nothing.
+      - name: Install the composer dependencies of notifications
+        working-directory: apps/notifications
+        run: |
+          if [ -f composer/autoload.php ]; then
+            composer install --no-interaction --no-progress
+            test -s vendor/autoload.php
+          else
+            echo "no composer/autoload.php on ${SERVER_VERSION}, nothing to install"
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
