@@ -71,6 +71,8 @@ class Fake:
         self.events: list[tuple[Any, ...]] = []
         self.claims: list[nc.Claim] = []
         self.claim_calls = 0
+        self.claim_gone: int | None = None
+        self.rechecks = 0
         self.source = _pdf_bytes()
         self.fetch_status: int | None = 200
         self.fetch_stale = False
@@ -92,7 +94,14 @@ class Fake:
 
     async def claim(self, _client: object) -> nc.Claim | None:
         self.claim_calls += 1
+        if self.claim_gone is not None:
+            raise nc.CompanionGone(self.claim_gone)
         return self.claims.pop(0) if self.claims else None
+
+    async def recheck(self) -> None:
+        # What companion.check_once would learn from the handshake: gone.
+        self.rechecks += 1
+        self.companion = False
 
     async def progress(
         self, _client: object, _job: nc.Claim, stage: Stage, done: int | None, total: int | None
@@ -152,6 +161,7 @@ class Fake:
             "ack": self.ack,
             "fetch_source": self.fetch,
             "may_work": lambda: self.companion,
+            "recheck_companion": self.recheck,
             "admit": lambda _kind: self.memory,
             "run_child": self.run_child,
             "convert": self.convert,
@@ -191,6 +201,28 @@ async def test_without_the_companion_no_claim_is_asked(fake: Fake) -> None:
     fake.companion = False
     assert await fake.runner().run_once() is False
     assert fake.claim_calls == 0
+
+
+async def test_a_gone_queue_route_asks_the_handshake_at_once_and_claims_no_more(fake: Fake) -> None:
+    # The PHP app was disabled: its queue route answers 404. The runner does
+    # not wait for the five minute round of companion.py; it asks now, and the
+    # next round claims nothing while the answer is missing.
+    fake.claim_gone = 404
+    worker = fake.runner()
+
+    assert await worker.run_once() is False
+    assert fake.rechecks == 1
+    assert await worker.run_once() is False
+    assert fake.claim_calls == 1
+    assert fake.rechecks == 1
+    assert fake.events == []
+
+
+async def test_an_empty_queue_asks_no_handshake(fake: Fake) -> None:
+    # Positive control of the rule above: an ordinary empty answer is no reason.
+    assert await fake.runner().run_once() is False
+    assert fake.claim_calls == 1
+    assert fake.rechecks == 0
 
 
 async def test_without_memory_no_claim_is_asked(fake: Fake) -> None:

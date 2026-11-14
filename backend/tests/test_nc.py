@@ -142,10 +142,21 @@ async def test_numbers_as_strings_are_accepted_like_ocs_may_send_them() -> None:
         assert await nc.claim(client) == _claim()
 
 
-@pytest.mark.parametrize("status", [401, 403, 412, 500])
+@pytest.mark.parametrize("status", [401, 412, 500])
 async def test_an_error_status_is_no_claim(status: int) -> None:
     async with Recorder(lambda _request: _ocs(CLAIM_ANSWER, status)).client() as client:
         assert await nc.claim(client) is None
+
+
+@pytest.mark.parametrize("status", [403, 404])
+async def test_a_queue_route_that_is_gone_says_so(status: int) -> None:
+    # 404: the PHP app is disabled or removed; 403: it does not take this
+    # container for its backend. The runner asks the handshake at once.
+    async with Recorder(lambda _request: _ocs(CLAIM_ANSWER, status)).client() as client:
+        with pytest.raises(nc.CompanionGone) as raised:
+            await nc.claim(client)
+
+    assert raised.value.http_status == status
 
 
 async def test_a_network_error_is_no_claim() -> None:
