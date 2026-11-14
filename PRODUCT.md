@@ -2,7 +2,7 @@
 
 <!-- impeccable:product-schema 1 -->
 
-> Vorlage aus nextcloud-exapp-skeleton. Jede mit TODO(skeleton) markierte Stelle füllt die App mit Quellenangabe. Aussagen ohne Quelle bestätigt der Owner mit Datum.
+> Quellen: `.planning/PROJECT.md` (Ziel, Nutzer, Grenzen), `.planning/phases/01-zwei-app-ger-st-und-integrationsbeweis/01-UI-SPEC.md` (Oberfläche Phase 1, Owner-Entscheide 07.11.2026) und der Code von Version 0.1.0. Aussagen über später geplante Fähigkeiten sind als geplant markiert.
 
 ## Platform
 
@@ -10,32 +10,47 @@ web
 
 ## Users
 
-- **Admins von Nextcloud-Instanzen** (Selfhost, kleine Organisationen, Behörden), die die App installieren und unter Verwaltungseinstellungen, Weitere Einstellungen konfigurieren.
-- TODO(skeleton): die Nutzer, die das Ergebnis der App sehen, und mit welcher Frage sie kommen.
+- **Admins von Nextcloud-Instanzen** (Behörden, Kommunen, Schulen, kleine Organisationen, Selfhost), die beide Apps installieren und den Zustand unter Verwaltungseinstellungen, PII Redaction prüfen.
+- **Sachbearbeitende**, die ein Dokument herausgeben müssen (IFG-Herausgaben, Veröffentlichung von Gerichtsentscheidungen) und fragen: Welche personenbezogenen Daten stehen darin, und wie entsteht eine Fassung, in der davon nachweislich nichts mehr steckt, ohne dass der Inhalt den Server verlässt? Quelle: PROJECT.md.
 
 ## Product Purpose
 
-TODO(skeleton): ein Absatz, was nach der Installation ohne weitere Konfiguration funktioniert (Core Value).
+Eine Datei aus Nextcloud wird mit einem Klick lokal auf personenbezogene Daten geprüft; nach menschlicher Prüfung entsteht neben dem Original eine geschwärzte oder pseudonymisierte Kopie, in der nachweislich nichts Geschwärztes mehr steckt (Text, Metadaten, Altversionen, OCR-Ebene). Kein Inhalt verlässt den Server. Quelle: PROJECT.md, Core Value.
 
-Erfolg heißt: TODO(skeleton).
+Stand 0.1.0: Der Weg von der Dateiaktion über die Prüfseite bis zur Kopie neben dem Original steht, mit Vorschau ohne Erkennung und einer Platzhalter-Kopie, die nichts aus dem Original enthält.
+
+Erfolg heißt: Eine herausgegebene Kopie enthält keinen der geschwärzten Werte mehr, belegt durch eine automatische Nachprüfung; Leckrate je Kategorie und Dokumenttyp als Hauptkennzahl. Quelle: PROJECT.md (geplant, in 0.1.0 nicht gebaut).
 
 ## Positioning
 
 - Läuft komplett in der eigenen Instanz, kein Inhalt verlässt den Server, keine Telemetrie.
-- External App: Python-Container über AppAPI/HaRP, AGPL-3.0-or-later, signiert im App Store.
-- TODO(skeleton): Differenzierer gegenüber vorhandenen Lösungen, mit Quelle.
+- Zwei Apps: PHP-App `pii_redaction` und External App `pii_redaction_backend` (Python-Container über AppAPI und HaRP), gleiche Version, AGPL-3.0-or-later.
+- Geplant: deutsche Erkenner und Rechtsgrundlagen, dokumentierte Leck-Nachprüfung, offene Qualitätszahlen, Pseudonymisierung. Nächster Wettbewerber: Conduction DocuDesk mit OpenAnonymiser (Fokus Niederlande, EUPL). Quelle: PROJECT.md, Context.
 
 ## Operating Context
 
-- Store-Eintrag unter External Apps, Nextcloud 33 bis 35, amd64 und arm64.
-- Oberfläche: deklarative Admin-Einstellungen (AppAPI), siehe DESIGN.md.
+- Nextcloud 33 bis 35, amd64 und arm64, nur CPU; noch nicht im App Store.
+- Oberfläche: Dateiaktion in der Dateien-App, eigene Prüfseite (Vue), Benachrichtigungen über die App Notifications, Admin-Statusbereich (PHP-Template), siehe DESIGN.md.
+- Die Kopie legt ein Nextcloud-Hintergrundjob an; Hintergrundjobs im Modus Cron empfohlen.
 - Texte in Deutsch, Englisch und Französisch, Deutsch zuerst.
 
 ## Capabilities and Constraints
 
-- TODO(skeleton): Fähigkeiten als Liste.
-- Out of Scope: Inhalte an externe Dienste schicken (Owner-Regel Datenschutz zuerst).
-- Texte nur über die l10n-Kataloge, drei Sprachen im Gleichstand (tests/test_trilingual.py).
+Version 0.1.0:
+
+- Dateiaktion „Schwärzen / Pseudonymisieren“ für genau eine PDF-, DOCX- oder ODT-Datei; nicht bei Mehrfachauswahl, im Papierkorb, auf öffentlichen Freigabeseiten, bei gesperrtem Download.
+- Ein Auftrag zur Zeit mit Warteschlange; DOCX und ODT werden mit LibreOffice in PDF umgewandelt.
+- Prüfseite mit Fortschritt und Seite 1 als Bild, „Vorschau ohne Erkennung“.
+- Platzhalter-Kopie neben dem Original: einseitige PDF ohne Originalinhalt, Name mit `_geschwärzt`, `_redacted` oder `_caviardé`.
+- Benachrichtigungen ohne Dateinamen; Statusbereich mit sieben Zuständen der Gegen-App plus gescheiterter Neuprüfung.
+
+Geplant, nicht gebaut (Quelle PROJECT.md): Erkennung personenbezogener Daten, Vorschlagsliste mit Annehmen und Ablehnen, echte Schwärzung und Pseudonymisierung, OCR für Scans, Vier-Augen-Freigabe, Schwärzungsprotokoll, automatische Leck-Nachprüfung, Löschung offener Prüfungen nach 14 Tagen.
+
+Out of Scope:
+
+- Inhalte an externe Dienste schicken (Owner-Regel Datenschutz zuerst).
+- Vollautomatische Schwärzung ohne menschliche Prüfung.
+- Texte nur über die l10n-Kataloge, drei Sprachen im Gleichstand (`backend/tests/test_trilingual.py`).
 
 ## Brand Commitments
 
@@ -45,8 +60,9 @@ Erfolg heißt: TODO(skeleton).
 
 ## Evidence on Hand
 
-- TODO(skeleton): Screenshots unter `store/media/`, Messwerte mit Methode.
-- Nicht vorhanden und nicht zu erfinden: Kundenstimmen, Nutzerzahlen, Preise.
+- Lokale Gates in `backend/` und `php/` (pytest, ruff, pyright, vulture, PHP-Unit-Tests); der Integrationsbeweis auf echten Instanzen (Workflow `deploy-harp.yml`, Playwright-Abnahme unter `ci/playwright/`) ist gebaut, aber noch nicht gelaufen.
+- Messwerte zu Erkennung und Schwärzung stammen aus dem Spike vom 06.11.2026, nicht aus dieser App.
+- Nicht vorhanden und nicht zu erfinden: Kundenstimmen, Nutzerzahlen, Preise, Screenshots für den Store.
 
 ## Product Principles
 
@@ -57,4 +73,4 @@ Erfolg heißt: TODO(skeleton).
 
 ## Accessibility & Inclusion
 
-Zielstandard WCAG 2.1 AA (BITV-relevant für öffentliche Einrichtungen): Fokus nie entfernt, Farbe nie alleiniger Träger, Icon-Knöpfe mit `aria-label`, hoher Kontrast über Server-Variablen.
+Zielstandard WCAG 2.1 AA (BITV-relevant für öffentliche Einrichtungen): Fokus nie entfernt, Farbe nie alleiniger Träger, Icon-Knöpfe mit `aria-label`, hoher Kontrast über Server-Variablen. Einzelheiten in DESIGN.md, Abschnitt Barrierefreiheit.

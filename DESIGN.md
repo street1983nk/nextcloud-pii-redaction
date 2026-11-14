@@ -1,6 +1,6 @@
 ---
 name: PII Redaction
-description: TODO(skeleton) ein Satz, was die Oberfläche zeigt. Gestaltet als Teil der Nextcloud-Oberfläche ohne eigene Marke.
+description: Dateiaktion, Prüfseite, Benachrichtigung und Admin-Statusbereich zum lokalen Finden und Schwärzen personenbezogener Daten. Gestaltet als Teil der Nextcloud-Oberfläche ohne eigene Marke.
 colors:
   color-primary-element: "#00679e"
   color-primary-element-text: "#ffffff"
@@ -59,7 +59,7 @@ components:
 
 # Design System: PII Redaction
 
-Vorlage aus nextcloud-exapp-skeleton. Folgt der Skill nextcloud-ui; diese Datei hat bei UI-Arbeit Vorrang vor der Skill. Die mit TODO(skeleton) markierten Stellen füllt jede App selbst.
+Folgt der Skill nextcloud-ui; diese Datei hat bei UI-Arbeit Vorrang vor der Skill. Der verbindliche Vertrag für Phase 1 mit allen Zuständen und Texten steht in `.planning/phases/01-zwei-app-ger-st-und-integrationsbeweis/01-UI-SPEC.md`.
 
 ## Overview
 
@@ -67,18 +67,26 @@ Die App hat kein eigenes Erscheinungsbild und soll keins bekommen. Jede Oberflä
 
 Stufen der Oberfläche, in dieser Reihenfolge prüfen:
 
-1. **Deklarative Einstellungen** (Standard im Skelett, `src/pii_redaction/settings.py`): AppAPI rendert das Formular mit Nextcloud-Komponenten. Kein eigenes CSS, kein Build-Schritt.
-2. **Eigene Seite mit Vue** nur wenn Stufe 1 nicht reicht: `@nextcloud/vue` 9 wie in Gameworld, Komponenten statt Eigenbau, ausgeliefert über `js/` im Container und `nc.ui.resources`.
-3. **PHP-Templates** nur in einer PHP-Begleit-App (siehe SKELETON.md, Abschnitt PHP-Begleit-App).
+1. **Deklarative Einstellungen** (`backend/src/pii_redaction_backend/settings.py`): AppAPI rendert das Formular mit Nextcloud-Komponenten. Kein eigenes CSS, kein Build-Schritt.
+2. **Eigene Seite mit Vue** nur wenn Stufe 1 nicht reicht: `@nextcloud/vue` 9, Komponenten statt Eigenbau, hier mit Vite in der PHP-App gebaut (`php/src/` nach `php/js/`).
+3. **PHP-Templates** nur in der PHP-App `pii_redaction`.
 
-TODO(skeleton): welche Stufe diese App nutzt und warum.
+PII Redaction nutzt Stufe 2 und 3 in der PHP-App `pii_redaction`: Vue 3 mit `@nextcloud/vue` 9 für Dateiaktion und Prüfseite, weil `@nextcloud/files` 4 ohnehin einen Build braucht und die Prüfseite später Liste, Kästchen und Tastaturbedienung trägt; ein PHP-Template für den Admin-Statusbereich, damit er ohne JavaScript lesbar bleibt (Muster aus Audio & Video Search). Die ExApp `pii_redaction_backend` hat nur deklarative Einstellungen und keine Routen für den Browser.
+
+Flächen in Version 0.1.0, sonst keine:
+
+1. Dateiaktion „Schwärzen / Pseudonymisieren“ in der Dateien-App mit Start-Rückmeldung als Toast
+2. Prüfseite `/apps/pii_redaction/review/{jobId}` mit Status, Fortschritt, Warteschlange und Seite 1 als Bild
+3. Benachrichtigung ohne Dateinamen, Link auf die Prüfseite
+4. Platzhalter-Kopie neben dem Original (Name und Inhalt der einseitigen PDF)
+5. Admin-Statusbereich unter Verwaltungseinstellungen, PII Redaction
 
 **Key Characteristics:**
 - Nur Nextcloud-CSS-Variablen, kein Farbliteral im Code.
 - Abstände als Vielfache von `var(--default-grid-baseline)`.
 - Schrift des Servers, zwei Gewichte (400, 700), keine Webfonts.
 - Flach: keine Schatten, Zustände über Flächenwechsel.
-- Icons aus Material Design Icons (`vue-material-design-icons`), Größe 20, keine Emojis.
+- Icons aus Material Design Icons als Inline-SVG mit `fill="currentColor"` (Dateiaktion, Admin-Banner), Größe 20, keine Emojis; Statuskarten der Prüfseite nutzen die Icons von `NcNoteCard`.
 
 ## Colors
 
@@ -131,9 +139,25 @@ Jede Ansicht braucht die Zustände Laden, leer, Fehler, Erfolg und keine Berecht
 
 ## Texte
 
+- Begriffe: **Analyse** ist der Maschinenlauf, **Prüfung** die Seite für den Menschen, **Kopie** die Ergebnisdatei. Englisch analysis, review, copy; Französisch analyse, vérification, copie. „PII Redaction“, „PII Redaction Backend“ und „AppAPI“ werden nicht übersetzt.
+- Kürze: zwei kurze Sätze nach dem Muster „Zustand. Folge oder Handlung.“, höchstens drei Sätze und 240 Zeichen je Katalogwert (Gate in `backend/tests/test_trilingual.py`). Kein Wert, der daneben schon steht, wird wiederholt; Versionen nur in der Versionszeile, nie im Banner.
+- Deutsch unpersönlich im Infinitiv („Die Seite neu laden.“), damit `de` und `de_DE` denselben Text tragen. Französisch mit U+00A0 vor `:` `;` `?` `!` und innerhalb von « ».
+- Kein Dateiname in Benachrichtigungen, Toasts, Fehlerkarten für fremde oder gelöschte Dateien und im Dokumenttitel solcher Seiten.
 - Jeder sichtbare Text dreisprachig (Deutsch, Englisch, Französisch) über `l10n/` bzw. `t('pii_redaction', ...)`, nie hart codiert.
 - Deutsch mit echten Umlauten, Satzanfang groß, kein Ausrufezeichen, keine Gedankenstriche, keine Emojis.
 - Fehlertexte sagen, was passiert ist und was der Nutzer tun kann.
+
+## Barrierefreiheit
+
+Ziel WCAG 2.1 AA und BITV 2.0:
+
+- Jede Aktion per Tab erreichbar, Reihenfolge gleich DOM-Reihenfolge, keine eigenen Tastenkürzel.
+- Fokusring des Servers bleibt sichtbar. Fokus wandert nur nach einer Nutzeraktion: nach „Platzhalter-Kopie anlegen“ auf die neue Statuszeile, im Admin nach „Erneut prüfen“ auf `#pii-backend-state`.
+- Statusbereiche mit `role="status"` und `aria-live="polite"`, angesagt wird nur ein Wechsel von Status oder Stufe; Ladezustand über `aria-busy`.
+- Erfolgs-Toast 10 s mit Schließen-Knopf, Fehler-Toast bleibt bis zum Schließen; die Prüfseite ist auch über die Benachrichtigung und einen erneuten Klick erreichbar.
+- Seitenbild mit `alt` „Seite 1 von {n}“ ohne Dateinamen; im Dunkelmodus nicht invertiert.
+- Text in Statusflächen nie in `--color-text-maxcontrast`; Kontrast allein über Server-Variablen, auch im Theme mit hohem Kontrast.
+- Bei 320 px Breite kein waagrechtes Scrollen außer im Bild.
 
 ## Do's and Don'ts
 
