@@ -6,7 +6,7 @@
 // expect.poll only. Answers forged with page.route carry values of the closed
 // lists below only (T-01-16-03); the real path of every state is proven by
 // ci/flow.sh and the check scripts of plan 17.
-import { expect, request, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, request, test, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -600,11 +600,68 @@ export function folderPath(folder: string): string {
 	return `${FILES_PATH}?dir=${encodeURIComponent(`/${folder}`)}`;
 }
 
-/** Fill the login form the page shows right now and wait until it is gone. */
+const LOGIN_POST = /\/login$/;
+const LOCKED = 'database is locked';
+
+/**
+ * True when the SQLite instance of this leg refused the last login with
+ * "database is locked": the newest such entry of nextcloud.log belongs to a
+ * POST /index.php/login of the last minute. Never true on MariaDB.
+ *
+ * Nextcloud core writes the session token of a login inside a transaction
+ * (User\Session::createSessionToken, atomic()). On SQLite with eight PHP
+ * workers and the backend claiming every one to ten seconds (two UPDATEs on
+ * the slot row each time), that write can meet a parallel write and SQLite
+ * answers at once, without its busy timeout (runs 43590559351 and
+ * 43600377522: once per run, always this login path, error within a second).
+ */
+function sqliteRefusedLogin(): boolean {
+	if (process.env.DB_KIND !== 'sqlite') {
+		return false;
+	}
+	const log = `${env('NC_ROOT')}/data/nextcloud.log`;
+	if (!existsSync(log)) {
+		return false;
+	}
+	const lines = readFileSync(log, 'utf8').trimEnd().split('\n').slice(-500).reverse();
+	for (const line of lines) {
+		if (!line.includes(LOCKED)) {
+			continue;
+		}
+		try {
+			const entry = JSON.parse(line) as { url?: string; method?: string; time?: string };
+			const age = Date.now() - Date.parse(entry.time ?? '');
+			return entry.method === 'POST' && LOGIN_POST.test(entry.url ?? '') && age >= 0 && age < 60_000;
+		} catch {
+			return false;
+		}
+	}
+	return false;
+}
+
+/**
+ * Fill the login form the page shows right now and wait until it is gone.
+ * One second try only when the server proves the SQLite lock above; every
+ * other refusal fails at once, and the retry is written into the report.
+ */
 export async function submitLogin(page: Page, who: User): Promise<void> {
-	await page.locator('#user').fill(who.name);
-	await page.locator('#password').fill(who.password);
-	await page.locator('form[name="login"] [type="submit"], button[type="submit"]').first().click();
+	const form = page.url();
+	for (let attempt = 1; attempt <= 2; attempt++) {
+		await page.locator('#user').fill(who.name);
+		await page.locator('#password').fill(who.password);
+		const answer = page.waitForResponse(
+			(response) => LOGIN_POST.test(new URL(response.url()).pathname) && response.request().method() === 'POST',
+			{ timeout: RESPONSE_TIMEOUT },
+		);
+		await page.locator('form[name="login"] [type="submit"], button[type="submit"]').first().click();
+		const response = await answer;
+		if (attempt === 1 && response.status() === 500 && sqliteRefusedLogin()) {
+			test.info().annotations.push({ type: 'sqlite-lock', description: `POST /login 500 "${LOCKED}" for ${who.name}, second try` });
+			await page.goto(form);
+			continue;
+		}
+		break;
+	}
 	await expect(page).not.toHaveURL(/\/login(\?|$)/);
 }
 
