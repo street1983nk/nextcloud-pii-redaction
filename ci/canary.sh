@@ -19,6 +19,13 @@
 #    the oc_pii_* rows and state.db. Positive control: the full database dump
 #    carries all three (oc_filecache), so the search does find them.
 #
+# 5. nextcloud.log runs at loglevel 1 (info) in CI only (owner 14.11.2026,
+#    set by deploy-harp.yml, never by the app): positive control that the log
+#    does carry info lines of this app ("PII Redaction: ..." at level 1, e.g.
+#    the refused starts of ci/rights.sh), so the scans of 3. and 4. see the
+#    info lines of the app and not only its warnings. Not debug: that level
+#    brings core lines with paths.
+#
 # Not scanned, by name: the page images (PNG, pixels and no text) and
 # work/<job>/src in the volume of the container (the downloaded original
 # itself, purged with the job). Two request lines are taken out of the name
@@ -122,6 +129,26 @@ if [ ! -f "${NC_LOG}" ]; then
 	: > "${CI_OUT}/nextcloud-log-empty-dump.txt"
 	NC_LOG="${CI_OUT}/nextcloud-log-empty-dump.txt"
 fi
+# 5. The log level the scan relies on, and the info lines of the app in it.
+loglevel=$(occ config:system:get loglevel || true)
+[ "${loglevel}" = "1" ] || fail "nextcloud.log runs at loglevel '${loglevel}', the scan expects 1 (info, set by deploy-harp.yml)"
+info_lines=$(python3 - "${NC_LOG}" <<'PY'
+import json, sys
+count = 0
+with open(sys.argv[1], encoding="utf-8", errors="replace") as source:
+    for line in source:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("level") == 1 and str(entry.get("message", "")).startswith("PII Redaction: "):
+            count += 1
+print(count)
+PY
+)
+[ "${info_lines}" -ge 1 ] || fail "positive control failed: nextcloud.log carries no info line of the app at loglevel 1"
+echo "positive control: nextcloud.log carries ${info_lines} info lines of the app"
+
 for dump in "${DB_DUMP}" "${PII_DUMP}" "${STATE_DUMP}" "${BACKEND_LOG}" "${HARP_LOG}"; do
 	[ -s "${dump}" ] || fail "$(basename "${dump}") is empty, the scan would prove nothing"
 done

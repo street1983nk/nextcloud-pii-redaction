@@ -250,8 +250,22 @@ CHECK_ORDER = (
     "ci/measure.sh",
     "ci/canary.sh",
 )
+# The scripts of the drift steps, which run after the canary on purpose.
+DRIFT_SCRIPTS = ("ci/redeploy.sh", "ci/admin-state.sh", "ci/lib.sh")
+_JOB_START = re.compile(r"^ {2}([\w-]+):\n", re.MULTILINE)
 _LEG_START = re.compile(r"^ {10}- server-version: (\S+)$")
 _LEG_FIELD = re.compile(r"^ {12}([\w-]+): (.+)$")
+
+
+def job_text(source: str, name: str) -> str:
+    """The text of one job of the jobs: block, up to the next job; empty when absent."""
+    jobs = source.find("\njobs:\n")
+    starts = [match for match in _JOB_START.finditer(source) if match.start() > jobs >= 0]
+    for index, match in enumerate(starts):
+        if match.group(1) == name:
+            end = starts[index + 1].start() if index + 1 < len(starts) else len(source)
+            return source[match.start() : end]
+    return ""
 
 
 def matrix_legs(source: str) -> list[tuple[str, str, str]]:
@@ -295,9 +309,16 @@ def deploy_findings(source: str) -> list[str]:
     present = [position for position in positions if position >= 0]
     if present != sorted(present):
         findings.append("the checks are not called in the fixed order")
-    scripts = re.findall(r"ci/[a-z_]+\.sh", source)
-    if not scripts or scripts[-1] != "ci/canary.sh":
+    # The canary is the last check of the main run; only the drift steps of
+    # plan 18 follow it (a redeploy replaces the container and its log).
+    main_job = job_text(source, "deploy-harp")
+    scripts = re.findall(r"ci/[a-z_-]+\.sh", main_job)
+    checks = [script for script in scripts if script not in DRIFT_SCRIPTS]
+    if not checks or checks[-1] != "ci/canary.sh":
         findings.append("ci/canary.sh is not the last check script")
+    canary = main_job.find("ci/canary.sh")
+    if any(0 <= main_job.find(script) < canary for script in DRIFT_SCRIPTS):
+        findings.append("a drift step runs before ci/canary.sh")
     if "NEXTCLOUD_WORKERS=8" not in source:
         findings.append("the server runs without NEXTCLOUD_WORKERS=8")
     if "repository: nextcloud/notifications\n" not in source:
@@ -374,3 +395,254 @@ def test_self_the_runner_context_in_the_job_env_is_found() -> None:
     mutated = deploy_source().replace("      NC_ROOT: ${{ github.workspace }}\n", "      NC_ROOT: ${{ runner.temp }}\n")
 
     assert deploy_findings(mutated) == ["the runner context is used in a workflow or job env block"]
+
+
+# -- deploy-harp.yml: upgrade job and drift steps (plan 18) ------------------------
+
+DRIFT_TAGS = ("@patch", "@drift", "@disabled", "@unreachable", "@missing", "@noappapi")
+# The five tags whose state is an error: a start there is refused.
+ERROR_TAGS = ("@drift", "@disabled", "@unreachable", "@missing", "@noappapi")
+UPGRADE_LEGS = frozenset(
+    {
+        ("stable33", "ubuntu-24.04", ""),
+        ("stable34", "ubuntu-24.04", ""),
+        ("stable35", "ubuntu-24.04", ""),
+        ("stable35", "ubuntu-24.04-arm", ""),
+    }
+)
+# What the upgrade job does, in this order (pitfalls 7, 9 and D).
+UPGRADE_ORDER = (
+    "repository: nextcloud/viewer",
+    "<version>${PREV_VERSION}</version>",
+    '--info-xml "${RUNNER_TEMP}/info-prev.xml"',
+    "ci/seed.sh",
+    'wait_status alice "${job}" review',
+    "STATE_DB_INODE=",
+    "./occ upgrade",
+    "app_api:app:update",
+    'test "${inode}" = "${STATE_DB_INODE}"',
+    "ci/routes.sh",
+    '${APP_PATH}/review/${UPGRADE_JOB}"',
+)
+# At the top level of a script only: a check inside a function (DB_FILE of
+# db_query) belongs to that function and is set by the script itself.
+_REQUIRED_VARIABLE = re.compile(r'^:\s*"\$\{([A-Z_]+):\?', re.MULTILINE)
+_STEP_START = re.compile(r"^ {6}- name: ", re.MULTILINE)
+
+
+def steps_of(job: str) -> list[str]:
+    """The text of every step of one job, from its - name: to the next."""
+    starts = [match.start() for match in _STEP_START.finditer(job)]
+    return [job[start:end] for start, end in zip(starts, [*starts[1:], len(job)], strict=True)]
+
+
+def upgrade_findings(source: str) -> list[str]:
+    source = _without_comments(source)
+    findings = []
+    if len(re.findall(r"^ {2}upgrade:\n", source, re.MULTILINE)) != 1:
+        return ["there is not exactly one job upgrade"]
+    job = job_text(source, "upgrade")
+    legs = matrix_legs(job)
+    if len(legs) != len(set(legs)) or set(legs) != UPGRADE_LEGS:
+        findings.append(f"the upgrade job runs {sorted(legs)} instead of 33, 34, 35 on amd64 and 35 on arm64")
+    if "ref: ${{ matrix.server-version }}\n          path: apps/viewer" not in job:
+        findings.append("the upgrade job does not check out viewer in the branch of its server version")
+    if "PREV_VERSION: '0.0.1'" not in job:
+        findings.append("the upgrade job does not start at 0.0.1")
+    positions = [job.find(mark) for mark in UPGRADE_ORDER]
+    for mark, position in zip(UPGRADE_ORDER, positions, strict=True):
+        if position < 0:
+            findings.append(f"the upgrade job lacks {mark}")
+    present = [position for position in positions if position >= 0]
+    if present != sorted(present):
+        findings.append("the upgrade job does not run its steps in the fixed order")
+    for mark, what in (
+        ("0|3)", "accepts no exit 3 of occ upgrade"),
+        ("installed=$(./occ config:app:get pii_redaction installed_version)", "does not read installed_version"),
+        ('test "${installed}" = "${CURR_VERSION}"', "does not check that installed_version moved"),
+        ('test "${created}" = "${VOLUME_CREATED}"', "does not compare the CreatedAt of the volume"),
+        ('cmp "${CI_OUT}/upgrade-job-before.tsv"', "does not compare the job row in oc_pii_jobs"),
+        ('cmp "${CI_OUT}/upgrade-volume-before.txt"', "does not compare the job in state.db and its page image"),
+    ):
+        if mark not in job:
+            findings.append(f"the upgrade job {what}")
+    return findings
+
+
+def drift_findings(source: str) -> list[str]:
+    source = _without_comments(source)
+    findings = []
+    called = re.findall(r"--grep (@\w+)", source)
+    for tag in DRIFT_TAGS:
+        if called.count(tag) != 1:
+            findings.append(f"{tag} is called {called.count(tag)} times with --grep, not once")
+    steps = steps_of(job_text(source, "deploy-harp"))
+    canary = next((index for index, step in enumerate(steps) if "ci/canary.sh" in step), -1)
+    for tag in DRIFT_TAGS:
+        holding = [index for index, step in enumerate(steps) if f"--grep {tag}" in step]
+        if not holding:
+            continue
+        index = holding[0]
+        step = steps[index]
+        if index < canary:
+            findings.append(f"the step of {tag} runs before ci/canary.sh")
+        if tag in ERROR_TAGS and (
+            'test "${code}" = "503"' not in step or "'.reason == \"backend_unavailable\"'" not in step
+        ):
+            findings.append(f"the step of {tag} does not check 503 backend_unavailable")
+        if tag in ("@patch", "@drift") and "PII_BACKEND_VERSION=" not in step:
+            findings.append(f"the step of {tag} does not name PII_BACKEND_VERSION")
+        if tag == "@patch" and 'start_job alice "${file}" 201' not in step:
+            findings.append("the step of @patch does not show that a start works")
+    companion = [step for step in steps if "app:disable pii_redaction" in step]
+    if len(companion) != 1:
+        findings.append("no single step disables the PHP app")
+    else:
+        step = companion[0]
+        for mark, what in (
+            ('\'"companion": "missing"\'', "does not wait for companion missing in the container log"),
+            ('\'"companion": "ok"\'', "has no positive control of the log line"),
+            ("seq 1 30", "does not wait at most 60 s"),
+            ('test "${status}" = "queued"', "does not read the job as queued"),
+            ("app:enable pii_redaction", "does not enable the PHP app again"),
+        ):
+            if mark not in step:
+                findings.append(f"the companion step {what}")
+    return findings
+
+
+def required_variables(script: str) -> list[str]:
+    """The variables a script stops without: ': "${NAME:?...}"' at the top level."""
+    return sorted(set(_REQUIRED_VARIABLE.findall(script)))
+
+
+def unset_variable_findings(workflow: str, scripts: list[str]) -> list[str]:
+    """Every required variable of the scripts is set in the workflow (pitfall 8)."""
+    code = _without_comments(workflow)
+    findings = []
+    for name in sorted({name for script in scripts for name in required_variables(script)}):
+        if not re.search(rf"^\s+{name}: |echo \"{name}=", code, re.MULTILINE):
+            findings.append(f"{name} is required by a drift script and set nowhere in the workflow")
+    return findings
+
+
+def loglevel_findings(workflow: str, canary: str, php_sources: list[str]) -> list[str]:
+    """Owner 14.11.2026: loglevel 1 in CI before the canary, never debug, never in the app."""
+    code = _without_comments(workflow)
+    main_job = job_text(code, "deploy-harp")
+    findings = []
+    setting = main_job.find("config:system:set loglevel --value=1 --type=integer")
+    if setting < 0 or setting > main_job.find("ci/canary.sh"):
+        findings.append("the main run does not set loglevel 1 before ci/canary.sh")
+    if re.search(r"loglevel --value=0", code):
+        findings.append("a workflow sets the debug loglevel 0")
+    if 'entry.get("level") == 1' not in canary or "positive control failed: nextcloud.log" not in canary:
+        findings.append("ci/canary.sh has no positive control of the info lines of the app")
+    if any("loglevel" in text for text in php_sources):
+        findings.append("the PHP app touches the loglevel")
+    return findings
+
+
+def _php_sources() -> list[str]:
+    return [path.read_text(encoding="utf-8") for path in sorted((REPO_ROOT / "php" / "lib").rglob("*.php"))]
+
+
+def _ci(name: str) -> str:
+    return (REPO_ROOT / "ci" / name).read_text(encoding="utf-8")
+
+
+def test_the_upgrade_job_installs_0_0_1_and_proves_the_update() -> None:
+    assert upgrade_findings(deploy_source()) == []
+
+
+def test_every_drift_state_runs_once_after_the_canary_and_refuses_a_start() -> None:
+    assert drift_findings(deploy_source()) == []
+
+
+def test_every_required_variable_of_the_drift_scripts_is_set() -> None:
+    scripts = [_ci("redeploy.sh"), _ci("admin-state.sh"), _ci("lib.sh")]
+    assert "INFO_XML" in required_variables(scripts[0])
+    assert unset_variable_findings(deploy_source(), scripts) == []
+
+
+def test_ci_runs_nextcloud_log_at_info_and_the_canary_checks_it() -> None:
+    php = _php_sources()
+    assert len(php) >= 20, "the scan found almost no PHP file, so it would judge nothing"
+    assert loglevel_findings(deploy_source(), _ci("canary.sh"), php) == []
+
+
+def test_self_the_upgrade_rules_fire() -> None:
+    source = deploy_source()
+    renamed = source.replace("  upgrade:\n", "  upgrade-old:\n")
+    assert upgrade_findings(renamed) == ["there is not exactly one job upgrade"]
+    arm_leg = (
+        "          - server-version: stable35\n            php-version: '8.3'\n            runner: ubuntu-24.04-arm\n"
+    )
+    mutated = (
+        source.replace("          path: apps/viewer\n", "          path: apps/files_pdfviewer\n")
+        .replace("0|3)", "0)")
+        .replace('test "${inode}" = "${STATE_DB_INODE}"', "true")
+        .replace(arm_leg + "    steps:", "    steps:")
+    )
+    found = upgrade_findings(mutated)
+    assert len(found) == 4
+    assert found[0].startswith("the upgrade job runs [")
+    assert found[0].endswith(" instead of 33, 34, 35 on amd64 and 35 on arm64")
+    assert found[1:] == [
+        "the upgrade job does not check out viewer in the branch of its server version",
+        'the upgrade job lacks test "${inode}" = "${STATE_DB_INODE}"',
+        "the upgrade job accepts no exit 3 of occ upgrade",
+    ]
+    late = "bash app-src/ci/routes.sh\n\n      - name: After the update, the old job"
+    early_step = "      - name: Routes too early\n        run: bash app-src/ci/routes.sh\n\n"
+    first_job_step = "      - name: A job of alice up to review at 0.0.1\n"
+    swapped = source.replace(late, "true\n\n      - name: After the update, the old job").replace(
+        first_job_step, early_step + first_job_step
+    )
+    assert "the upgrade job does not run its steps in the fixed order" in upgrade_findings(swapped)
+
+
+def test_self_the_drift_rules_fire() -> None:
+    source = deploy_source()
+    twice = source.replace("npx playwright test --grep @missing", "npx playwright test --grep @missing --grep @drift")
+    assert "@drift is called 2 times with --grep, not once" in drift_findings(twice)
+    no_503 = source.replace("jq -e '.reason == \"backend_unavailable\"' app-src/ci/out/start-unreachable.json", "true")
+    assert drift_findings(no_503) == ["the step of @unreachable does not check 503 backend_unavailable"]
+    no_version = source.replace('PII_BACKEND_VERSION="${DRIFT_MINOR_VERSION}" ', "")
+    assert drift_findings(no_version) == ["the step of @drift does not name PII_BACKEND_VERSION"]
+    no_queue = source.replace('test "${status}" = "queued"', "true")
+    assert drift_findings(no_queue) == ["the companion step does not read the job as queued"]
+    # The canary moved behind the drift steps: right before the first "Collect
+    # the logs", which is the one of the main job.
+    canary_step = (
+        "      - name: Canary and test file names in no database, log or copy\n        run: bash app-src/ci/canary.sh\n"
+    )
+    collect = "      - name: Collect the logs\n"
+    early = source.replace(canary_step, "").replace(collect, canary_step + "\n" + collect, 1)
+    found = drift_findings(early)
+    assert "the step of @patch runs before ci/canary.sh" in found
+    assert "the step of @noappapi runs before ci/canary.sh" in found
+    assert "a drift step runs before ci/canary.sh" in deploy_findings(early)
+
+
+def test_self_a_required_variable_left_unset_is_named() -> None:
+    scripts = [_ci("redeploy.sh"), _ci("admin-state.sh"), _ci("lib.sh")]
+    mutated = deploy_source().replace('echo "INFO_XML=${RUNNER_TEMP}/info-citest.xml"', "true")
+    assert unset_variable_findings(mutated, scripts) == [
+        "INFO_XML is required by a drift script and set nowhere in the workflow"
+    ]
+    sample = ': "${NC_URL:?NC_URL is required}"\n: "${OTHER:-x}"\nf() {\n\t: "${INNER:?set by the script}"\n}\n'
+    assert required_variables(sample) == ["NC_URL"]
+
+
+def test_self_the_loglevel_rules_fire() -> None:
+    canary = _ci("canary.sh")
+    mutated = deploy_source().replace("loglevel --value=1 --type=integer", "loglevel --value=0 --type=integer")
+    assert loglevel_findings(
+        mutated, canary.replace('entry.get("level") == 1', "True"), ["$c->setValue('loglevel', 2);"]
+    ) == [
+        "the main run does not set loglevel 1 before ci/canary.sh",
+        "a workflow sets the debug loglevel 0",
+        "ci/canary.sh has no positive control of the info lines of the app",
+        "the PHP app touches the loglevel",
+    ]

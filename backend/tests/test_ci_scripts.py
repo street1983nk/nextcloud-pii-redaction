@@ -26,7 +26,9 @@ SHEBANG = "#!/usr/bin/env bash\n"
 STRICT = "set -euo pipefail"
 OUT_ROOT = "${CI_OUT}"
 
-_SCRIPT_CALL = re.compile(r"\bci/([a-z_]+\.sh)\b")
+# A hyphen belongs to a script name (ci/admin-state.sh, plan 18); without it the
+# rules would not see that script at all.
+_SCRIPT_CALL = re.compile(r"\bci/([a-z_-]+\.sh)\b")
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_]+)\1")
 # A redirection after a blank, a ";", "}" or ")" with an optional descriptor;
 # "->" inside a message and ">&2" are no redirection into a file.
@@ -313,3 +315,12 @@ exactly_one=$(grep -c '^sample [0-9]* active 1$' log)
         "no check that a sample saw exactly 1"
     ]
     assert queue_problems(good.replace("lease_until", "status")) == ["the samples do not ask lease_until"]
+
+
+def test_the_scripts_of_plan_18_are_seen_by_the_rules() -> None:
+    # Positive control of the call pattern: the drift scripts, one of them with
+    # a hyphen, are in the list the rules check.
+    names = called_scripts(DEPLOY.read_text(encoding="utf-8"))
+    assert "redeploy.sh" in names
+    assert "admin-state.sh" in names
+    assert called_scripts("bash app-src/ci/admin-state.sh x.json\n# bash ci/hidden.sh\n") == ["admin-state.sh"]

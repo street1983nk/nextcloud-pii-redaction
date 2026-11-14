@@ -22,10 +22,22 @@ name: Deploy through HaRP
 #     download block, etag binding, one job at a time, no browser route,
 #   - Playwright: the screenshots and assertions of the UI-SPEC,
 #   - ci/measure.sh: image size, cold start, idle RSS, peak per child,
-#   - ci/canary.sh, last: the canary of the fixtures, found first in the
-#     uploaded originals (positive control), is in no database, log or copy.
+#   - ci/canary.sh, the last check of the main run: the canary of the
+#     fixtures, found first in the uploaded originals (positive control), is
+#     in no database, log or copy, and nextcloud.log carries info lines of
+#     the app (loglevel 1, owner 14.11.2026, CI only),
+#   - after it the drift steps (plan 18, PLAT-02): the backend registered a
+#     patch and a minor apart, disabled, stopped, unregistered and AppAPI
+#     disabled give the six admin states with their banners, every error
+#     state refuses a start with 503 backend_unavailable, and a disabled PHP
+#     app makes the container report companion missing and claim nothing.
+#     They run after the canary because a redeploy replaces the container and
+#     with it the log the canary reads.
 #
-# The upgrade job and the drift steps follow in plan 18.
+# The second job, upgrade (plan 18, PLAT-01), installs both halves at 0.0.1,
+# takes a job to review and updates both to the version of this commit; the
+# volume, state.db (same inode) and the job survive, and no browser route
+# reaches the container afterwards.
 on:
   push:
     branches:
@@ -63,9 +75,11 @@ jobs:
   deploy-harp:
     name: deploy-harp ${{ matrix.server-version }} ${{ matrix.runner }} ${{ matrix.database }}
     runs-on: ${{ matrix.runner }}
-    # An estimate until the first green run measures it: image build, HaRP,
-    # six core paths twice each, the check scripts and the Playwright grid.
-    timeout-minutes: 90
+    # An estimate until the first green run measures it (plan 20): image
+    # build, HaRP, six core paths twice each, the check scripts, the Playwright
+    # grid, and since plan 18 four registrations, two job runs and six admin
+    # tags over the twelve projects in the drift steps (90 before them).
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -182,6 +196,10 @@ jobs:
           fi
           ./occ config:system:set trusted_domains 1 --value=127.0.0.1
           ./occ config:system:set trusted_domains 2 --value=localhost
+          # Owner 14.11.2026: in CI only, nextcloud.log takes info lines
+          # (loglevel 1), so ci/canary.sh scans the info lines of the app as
+          # well. Never debug (core lines with paths), never set by the app.
+          ./occ config:system:set loglevel --value=1 --type=integer
           # PublishJob is a background job; ci/flow.sh runs cron.php for it.
           ./occ background:cron
           NEXTCLOUD_WORKERS=8 NEXTCLOUD_HOST=0.0.0.0 composer run serve > "${RUNNER_TEMP}/php-server.log" 2>&1 &
@@ -382,7 +400,7 @@ jobs:
 
       # --ignore-scripts: npm ci installs exactly the lock file with its
       # integrity hashes and runs no install script. The drift tags run in the
-      # steps of plan 18.
+      # drift steps after the canary.
       - name: Playwright on the running instance
         working-directory: app-src/ci/playwright
         run: |
@@ -393,9 +411,222 @@ jobs:
       - name: Measurements
         run: bash app-src/ci/measure.sh
 
-      # Last: every request, log line and copy of the run is there to be scanned.
+      # Last check of the main run: every request, log line and copy of it is
+      # there to be scanned. The drift steps below replace the container.
       - name: Canary and test file names in no database, log or copy
         run: bash app-src/ci/canary.sh
+
+      # -- Lockstep in the running instance (plan 18, PLAT-02) --------------------
+      #
+      # Owner rule of 06.11.: a difference in major or minor is an error with an
+      # admin banner and no start, a difference in the patch part is a hint and
+      # a start works, an unknown version is never ok. ci/redeploy.sh registers
+      # the backend again at a chosen version (same image, AppAPI hands
+      # <version> to the container as APP_VERSION; it needs INFO_XML, pitfall
+      # 8), ci/admin-state.sh reads the verdict where the admin reads it (the
+      # route behind "Check again", which also refreshes what a start follows).
+      # Every error state refuses POST /api/v1/jobs with 503 backend_unavailable.
+      # The versions are derived from the PHP app of this commit, so the steps
+      # keep their meaning after the next version bump.
+      - name: Drift versions next to the version of this commit
+        run: |
+          own=$(sed -n 's|.*<version>\([^<]*\)</version>.*|\1|p' apps/pii_redaction/appinfo/info.xml | head -n 1)
+          if [[ ! "${own}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "apps/pii_redaction/appinfo/info.xml carries no major.minor.patch version ('${own}')"
+            exit 1
+          fi
+          major=${BASH_REMATCH[1]}
+          minor=${BASH_REMATCH[2]}
+          patch=${BASH_REMATCH[3]}
+          {
+            echo "OWN_VERSION=${own}"
+            echo "INFO_XML=${RUNNER_TEMP}/info-citest.xml"
+            echo "DRIFT_MINOR_VERSION=${major}.$((minor + 1)).0"
+            echo "DRIFT_PATCH_VERSION=${major}.${minor}.$((patch + 1))"
+            cat app-src/ci/out/fileids.env
+          } >> "${GITHUB_ENV}"
+          echo "own ${own}, minor drift ${major}.$((minor + 1)).0, patch drift ${major}.${minor}.$((patch + 1))"
+
+      # The baseline the drift is measured against: the untouched pair is ok.
+      - name: Drift baseline, the untouched pair is ok
+        run: |
+          bash app-src/ci/admin-state.sh state-baseline.json ok
+          jq -e --arg v "${OWN_VERSION}" '.ownVersion == $v and .backendVersion == $v and .companion == "ok"' \
+            app-src/ci/out/state-baseline.json
+
+      # Only the patch part differs: a hint without an action, and a start
+      # works up to review on a fresh copy.
+      - name: Drift 1, backend a patch apart gives version_patch_differs and a start works
+        run: |
+          bash app-src/ci/redeploy.sh "${DRIFT_PATCH_VERSION}"
+          bash app-src/ci/admin-state.sh state-patch.json version_patch_differs
+          jq -e --arg own "${OWN_VERSION}" --arg b "${DRIFT_PATCH_VERSION}" \
+            '.ownVersion == $own and .backendVersion == $b' app-src/ci/out/state-patch.json
+          . app-src/ci/lib.sh
+          curl -sfS -u "alice:${CI_PASS}" -X COPY -H "Destination: $(dav_url alice 'Bescheid 2026-114 Patch.pdf')" \
+            -H 'Overwrite: F' "$(dav_url alice 'Bescheid 2026-114.pdf')" > /dev/null
+          file=$(fileid_of alice 'Bescheid 2026-114 Patch.pdf')
+          job=$(start_job alice "${file}" 201)
+          wait_status alice "${job}" review
+          echo "a start while only the patch differs reached review (job ${job})"
+          cd app-src/ci/playwright
+          PII_BACKEND_VERSION="${DRIFT_PATCH_VERSION}" npx playwright test --grep @patch
+
+      # Direction one of the error: the container is a minor ahead. It is never
+      # asked anything, and a start is refused.
+      - name: Drift 2, backend a minor ahead gives version_drift and no start
+        run: |
+          bash app-src/ci/redeploy.sh "${DRIFT_MINOR_VERSION}"
+          bash app-src/ci/admin-state.sh state-drift.json version_drift
+          jq -e --arg own "${OWN_VERSION}" --arg b "${DRIFT_MINOR_VERSION}" \
+            '.ownVersion == $own and .backendVersion == $b' app-src/ci/out/state-drift.json
+          code=$(curl -s -o app-src/ci/out/start-drift.json -w '%{http_code}' -u "alice:${CI_PASS}" \
+            -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+            --data "{\"fileId\": ${FILE_PDF_ALICE}}" "${NC_URL}/index.php/apps/${APP_ID}/api/v1/jobs")
+          echo "start while version_drift: HTTP ${code}"
+          test "${code}" = "503"
+          jq -e '.reason == "backend_unavailable"' app-src/ci/out/start-drift.json
+          cd app-src/ci/playwright
+          PII_BACKEND_VERSION="${DRIFT_MINOR_VERSION}" npx playwright test --grep @drift
+
+      - name: Back to the matching pair after the version drift
+        run: |
+          bash app-src/ci/redeploy.sh "${OWN_VERSION}"
+          bash app-src/ci/admin-state.sh state-back-version.json ok
+
+      - name: Drift 3, backend disabled gives backend_disabled and no start
+        run: |
+          timeout 120 ./occ app_api:app:disable "${BACKEND_APP_ID}"
+          bash app-src/ci/admin-state.sh state-disabled.json backend_disabled
+          code=$(curl -s -o app-src/ci/out/start-disabled.json -w '%{http_code}' -u "alice:${CI_PASS}" \
+            -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+            --data "{\"fileId\": ${FILE_PDF_ALICE}}" "${NC_URL}/index.php/apps/${APP_ID}/api/v1/jobs")
+          echo "start while backend_disabled: HTTP ${code}"
+          test "${code}" = "503"
+          jq -e '.reason == "backend_unavailable"' app-src/ci/out/start-disabled.json
+          status=0
+          (cd app-src/ci/playwright && npx playwright test --grep @disabled) || status=$?
+          timeout 300 ./occ app_api:app:enable "${BACKEND_APP_ID}"
+          bash app-src/ci/admin-state.sh state-back-disabled.json ok
+          exit "${status}"
+
+      - name: Drift 4, backend container stopped gives backend_unreachable and no start
+        run: |
+          container=$(docker ps --filter "name=nc_app_${BACKEND_APP_ID}" --format '{{.Names}}' | head -n 1)
+          test -n "${container}"
+          docker stop "${container}"
+          bash app-src/ci/admin-state.sh state-unreachable.json backend_unreachable
+          code=$(curl -s -o app-src/ci/out/start-unreachable.json -w '%{http_code}' -u "alice:${CI_PASS}" \
+            -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+            --data "{\"fileId\": ${FILE_PDF_ALICE}}" "${NC_URL}/index.php/apps/${APP_ID}/api/v1/jobs")
+          echo "start while backend_unreachable: HTTP ${code}"
+          test "${code}" = "503"
+          jq -e '.reason == "backend_unavailable"' app-src/ci/out/start-unreachable.json
+          status=0
+          (cd app-src/ci/playwright && npx playwright test --grep @unreachable) || status=$?
+          docker start "${container}"
+          bash app-src/ci/admin-state.sh state-back-unreachable.json ok
+          exit "${status}"
+
+      # The other half is gone: unregistered the way an admin removes it, and
+      # without the data flag, so the volume stays for the way back.
+      - name: Drift 5, backend unregistered gives backend_missing and no start
+        run: |
+          timeout 300 ./occ app_api:app:unregister "${BACKEND_APP_ID}"
+          bash app-src/ci/admin-state.sh state-missing.json backend_missing
+          code=$(curl -s -o app-src/ci/out/start-missing.json -w '%{http_code}' -u "alice:${CI_PASS}" \
+            -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+            --data "{\"fileId\": ${FILE_PDF_ALICE}}" "${NC_URL}/index.php/apps/${APP_ID}/api/v1/jobs")
+          echo "start while backend_missing: HTTP ${code}"
+          test "${code}" = "503"
+          jq -e '.reason == "backend_unavailable"' app-src/ci/out/start-missing.json
+          status=0
+          (cd app-src/ci/playwright && npx playwright test --grep @missing) || status=$?
+          bash app-src/ci/redeploy.sh "${OWN_VERSION}"
+          bash app-src/ci/admin-state.sh state-back-missing.json ok
+          exit "${status}"
+
+      - name: Drift 6, AppAPI disabled gives no_app_api and no start
+        run: |
+          ./occ app:disable app_api
+          bash app-src/ci/admin-state.sh state-noappapi.json no_app_api
+          code=$(curl -s -o app-src/ci/out/start-noappapi.json -w '%{http_code}' -u "alice:${CI_PASS}" \
+            -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+            --data "{\"fileId\": ${FILE_PDF_ALICE}}" "${NC_URL}/index.php/apps/${APP_ID}/api/v1/jobs")
+          echo "start while no_app_api: HTTP ${code}"
+          test "${code}" = "503"
+          jq -e '.reason == "backend_unavailable"' app-src/ci/out/start-noappapi.json
+          status=0
+          (cd app-src/ci/playwright && npx playwright test --grep @noappapi) || status=$?
+          ./occ app:enable -f app_api
+          # Should AppAPI have left the ExApp disabled on its way out, it is
+          # enabled again here; the state then has to come back to ok.
+          bash app-src/ci/admin-state.sh state-noappapi-after.json
+          if jq -e '.state == "backend_disabled"' app-src/ci/out/state-noappapi-after.json > /dev/null; then
+            timeout 300 ./occ app_api:app:enable "${BACKEND_APP_ID}"
+          fi
+          bash app-src/ci/admin-state.sh state-back-noappapi.json ok
+          exit "${status}"
+
+      # The other direction (PLAT-02): the PHP app goes away and the container
+      # notices on its own. A job is put into the queue while the container is
+      # paused, so it cannot be claimed before the PHP app is disabled. After
+      # the unpause the next claim of the runner gets 404, the runner asks the
+      # handshake at once (runner.py), and the container logs the change to
+      # missing within a minute; it claims nothing after that and the job stays
+      # queued (read in oc_pii_jobs). Positive controls: the container logged
+      # "companion": "ok" before, and the refused claim is in its log. After the
+      # PHP app is back, /status refreshes the stale answer, the admin state is
+      # ok with companion ok and the very same job runs to review.
+      - name: Drift 7, PHP app disabled gives companion missing and no claim
+        run: |
+          . app-src/ci/lib.sh
+          db_init
+          container=$(docker ps --filter "name=nc_app_${BACKEND_APP_ID}" --format '{{.Names}}' | head -n 1)
+          test -n "${container}"
+          logs=$(docker logs "${container}" 2>&1)
+          grep -qF '"companion": "ok"' <<<"${logs}" || fail "positive control failed: the container never logged companion ok"
+          # A fresh verdict, so the start below follows it within the minute.
+          bash app-src/ci/admin-state.sh state-companion-before.json ok
+          curl -sfS -u "alice:${CI_PASS}" -X COPY -H "Destination: $(dav_url alice 'Bescheid 2026-114 Companion.pdf')" \
+            -H 'Overwrite: F' "$(dav_url alice 'Bescheid 2026-114.pdf')" > /dev/null
+          file=$(fileid_of alice 'Bescheid 2026-114 Companion.pdf')
+          since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          docker pause "${container}"
+          job=$(start_job alice "${file}" 201)
+          ./occ app:disable pii_redaction
+          docker unpause "${container}"
+          seen=no
+          for _ in $(seq 1 30); do
+            logs=$(docker logs --since "${since}" "${container}" 2>&1)
+            if grep -qF '"companion": "missing"' <<<"${logs}"; then
+              seen=yes
+              break
+            fi
+            sleep 2
+          done
+          [ "${seen}" = "yes" ] || fail "the container did not log companion missing within 60 s"
+          grep -qF '"msg": "claim refused"' <<<"${logs}" || fail "positive control failed: no refused claim in the container log"
+          refused=$(grep -cF '"msg": "claim refused"' <<<"${logs}")
+          # Two idle rounds of the runner and more (10 s each): no claim after it.
+          sleep 25
+          logs=$(docker logs --since "${since}" "${container}" 2>&1)
+          test "$(grep -cF '"msg": "claim refused"' <<<"${logs}")" = "${refused}" \
+            || fail "the container went on claiming while the companion is missing"
+          status=$(db_query "SELECT status FROM oc_pii_jobs WHERE id = ${job}")
+          echo "job ${job} is ${status} while the PHP app is disabled"
+          test "${status}" = "queued"
+          ./occ app:enable pii_redaction
+          companion=missing
+          for _ in $(seq 1 20); do
+            bash app-src/ci/admin-state.sh state-companion-back.json ok
+            companion=$(json_field app-src/ci/out/state-companion-back.json companion)
+            [ "${companion}" = "ok" ] && break
+            sleep 3
+          done
+          [ "${companion}" = "ok" ] || fail "the container still reports companion ${companion} after the PHP app came back"
+          wait_status alice "${job}" review
+          echo "the job queued while the companion was missing reached review"
 
       - name: Collect the logs
         if: always()
@@ -435,4 +666,410 @@ jobs:
             app-src/ci/playwright/test-results/
             app-src/ci/playwright/screenshots/
           retention-days: 14
+          if-no-files-found: ignore
+
+  # The upgrade proof of both halves (plan 18, PLAT-01; AVS plan 10). There is
+  # no released version yet, so the previous one is this commit with both
+  # version numbers set to PREV_VERSION by sed: the PHP app in its
+  # appinfo/info.xml, the backend in <version> and <image-tag> of its
+  # info.xml (the same image is pushed under both tags; AppAPI hands
+  # <version> to the container as APP_VERSION, and that is all the lockstep
+  # compares). Both halves are installed at 0.0.1, alice takes a PDF to review,
+  # and then both are moved to the version of this commit the way an update
+  # moves them: the PHP app by swapping its directory and occ upgrade, the
+  # ExApp by app_api:app:update with the new info.xml.
+  #
+  # What has to survive, compared before against after: the volume (same
+  # CreatedAt), state.db in it (same inode, so the same file and not a new
+  # one), the row of the job in oc_pii_jobs and in state.db, and its page
+  # image in the volume. After the update the pair is ok at the new version,
+  # ci/routes.sh finds no browser route into the container (pitfall D: the
+  # empty routes element also empties the list on an update), and the review
+  # page, the status and the page image of the old job answer 200.
+  #
+  # app_api:app:update keeps the volume: it removes the old container without
+  # remove_data, and HaRP deletes a volume only with remove_data (pitfall 9,
+  # AVS 01-10-SUMMARY); this job is the proof on the running thing.
+  upgrade:
+    name: upgrade ${{ matrix.server-version }} ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    # An estimate until the first green run measures it: one image build,
+    # HaRP, the seed, one job to review and the update of both halves.
+    timeout-minutes: 45
+    env:
+      NC_ROOT: ${{ github.workspace }}
+      DB_KIND: sqlite
+      SERVER_VERSION: ${{ matrix.server-version }}
+      PREV_VERSION: '0.0.1'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every server version on amd64, and the newest on arm64 as well: the
+        # update path does not differ by architecture, the image build does.
+        include:
+          - server-version: stable33
+            php-version: '8.2'
+            runner: ubuntu-24.04
+          - server-version: stable34
+            php-version: '8.2'
+            runner: ubuntu-24.04
+          - server-version: stable35
+            php-version: '8.3'
+            runner: ubuntu-24.04
+          - server-version: stable35
+            php-version: '8.3'
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Check out nextcloud/server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nextcloud/server
+          ref: ${{ matrix.server-version }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Check out nextcloud/app_api
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nextcloud/app_api
+          ref: ${{ matrix.server-version }}
+          path: apps/app_api
+          persist-credentials: false
+
+      - name: Check out nextcloud/notifications
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nextcloud/notifications
+          ref: ${{ matrix.server-version }}
+          path: apps/notifications
+          persist-credentials: false
+
+      # Pitfall 7: the server repository no longer carries apps/viewer, but
+      # core/shipped.json lists viewer as always enabled, so occ upgrade stops
+      # on stable33 and stable34 with "The files of the app viewer were not
+      # correctly replaced". A release tarball carries viewer; this checkout
+      # does the same with the viewer branch of the same server version.
+      - name: Check out nextcloud/viewer like a release tarball carries it
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nextcloud/viewer
+          ref: ${{ matrix.server-version }}
+          path: apps/viewer
+          persist-credentials: false
+
+      - name: Check out this app
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: app-src
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: mbstring, iconv, fileinfo, intl, sqlite, pdo_sqlite, gd, zip
+          coverage: none
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install Nextcloud and enable AppAPI and notifications
+        run: |
+          mkdir data
+          ./occ maintenance:install --database=sqlite --admin-user "${ADMIN_USER}" --admin-pass "${ADMIN_PASS}"
+          ./occ config:system:set trusted_domains 1 --value=127.0.0.1
+          ./occ config:system:set trusted_domains 2 --value=localhost
+          ./occ background:cron
+          NEXTCLOUD_WORKERS=8 NEXTCLOUD_HOST=0.0.0.0 composer run serve > "${RUNNER_TEMP}/php-server.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf "${NC_URL}/status.php" > /dev/null && break
+            sleep 2
+          done
+          curl -sf "${NC_URL}/status.php"
+          ./occ app:enable -vvv -f app_api
+          ./occ app:enable notifications
+
+      # php-curr is this commit as it is, php-prev the same tree at
+      # PREV_VERSION. Every place the lockstep looks says the version of its
+      # side, so a sed that missed ends the job here and not as a puzzle later.
+      - name: Build the PHP app and prepare 0.0.1 and the current version
+        run: |
+          (cd app-src/php && npm ci --ignore-scripts --no-audit --no-fund && npm run build)
+          test -s app-src/php/js/pii_redaction-init.mjs
+          curr=$(sed -n 's|.*<version>\([^<]*\)</version>.*|\1|p' app-src/php/appinfo/info.xml | head -n 1)
+          [[ "${curr}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "${curr}" != "${PREV_VERSION}"
+          cp -R app-src/php "${RUNNER_TEMP}/php-curr"
+          cp -R app-src/php "${RUNNER_TEMP}/php-prev"
+          sed -i "s|<version>${curr}</version>|<version>${PREV_VERSION}</version>|" "${RUNNER_TEMP}/php-prev/appinfo/info.xml"
+          test "$(grep -c "<version>${PREV_VERSION}</version>" "${RUNNER_TEMP}/php-prev/appinfo/info.xml")" = "1"
+          test "$(grep -c '<version>[^<]*</version>' "${RUNNER_TEMP}/php-prev/appinfo/info.xml")" = "1"
+          for side in prev curr; do
+            if [ "${side}" = "prev" ]; then version="${PREV_VERSION}"; else version="${curr}"; fi
+            sed -e "s|<registry>ghcr.io</registry>|<registry>${LOCAL_REGISTRY}</registry>|" \
+                -e "s|<image>street1983nk/${BACKEND_APP_ID}</image>|<image>${BACKEND_APP_ID}</image>|" \
+                -e "s|<version>[^<]*</version>|<version>${version}</version>|" \
+                -e "s|<image-tag>[^<]*</image-tag>|<image-tag>${version}</image-tag>|" \
+                app-src/backend/appinfo/info.xml > "${RUNNER_TEMP}/info-${side}.xml"
+            test "$(grep -c "<version>${version}</version>" "${RUNNER_TEMP}/info-${side}.xml")" = "1"
+            test "$(grep -c "<image-tag>${version}</image-tag>" "${RUNNER_TEMP}/info-${side}.xml")" = "1"
+            test "$(grep -c '<routes/>' "${RUNNER_TEMP}/info-${side}.xml")" = "1"
+            grep -E '<version>|<registry>|<image>|<image-tag>' "${RUNNER_TEMP}/info-${side}.xml"
+          done
+          echo "CURR_VERSION=${curr}" >> "${GITHUB_ENV}"
+          echo "previous ${PREV_VERSION}, current ${curr}"
+
+      - name: Install the PHP app at 0.0.1
+        run: |
+          mv "${RUNNER_TEMP}/php-prev" apps/pii_redaction
+          ./occ app:enable pii_redaction
+          test "$(./occ config:app:get pii_redaction installed_version)" = "${PREV_VERSION}"
+
+      - name: Build the image once and push it under both versions
+        run: |
+          docker run -d -p 5000:5000 --name registry registry:2
+          docker build -t "${LOCAL_REGISTRY}/${BACKEND_APP_ID}:${PREV_VERSION}" ./app-src/backend
+          docker tag "${LOCAL_REGISTRY}/${BACKEND_APP_ID}:${PREV_VERSION}" "${LOCAL_REGISTRY}/${BACKEND_APP_ID}:${CURR_VERSION}"
+          docker push "${LOCAL_REGISTRY}/${BACKEND_APP_ID}:${PREV_VERSION}"
+          docker push "${LOCAL_REGISTRY}/${BACKEND_APP_ID}:${CURR_VERSION}"
+
+      - name: Start HaRP
+        run: |
+          harp_key=$(openssl rand -hex 16)
+          echo "::add-mask::${harp_key}"
+          echo "HARP_SHARED_KEY=${harp_key}" >> "${GITHUB_ENV}"
+          mkdir -p "${RUNNER_TEMP}/certs"
+          docker run -d --name "${HARP_CONTAINER}" --net host \
+            -e HP_SHARED_KEY="${harp_key}" \
+            -e NC_INSTANCE_URL="${NC_URL}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${RUNNER_TEMP}/certs:/certs" \
+            "${HARP_IMAGE}"
+          for _ in $(seq 1 45); do
+            code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' \
+              -H "harp-shared-key: ${harp_key}" -H 'docker-engine-port: 24000' \
+              http://localhost:8780/exapps/app_api/v1.44/_ping || true)
+            [ "${code}" = "200" ] && exit 0
+            sleep 2
+          done
+          docker logs "${HARP_CONTAINER}" || true
+          exit 1
+
+      - name: Put one address in front of Nextcloud and HaRP
+        run: |
+          cat > "${RUNNER_TEMP}/exapps-proxy.conf" <<'CONF'
+          server {
+            listen 8090;
+            location /exapps/ {
+              proxy_pass http://127.0.0.1:8780;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+            }
+            location / {
+              proxy_pass http://127.0.0.1:8080;
+              proxy_http_version 1.1;
+              proxy_set_header Host $host;
+            }
+          }
+          CONF
+          docker run -d --name exapps-proxy --net host \
+            -v "${RUNNER_TEMP}/exapps-proxy.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8090/status.php > /dev/null && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Register the HaRP daemon and install the ExApp at 0.0.1
+        run: |
+          timeout 30 ./occ app_api:daemon:register \
+            harp_proxy_host "Harp Proxy (Host)" docker-install http localhost:8780 \
+            http://localhost:8090 \
+            --harp --harp_frp_address localhost:8782 \
+            --harp_shared_key "${HARP_SHARED_KEY}" \
+            --net host --set-default
+          timeout 600 ./occ app_api:app:register "${BACKEND_APP_ID}" harp_proxy_host \
+            --info-xml "${RUNNER_TEMP}/info-prev.xml" --wait-finish
+          container=$(docker ps --filter "name=nc_app_${BACKEND_APP_ID}" --format '{{.Names}}' | head -n 1)
+          test -n "${container}" || { docker ps -a; exit 1; }
+          {
+            echo "EXAPP_CONTAINER=${container}"
+            echo "BACKEND_CONTAINER=${container}"
+          } >> "${GITHUB_ENV}"
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' "${container}")" = "healthy" ] && break
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "${container}")" = "healthy"
+          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container}" \
+            | grep -qx "APP_VERSION=${PREV_VERSION}"
+
+      - name: Make the fixtures
+        run: python3 app-src/ci/make_fixtures.py app-src/ci/out/fixtures
+
+      - name: Seed users, group folder with ACL, share and fixtures at 0.0.1
+        run: bash app-src/ci/seed.sh
+
+      # The job the update has to keep: alice's PDF up to review, without the
+      # placeholder copy (that would close it).
+      - name: A job of alice up to review at 0.0.1
+        run: |
+          . app-src/ci/lib.sh
+          load_fileids
+          job=$(start_job alice "${FILE_PDF_ALICE}" 201)
+          wait_status alice "${job}" review
+          echo "UPGRADE_JOB=${job}" >> "${GITHUB_ENV}"
+          echo "job ${job} is in review at ${PREV_VERSION}"
+
+      # Everything the update has to keep, on record before it runs. The
+      # positive control: the pair is ok at 0.0.1, the job row and its row in
+      # state.db are there and its page image lies in the volume, so the
+      # comparison after the update cannot pass on rows that never existed.
+      - name: Before the update, 0.0.1 is ok and the job is on record
+        run: |
+          . app-src/ci/lib.sh
+          db_init
+          bash app-src/ci/admin-state.sh upgrade-state-before.json ok
+          jq -e --arg v "${PREV_VERSION}" '.ownVersion == $v and .backendVersion == $v' app-src/ci/out/upgrade-state-before.json
+          db_query "SELECT id, file_id, initiator_uid, file_etag, mode, lang, status, task, stage, pages_total, image_width, image_height, created_at, expires_at FROM oc_pii_jobs WHERE id = ${UPGRADE_JOB}" > "${CI_OUT}/upgrade-job-before.tsv"
+          [ "$(cut -f7 "${CI_OUT}/upgrade-job-before.tsv")" = "review" ] \
+            || fail "upgrade positive control failed: job ${UPGRADE_JOB} is not in review in oc_pii_jobs"
+          docker exec -i "${EXAPP_CONTAINER}" python3 - "${UPGRADE_JOB}" > "${CI_OUT}/upgrade-volume-before.txt" <<'PY'
+          import hashlib, os, sqlite3, sys
+          root = os.environ["APP_PERSISTENT_STORAGE"]
+          job = int(sys.argv[1])
+          row = sqlite3.connect(os.path.join(root, "state.db"), timeout=15).execute(
+              "SELECT job_id, task, stage, pages_total, src_sha256, src_bytes, created_at FROM jobs WHERE job_id = ?", (job,)).fetchone()
+          if row is None:
+              sys.exit("upgrade positive control failed: no row of the job in state.db")
+          with open(os.path.join(root, "work", str(job), "page-1.png"), "rb") as image:
+              page = hashlib.sha256(image.read()).hexdigest()
+          print(repr(row))
+          print("page-1.png", page)
+          PY
+          volume="nc_app_${BACKEND_APP_ID}_data"
+          {
+            echo "VOLUME_CREATED=$(docker volume inspect --format '{{.CreatedAt}}' "${volume}")"
+            echo "STATE_DB_INODE=$(docker exec "${EXAPP_CONTAINER}" sh -c 'stat -c %i "${APP_PERSISTENT_STORAGE}/state.db"')"
+          } >> "${GITHUB_ENV}"
+          cat "${CI_OUT}/upgrade-job-before.tsv" "${CI_OUT}/upgrade-volume-before.txt"
+
+      # The PHP half: the directory goes and the new one takes its place, the
+      # way Installer::updateAppstoreApp does it. occ upgrade then runs the app
+      # update. Exit 0 is success; 3 is accepted as in AVS and Findling, but
+      # installed_version has to move either way (pitfall 9), otherwise
+      # "nothing to do" would pass as an update.
+      - name: Update the PHP app with occ upgrade
+        run: |
+          rm -rf apps/pii_redaction
+          mv "${RUNNER_TEMP}/php-curr" apps/pii_redaction
+          status=0
+          ./occ upgrade || status=$?
+          case "${status}" in
+            0|3) echo "occ upgrade answered ${status}" ;;
+            *) echo "occ upgrade answered ${status}, which is neither success nor up to date"; exit 1 ;;
+          esac
+          installed=$(./occ config:app:get pii_redaction installed_version)
+          echo "installed_version ${installed}"
+          test "${installed}" = "${CURR_VERSION}"
+
+      - name: Update the ExApp with app_api:app:update
+        run: |
+          timeout 600 ./occ app_api:app:update "${BACKEND_APP_ID}" \
+            --info-xml "${RUNNER_TEMP}/info-curr.xml" --wait-finish
+          container=$(docker ps --filter "name=nc_app_${BACKEND_APP_ID}" --format '{{.Names}}' | head -n 1)
+          test -n "${container}" || { docker ps -a; exit 1; }
+          image=$(docker inspect --format '{{.Config.Image}}' "${container}")
+          echo "${container} runs ${image}"
+          case "${image}" in
+            *":${CURR_VERSION}") ;;
+            *) echo "the updated container does not run the image of ${CURR_VERSION}"; exit 1 ;;
+          esac
+          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${container}" \
+            | grep -qx "APP_VERSION=${CURR_VERSION}"
+          {
+            echo "EXAPP_CONTAINER=${container}"
+            echo "BACKEND_CONTAINER=${container}"
+          } >> "${GITHUB_ENV}"
+
+      - name: After the update, volume, state.db and the job survived
+        run: |
+          . app-src/ci/lib.sh
+          db_init
+          for _ in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' "${EXAPP_CONTAINER}")" = "healthy" ] && break
+            sleep 2
+          done
+          test "$(docker inspect --format '{{.State.Health.Status}}' "${EXAPP_CONTAINER}")" = "healthy"
+          volume="nc_app_${BACKEND_APP_ID}_data"
+          created=$(docker volume inspect --format '{{.CreatedAt}}' "${volume}")
+          inode=$(docker exec "${EXAPP_CONTAINER}" sh -c 'stat -c %i "${APP_PERSISTENT_STORAGE}/state.db"')
+          echo "volume created ${created} (before ${VOLUME_CREATED}), state.db inode ${inode} (before ${STATE_DB_INODE})"
+          test "${created}" = "${VOLUME_CREATED}"
+          test "${inode}" = "${STATE_DB_INODE}"
+          db_query "SELECT id, file_id, initiator_uid, file_etag, mode, lang, status, task, stage, pages_total, image_width, image_height, created_at, expires_at FROM oc_pii_jobs WHERE id = ${UPGRADE_JOB}" > "${CI_OUT}/upgrade-job-after.tsv"
+          cmp "${CI_OUT}/upgrade-job-before.tsv" "${CI_OUT}/upgrade-job-after.tsv" \
+            || fail "the row of job ${UPGRADE_JOB} in oc_pii_jobs changed with the update"
+          docker exec -i "${EXAPP_CONTAINER}" python3 - "${UPGRADE_JOB}" > "${CI_OUT}/upgrade-volume-after.txt" <<'PY'
+          import hashlib, os, sqlite3, sys
+          root = os.environ["APP_PERSISTENT_STORAGE"]
+          job = int(sys.argv[1])
+          row = sqlite3.connect(os.path.join(root, "state.db"), timeout=15).execute(
+              "SELECT job_id, task, stage, pages_total, src_sha256, src_bytes, created_at FROM jobs WHERE job_id = ?", (job,)).fetchone()
+          if row is None:
+              sys.exit("the row of the job in state.db is gone after the update")
+          with open(os.path.join(root, "work", str(job), "page-1.png"), "rb") as image:
+              page = hashlib.sha256(image.read()).hexdigest()
+          print(repr(row))
+          print("page-1.png", page)
+          PY
+          cmp "${CI_OUT}/upgrade-volume-before.txt" "${CI_OUT}/upgrade-volume-after.txt" \
+            || fail "the row of job ${UPGRADE_JOB} in state.db or its page image changed with the update"
+          bash app-src/ci/admin-state.sh upgrade-state-after.json ok
+          jq -e --arg v "${CURR_VERSION}" '.ownVersion == $v and .backendVersion == $v' app-src/ci/out/upgrade-state-after.json
+
+      # Pitfall D: the empty routes element empties the route list on the update
+      # as well; the same negative check as in the main run.
+      - name: After the update, no browser route reaches the container
+        run: bash app-src/ci/routes.sh
+
+      - name: After the update, the old job answers on its review page, status and image
+        run: |
+          . app-src/ci/lib.sh
+          code=$(req alice GET "${APP_PATH}/review/${UPGRADE_JOB}" "${CI_OUT}/upgrade-review.html" "${CI_OUT}/upgrade-review.headers")
+          echo "review page of job ${UPGRADE_JOB}: HTTP ${code}"
+          test "${code}" = "200"
+          code=$(job_status alice "${UPGRADE_JOB}" "${CI_OUT}/upgrade-status.json")
+          test "${code}" = "200"
+          test "$(json_field "${CI_OUT}/upgrade-status.json" status)" = "review"
+          code=$(req alice GET "${APP_PATH}/review/${UPGRADE_JOB}/page/1" "${CI_OUT}/upgrade-page.bin" "${CI_OUT}/upgrade-page.headers")
+          echo "page image of job ${UPGRADE_JOB}: HTTP ${code}"
+          test "${code}" = "200"
+          head -c 8 "${CI_OUT}/upgrade-page.bin" | od -An -tx1 | tr -d ' \n' | grep -qx '89504e470d0a1a0a'
+
+      - name: Collect the logs
+        if: always()
+        run: |
+          mkdir -p logs
+          docker logs "${HARP_CONTAINER}" > logs/harp.log 2>&1 || true
+          [ -n "${EXAPP_CONTAINER:-}" ] && docker logs "${EXAPP_CONTAINER}" > logs/exapp.log 2>&1 || true
+          cp data/nextcloud.log logs/ 2>/dev/null || true
+          cp "${RUNNER_TEMP}/php-server.log" logs/ 2>/dev/null || true
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: upgrade-logs-${{ matrix.server-version }}-${{ matrix.runner }}
+          path: |
+            logs/
+            app-src/ci/out/*.json
+            app-src/ci/out/*.tsv
+            app-src/ci/out/*.txt
+            !app-src/ci/out/*.sql
+            !app-src/ci/out/*-dump.*
+          retention-days: 7
           if-no-files-found: ignore
