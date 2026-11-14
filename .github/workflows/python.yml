@@ -69,16 +69,18 @@ jobs:
         # Paths and confidence come from [tool.vulture] in pyproject.toml.
         run: uv run vulture
 
+      # shellcheck as a pinned PyPI wheel, the same command runs locally. Not the
+      # runner's apt package: its version (0.9.0) differs from a local current
+      # one, and 0.11.0 no longer reports SC2015 when B is a test, 0.9.0 does.
       - name: Shell check of the image and release scripts
         run: |
-          command -v shellcheck || sudo apt-get install -y shellcheck
-          shellcheck --version
-          shellcheck docker/entrypoint.sh docker/healthcheck.sh ../scripts/release/store-archive.sh ../scripts/ci/head_green.sh
+          uvx --from shellcheck-py==0.9.0.6 shellcheck --version
+          uvx --from shellcheck-py==0.9.0.6 shellcheck docker/entrypoint.sh docker/healthcheck.sh ../scripts/release/store-archive.sh ../scripts/ci/head_green.sh
 
       # The CI scripts source ci/lib.sh; -x follows it from the repository root.
       - name: Shell check of the CI scripts
         working-directory: .
-        run: shellcheck -x ci/*.sh
+        run: uvx --from shellcheck-py==0.9.0.6 shellcheck -x ci/*.sh
 
       # The Dockerfile linter, as a pinned PyPI wheel so it runs without Docker.
       # tests/test_dockerfile.py holds the project rules on top of it.

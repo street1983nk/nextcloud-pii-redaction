@@ -197,7 +197,9 @@ echo "positive control: the database dump carries all three test file names"
 # test asked for on purpose, nothing else; it prints both numbers.
 read -r excluded_php notfound_php < <(python3 "${CI_DIR}/names_filter.py" php "${PHP_SERVER_LOG}" "${PHP_FOR_NAMES}")
 read -r excluded_nc notfound_nc < <(python3 "${CI_DIR}/names_filter.py" nextcloud "${NC_LOG}" "${NC_LOG_FOR_NAMES}")
-[ -n "${notfound_nc}" ] && [ -n "${notfound_php}" ] || fail "ci/names_filter.py gave no counts"
+if [ -z "${notfound_nc}" ] || [ -z "${notfound_php}" ]; then
+	fail "ci/names_filter.py gave no counts"
+fi
 echo "request lines taken out of the name search: PHP server log ${excluded_php}, nextcloud.log url fields ${excluded_nc}"
 echo "NotFound of a test 404 taken out: PHP server log ${notfound_php}, nextcloud.log ${notfound_nc}"
 
