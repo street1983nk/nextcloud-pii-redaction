@@ -131,12 +131,18 @@ sha256_of() {
 # module of python3; DB_KIND mariadb asks the client inside the service
 # container (DB_CONTAINER, DB_USER, DB_PASS, DB_NAME from the workflow).
 
-# The SQLite file of the instance; prints its path.
+# The SQLite file of the instance; prints its path. Same rule as
+# OC\DB\ConnectionFactory: dbname falls back to 'owncloud' and datadirectory
+# to <server root>/data. maintenance:install with SQLite and the default name
+# writes no dbname into config.php (lib/private/Setup/Sqlite.php), so a plain
+# config:system:get dbname answers nothing there.
 sqlite_file() {
 	local datadir dbname
-	datadir=$(occ config:system:get datadirectory)
-	dbname=$(occ config:system:get dbname)
-	[ -n "${datadir}" ] && [ -n "${dbname}" ] || fail "the instance names no data directory or database"
+	datadir=$(occ config:system:get datadirectory --default-value="${NC_ROOT}/data")
+	dbname=$(occ config:system:get dbname --default-value=owncloud)
+	if [ -z "${datadir}" ] || [ -z "${dbname}" ]; then
+		fail "the instance names no data directory or database"
+	fi
 	printf '%s/%s.db' "${datadir}" "${dbname}"
 }
 
