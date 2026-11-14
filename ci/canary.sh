@@ -136,6 +136,14 @@ fi
 # 5. The log level the scan relies on, and the info lines of the app in it.
 loglevel=$(occ config:system:get loglevel || true)
 [ "${loglevel}" = "1" ] || fail "nextcloud.log runs at loglevel '${loglevel}', the scan expects 1 (info, set by deploy-harp.yml)"
+# The scan needs the whole log in one file. At loglevel 1 the CI log passes
+# the default log_rotate_size (100 MiB) within the run, and the background job
+# OC\Log\Rotate then moves it to nextcloud.log.1 (run 43624117588, stable33
+# arm64: rotated at 19:05:07, the info lines of the app were all in .1).
+# deploy-harp.yml turns rotation off (0); both are checked here.
+rotate_size=$(occ config:system:get log_rotate_size || true)
+[ "${rotate_size}" = "0" ] || fail "log_rotate_size is '${rotate_size}', the scan expects 0 (no rotation, set by deploy-harp.yml)"
+[ ! -e "${DATA_DIR}/nextcloud.log.1" ] || fail "nextcloud.log was rotated, the scan would miss the lines in nextcloud.log.1"
 info_lines=$(python3 - "${NC_LOG}" <<'PY'
 import json, sys
 count = 0

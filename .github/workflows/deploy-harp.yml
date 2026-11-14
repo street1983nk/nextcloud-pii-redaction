@@ -218,6 +218,10 @@ jobs:
           # (loglevel 1), so ci/canary.sh scans the info lines of the app as
           # well. Never debug (core lines with paths), never set by the app.
           ./occ config:system:set loglevel --value=1 --type=integer
+          # No rotation: at loglevel 1 the log passes the default 100 MiB
+          # within the run, OC\Log\Rotate moves it to nextcloud.log.1 and the
+          # scan of ci/canary.sh would miss those lines (canary.sh checks it).
+          ./occ config:system:set log_rotate_size --value=0 --type=integer
           # PublishJob is a background job; ci/flow.sh runs cron.php for it.
           ./occ background:cron
           NEXTCLOUD_WORKERS=8 NEXTCLOUD_HOST=0.0.0.0 composer run serve > "${RUNNER_TEMP}/php-server.log" 2>&1 &
