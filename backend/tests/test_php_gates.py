@@ -361,6 +361,88 @@ def test_the_tree_is_not_empty() -> None:
     assert php_files(LIB / "Migration"), "no migration to judge"
 
 
+# Every PHP file of phase 1 (01-SKELETON.md): controllers, services, mappers,
+# notifier, background job, listeners, migration, models and settings. A gate
+# over a file that is gone would pass on nothing (plan 17).
+PHASE1_FILES = (
+    "AppInfo/Application.php",
+    "BackgroundJob/PublishJob.php",
+    "Controller/GatewayController.php",
+    "Controller/HandshakeController.php",
+    "Controller/JobController.php",
+    "Controller/QueueController.php",
+    "Controller/ReviewController.php",
+    "Controller/SettingsController.php",
+    "Db/Job.php",
+    "Db/JobEvent.php",
+    "Db/JobEventMapper.php",
+    "Db/JobMapper.php",
+    "Listener/FileLifecycleListener.php",
+    "Listener/LoadFilesScriptsListener.php",
+    "Migration/Version000100Date20261107000000.php",
+    "Model/Lang.php",
+    "Model/Mode.php",
+    "Model/Reason.php",
+    "Model/Recheck.php",
+    "Model/Stage.php",
+    "Model/Status.php",
+    "Model/Subject.php",
+    "Model/Task.php",
+    "Notification/Notifier.php",
+    "Service/ExAppService.php",
+    "Service/FileAccess.php",
+    "Service/JobService.php",
+    "Service/NotificationSender.php",
+    "Service/PublishService.php",
+    "Service/ReaderContext.php",
+    "Service/Suffix.php",
+    "Settings/Admin.php",
+    "Settings/Section.php",
+)
+
+
+def missing_phase1_files(lib: Path) -> list[str]:
+    """The files of PHASE1_FILES that are not under ``lib``."""
+    return [name for name in PHASE1_FILES if not (lib / name).is_file()]
+
+
+def tree_problems(lib: Path) -> list[str]:
+    """Anti vacuum: every phase 1 file is there and the rules have their subjects."""
+    problems = [f"{name} is missing" for name in missing_phase1_files(lib)]
+    for name, attribute in RECHECK_FILES.items():
+        path = lib / "Controller" / name
+        if path.is_file() and not _methods_with(path.read_text(encoding="utf-8"), attribute):
+            problems.append(f"{name} has no {attribute} method for rule 12 to judge")
+    publish = lib / "Service" / "PublishService.php"
+    if publish.is_file() and NEW_FILE_CALL not in publish.read_text(encoding="utf-8"):
+        problems.append("PublishService.php has no newFile( for rule 18 to judge")
+    proxy = lib / "Service" / "ExAppService.php"
+    if proxy.is_file() and proxy.read_text(encoding="utf-8").count(PROXY_CALL) != 1:
+        problems.append("ExAppService.php does not call exAppRequest( exactly once")
+    return problems
+
+
+def test_the_tree_carries_the_files_the_gates_are_about() -> None:
+    """Anti vacuum: rules 12 and 18 and the rest must have something to judge."""
+    assert tree_problems(LIB) == []
+
+
+def test_self_the_tree_rule_fires_on_a_missing_file(tmp_path: Path) -> None:
+    for name in PHASE1_FILES:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((LIB / name).read_text(encoding="utf-8"), encoding="utf-8")
+    assert tree_problems(tmp_path) == []
+    (tmp_path / "Controller" / "QueueController.php").unlink()
+    assert tree_problems(tmp_path) == ["Controller/QueueController.php is missing"]
+    publish = tmp_path / "Service" / "PublishService.php"
+    publish.write_text(publish.read_text(encoding="utf-8").replace(NEW_FILE_CALL, "newFolder("), encoding="utf-8")
+    assert "PublishService.php has no newFile( for rule 18 to judge" in tree_problems(tmp_path)
+    review = tmp_path / "Controller" / "ReviewController.php"
+    review.write_text(review.read_text(encoding="utf-8").replace("FrontpageRoute", "Route"), encoding="utf-8")
+    assert "ReviewController.php has no FrontpageRoute method for rule 12 to judge" in tree_problems(tmp_path)
+
+
 def test_rule1_every_exapp_route_opens_with_the_foreign_caller_guard() -> None:
     findings = {name: unguarded_exapp_methods(text) for name, text in _lib_sources().items()}
     assert {name: methods for name, methods in findings.items() if methods} == {}
