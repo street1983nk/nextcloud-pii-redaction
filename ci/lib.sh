@@ -126,6 +126,48 @@ sha256_of() {
 	curl -sfS -u "$1:$(password_of "$1")" "$(dav_url "$1" "$2")" | sha256sum | cut -d' ' -f1
 }
 
+# -- the database of the instance (plan 17) -------------------------------------
+# DB_KIND sqlite reads the SQLite file in the data directory with the sqlite3
+# module of python3; DB_KIND mariadb asks the client inside the service
+# container (DB_CONTAINER, DB_USER, DB_PASS, DB_NAME from the workflow).
+
+# The SQLite file of the instance; prints its path.
+sqlite_file() {
+	local datadir dbname
+	datadir=$(occ config:system:get datadirectory)
+	dbname=$(occ config:system:get dbname)
+	[ -n "${datadir}" ] && [ -n "${dbname}" ] || fail "the instance names no data directory or database"
+	printf '%s/%s.db' "${datadir}" "${dbname}"
+}
+
+# db_query <sql>: one line per row, the columns separated by a tab. On SQLite
+# the caller sets DB_FILE once (DB_FILE=$(sqlite_file)), occ is slow.
+db_query() {
+	if [ "${DB_KIND:-sqlite}" = "mariadb" ]; then
+		: "${DB_CONTAINER:?DB_CONTAINER is required on the mariadb leg}"
+		docker exec "${DB_CONTAINER}" mariadb -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" -N -B -e "$1"
+	else
+		: "${DB_FILE:?DB_FILE is not set, call sqlite_file first}"
+		python3 - "${DB_FILE}" "$1" <<'PY'
+import sqlite3, sys
+connection = sqlite3.connect(sys.argv[1], timeout=15)
+for row in connection.execute(sys.argv[2]):
+    print("\t".join("" if value is None else str(value) for value in row))
+PY
+	fi
+}
+
+db_init() {
+	if [ "${DB_KIND:-sqlite}" != "mariadb" ]; then
+		DB_FILE=$(sqlite_file)
+		[ -s "${DB_FILE}" ] || fail "the SQLite file of the instance is missing"
+		export DB_FILE
+	fi
+	# Positive control: the query reaches the table this app created.
+	[ "$(db_query "SELECT COUNT(*) FROM oc_pii_slot WHERE id = 1")" = "1" ] \
+		|| fail "the database query does not see the slot row of oc_pii_slot"
+}
+
 # The background jobs: one cron.php round (PublishJob is a QueuedJob).
 cron_round() {
 	php -f "${NC_ROOT}/cron.php" > /dev/null 2>&1 || true
