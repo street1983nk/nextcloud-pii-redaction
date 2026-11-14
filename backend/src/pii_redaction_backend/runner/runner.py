@@ -5,7 +5,11 @@ two rounds never work at the same time (the PHP app enforces the same with its
 slot row). A round asks for work only while the PHP app answered the handshake
 (``companion.may_work``) and the memory guard admits the largest child of a
 task (``admit("soffice")``, the format is unknown before the download). A job
-that cannot start for lack of memory stays visibly in the queue.
+that cannot start for lack of memory stays visibly in the queue. When the
+queue route answers 403 or 404 (the PHP app was disabled or removed), the
+round asks the handshake at once (``companion.check_once``), so the container
+reports the companion missing within one round and claims nothing more,
+instead of after the next five minute check (plan 18, PLAT-02).
 
 Tasks (01-SKELETON.md):
 
@@ -109,6 +113,7 @@ class Runner:
         ack: Callable[..., Awaitable[nc.Outcome]] = nc.ack_outcome,
         fetch_source: Callable[..., Awaitable[nc.FetchResult]] = nc.fetch_source,
         may_work: Callable[[], bool] = companion.may_work,
+        recheck_companion: Callable[[], Awaitable[object]] = companion.check_once,
         admit: Callable[[str], bool] = memory_guard.admit,
         run_child: Callable[..., Awaitable[None]] = child.run_child,
         convert: Callable[..., Awaitable[Path]] = soffice.convert,
@@ -125,6 +130,7 @@ class Runner:
         self._ack = ack
         self._fetch = fetch_source
         self._may_work = may_work
+        self._recheck_companion = recheck_companion
         self._admit = admit
         self._run_child = run_child
         self._convert = convert
@@ -168,7 +174,13 @@ class Runner:
                 return False
             if self._client is None:
                 self._client = self._client_factory()
-            claimed = await self._claim(self._client)
+            try:
+                claimed = await self._claim(self._client)
+            except nc.CompanionGone:
+                # The handshake decides; while it says missing, may_work is
+                # false and the next round asks for nothing.
+                await self._recheck_companion()
+                return False
             if claimed is None:
                 return False
             self.busy = True

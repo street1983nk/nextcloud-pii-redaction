@@ -57,6 +57,7 @@ __all__ = [
     "AppAPIAuthMiddleware",
     "AsyncNextcloudApp",
     "Claim",
+    "CompanionGone",
     "FetchResult",
     "NextcloudException",
     "SettingsField",
@@ -279,13 +280,36 @@ async def _post(client: httpx.AsyncClient, path: str, body: dict[str, object]) -
         return None
 
 
+class CompanionGone(Exception):
+    """The queue route of the PHP app answered 403 or 404.
+
+    404: the PHP app is disabled or removed; 403: it does not take this
+    container for its backend. The runner asks the handshake at once
+    (companion.check_once) instead of at the next five minute round.
+    """
+
+    def __init__(self, http_status: int) -> None:
+        super().__init__(http_status)
+        self.http_status = http_status
+
+
+# The answers of the claim route that mean the PHP app is not there for us; the
+# same two the handshake reads as missing (companion._MISSING_STATUS).
+_GONE_STATUS: Final = frozenset({403, 404})
+
+
 async def claim(client: httpx.AsyncClient) -> Claim | None:
-    """Ask for one task. None for an empty queue, an error, or an answer outside its shape."""
+    """Ask for one task. None for an empty queue, an error, or an answer outside its shape.
+
+    Raises CompanionGone when the queue route answers 403 or 404.
+    """
     response = await _post(client, CLAIM_PATH, {})
     if response is None:
         return None
     if response.status_code != _OK:
         LOGGER.info("claim refused", extra={"http_status": response.status_code})
+        if response.status_code in _GONE_STATUS:
+            raise CompanionGone(response.status_code)
         return None
     return _parse_claim(_ocs_data(response))
 
