@@ -1,0 +1,35 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Khaled Cherif
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The toasts of the file action in the Files app (UI-SPEC Fläche 1) on narrow
+ * screens. Loaded with the init script on the Files page only.
+ *
+ * @nextcloud/dialogs 8.0.0 moves its toast container to the right by
+ * var(--navigation-width) while it believes the app navigation is open. It
+ * reads that from the class app-navigation--closed of @nextcloud/vue 9, but
+ * Files in Nextcloud 34 still renders @nextcloud/vue 8, whose closed class is
+ * app-navigation--close. On a 375 px phone the toast then starts at about
+ * 310 px and its close button lies outside the screen (CI run 43600377522).
+ *
+ * Below 1024 px (the mobile breakpoint of @nextcloud/vue) the navigation lies
+ * over the content and never pushes it aside, so the toasts belong at the
+ * page margin there whatever the navigation does. The rule sets the server
+ * variable to zero on the container only; it touches no inset and no hashed
+ * class name. The container is found by the DOM the library builds: a
+ * wrapper div on body with the polite list, the assertive region and the
+ * container as its third child.
+ *
+ * Verified against @nextcloud/dialogs 8.0.0 (TOAST_DOM_VERIFIED_WITH below);
+ * backend/tests/test_ui_assets.py fails as soon as package.json names another
+ * version, and the 375 px toast tests of ci/playwright fail when the toast or
+ * its close button leaves the screen.
+ *
+ * TOAST_DOM_VERIFIED_WITH @nextcloud/dialogs 8.0.0
+ */
+
+@media (max-width: 1023px) {
+	body > div > ul.hidden-visually[aria-live='polite'] + div.hidden-visually[aria-live='assertive'] + div {
+		--navigation-width: 0px;
+	}
+}

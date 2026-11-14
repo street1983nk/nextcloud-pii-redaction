@@ -243,7 +243,68 @@ def test_the_admin_section_keeps_its_contract() -> None:
     assert "pointer: coarse" in style
 
 
+TOAST_MARKER = re.compile(r"TOAST_DOM_VERIFIED_WITH @nextcloud/dialogs (\S+)")
+TOAST_SELECTOR = (
+    "body > div > ul.hidden-visually[aria-live='polite'] + div.hidden-visually[aria-live='assertive'] + div"
+)
+
+
+def dialogs_versions(package_json: str, package_lock: str) -> set[str]:
+    """The @nextcloud/dialogs version in package.json and in the root entry of the lock."""
+    found = set(re.findall(r'"@nextcloud/dialogs"\s*:\s*"([^"]+)"', package_json))
+    entry = re.search(r'"node_modules/@nextcloud/dialogs"\s*:\s*\{\s*"version"\s*:\s*"([^"]+)"', package_lock)
+    if entry:
+        found.add(entry.group(1))
+    return found
+
+
+def toast_fix_problems(sheet: str, versions: set[str]) -> list[str]:
+    """Why css/files.css no longer matches the bundled toast library."""
+    problems = []
+    marker = TOAST_MARKER.search(sheet)
+    if marker is None:
+        problems.append("no TOAST_DOM_VERIFIED_WITH marker")
+    elif versions != {marker.group(1)}:
+        problems.append(f"verified with {marker.group(1)}, bundled {sorted(versions)}: verify the toast DOM again")
+    if TOAST_SELECTOR not in sheet:
+        problems.append("toast container selector missing")
+    if "--navigation-width: 0px" not in sheet:
+        problems.append("navigation width reset missing")
+    return problems
+
+
+def test_the_toast_fix_matches_the_bundled_dialogs_version() -> None:
+    # css/files.css leans on the DOM that @nextcloud/dialogs builds for its
+    # toast container. A new version of the library has to be verified again
+    # (375 px, toast and close button inside the viewport) before this passes.
+    sheet = (STYLES / "files.css").read_text(encoding="utf-8")
+    versions = dialogs_versions(
+        (PHP_ROOT / "package.json").read_text(encoding="utf-8"),
+        (PHP_ROOT / "package-lock.json").read_text(encoding="utf-8"),
+    )
+    assert versions == {"8.0.0"}
+    assert toast_fix_problems(sheet, versions) == []
+    listener = (LIB / "Listener" / "LoadFilesScriptsListener.php").read_text(encoding="utf-8")
+    assert "Util::addStyle('pii_redaction', 'files')" in listener
+
+
 # -- the self tests: every rule has to fire on a staged violation --------------------
+
+
+def test_self_the_toast_fix_gate_fires_on_a_new_dialogs_version() -> None:
+    sheet = f"/* TOAST_DOM_VERIFIED_WITH @nextcloud/dialogs 8.0.0 */\n{TOAST_SELECTOR} {{ --navigation-width: 0px; }}"
+    assert toast_fix_problems(sheet, {"8.0.0"}) == []
+    assert toast_fix_problems(sheet, {"8.1.0"}) == [
+        "verified with 8.0.0, bundled ['8.1.0']: verify the toast DOM again"
+    ]
+    assert toast_fix_problems(sheet, {"8.0.0", "8.1.0"}) != []
+    assert toast_fix_problems(sheet.replace("8.0.0", "x").replace("TOAST_DOM", "NO"), {"8.0.0"}) == [
+        "no TOAST_DOM_VERIFIED_WITH marker"
+    ]
+    assert "toast container selector missing" in toast_fix_problems(sheet.replace("+ div {", "{"), {"8.0.0"})
+    package = '{"dependencies": {"@nextcloud/dialogs": "8.1.0"}}'
+    lock = '{"packages": {"node_modules/@nextcloud/dialogs": {"version": "8.0.0"}}}'
+    assert dialogs_versions(package, lock) == {"8.0.0", "8.1.0"}
 
 
 def test_self_inline_script_and_style_attribute_fire() -> None:
