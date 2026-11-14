@@ -25,21 +25,45 @@ export const FILE_STEMS = ['Bescheid 2026-114', 'Antrag', 'Vermerk'] as const;
 
 // -- closed lists (php/lib/Model, UI-SPEC) -----------------------------------
 
-export const STATUSES = ['queued', 'analyzing', 'review', 'approved', 'applying', 'verified', 'published', 'failed', 'stale', 'cancelled', 'expired'] as const;
-export const STAGES = ['waiting', 'fetching', 'converting', 'rendering'] as const;
+// Mirrors of php/lib/Model/{Status,Stage,Reason}.php; the contract test
+// backend/tests/test_playwright_contract.py compares them value by value.
+export const STATUSES = [
+	'queued',
+	'analyzing',
+	'review',
+	'submitted',
+	'approved',
+	'applying',
+	'verified',
+	'published',
+	'failed',
+	'stale',
+	'cancelled',
+	'expired',
+] as const;
+export const STAGES = [
+	'waiting',
+	'fetching',
+	'converting',
+	'rendering',
+	'done',
+] as const;
 export const REASONS = [
-	'render_failed',
+	'encrypted_pdf',
+	'unsupported_format',
+	'too_many_pages',
 	'out_of_memory',
 	'repeatedly_stuck',
-	'backend_state_lost',
-	'target_not_writable',
-	'unsupported_format',
+	'leak_detected',
+	'check_error',
 	'original_changed',
 	'original_deleted',
-	'backend_unavailable',
+	'target_not_writable',
+	'backend_state_lost',
 	'download_blocked',
 	'not_readable',
-	'internal_error',
+	'render_failed',
+	'backend_unavailable',
 ] as const;
 export type JobStatus = (typeof STATUSES)[number];
 export type JobStage = (typeof STAGES)[number];
