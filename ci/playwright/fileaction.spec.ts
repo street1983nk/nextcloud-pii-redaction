@@ -16,6 +16,7 @@ import {
 	PDF,
 	TXT,
 	baseJob,
+	closeRowMenu,
 	closeToast,
 	copySuffix,
 	davDelete,
@@ -32,6 +33,7 @@ import {
 	openRowMenu,
 	projectUser,
 	publish,
+	RESPONSE_TIMEOUT,
 	row,
 	rowMenuToggle,
 	screenshot,
@@ -58,12 +60,19 @@ async function openFolder(page: Page, folder: string, name: string): Promise<voi
 	await expect(row(page, name)).toBeVisible();
 }
 
-/** Clicks the action on a row and returns the answer of the start route. */
+/**
+ * Clicks the action on a row and returns the answer of the start route. The
+ * click goes to the menu item itself (the li around it is presentation only)
+ * and the answer has a deadline: a click that sends nothing fails here.
+ */
 async function clickStart(page: Page, name: string) {
 	await openRowMenu(page, name);
-	const action = startAction(page);
+	const action = startAction(page).getByRole('menuitem');
 	await expect(action).toBeVisible();
-	const answer = page.waitForResponse((response) => START_ROUTE.test(new URL(response.url()).pathname) && response.request().method() === 'POST');
+	await expect(action).toBeEnabled();
+	const answer = page.waitForResponse((response) => START_ROUTE.test(new URL(response.url()).pathname) && response.request().method() === 'POST', {
+		timeout: RESPONSE_TIMEOUT,
+	});
 	await action.click();
 	return answer;
 }
@@ -88,17 +97,17 @@ test.describe('Dateiaktion: wo sie angeboten wird', () => {
 		await expect(startAction(page)).toBeVisible();
 		await expect(startAction(page)).toHaveText(ACTION_NAME);
 		await screenshot(page, 'dateien', 'menue-pdf', testInfo);
-		await page.keyboard.press('Escape');
+		await closeRowMenu(page);
 
 		for (const name of [DOCX, ODT]) {
 			await openRowMenu(page, name);
 			await expect(startAction(page)).toBeVisible();
-			await page.keyboard.press('Escape');
+			await closeRowMenu(page);
 		}
 		for (const name of [TXT, 'Unterordner']) {
 			await openRowMenu(page, name);
 			await expectNoAction(page);
-			await page.keyboard.press('Escape');
+			await closeRowMenu(page);
 		}
 	});
 
@@ -181,7 +190,7 @@ test.describe('Dateiaktion: wo sie angeboten wird', () => {
 			await openRowMenu(page, 'Bescheid gesperrt.pdf');
 			await expectNoAction(page);
 			await screenshot(page, 'dateien', 'menue-download-gesperrt', testInfo);
-			await page.keyboard.press('Escape');
+			await closeRowMenu(page);
 
 			// The action is hidden there, so the start goes out from the page
 			// itself: the action of an own file, its request sent for the

@@ -44,11 +44,24 @@ export default defineConfig({
 	fullyParallel: false,
 	forbidOnly: !!process.env.CI,
 	// Real jobs run through the backend (render, LibreOffice for DOCX/ODT).
+	// The longest passing test of run 43600377522 took 40 s; waitFor() in
+	// helpers.ts polls up to 180 s, so 240 s stays the frame of one test.
 	timeout: 240_000,
+	// The whole main step: twelve projects at about 4.2 minutes each (run
+	// 43600377522 without its hangs) is about 50 minutes. Past 75 minutes the
+	// run stops by itself, names the test in progress and still writes the
+	// report, well before the job timeout of 120 minutes (setup and the drift
+	// steps need the rest).
+	globalTimeout: 75 * 60_000,
 	expect: { timeout: 15_000 },
 	reporter: [['list'], ['html', { open: 'never' }]],
 	use: {
 		baseURL: process.env.NC_URL ?? 'http://localhost:8080',
+		// Without these, a click on an element that never becomes clickable
+		// (a toast outside the viewport, run 43600377522) retries until the
+		// test timeout of 240 s. With them it fails after 15 s by name.
+		actionTimeout: 15_000,
+		navigationTimeout: 30_000,
 		screenshot: 'only-on-failure',
 		trace: 'retain-on-failure',
 	},

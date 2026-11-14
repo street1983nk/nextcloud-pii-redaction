@@ -16,6 +16,14 @@ export const ADMIN_PATH = '/index.php/settings/admin/pii_redaction';
 export const FILES_PATH = '/index.php/apps/files/files';
 export const CANARY = 'PIIKANARIE7Q4XZ9';
 
+/**
+ * Upper bound for one awaited browser answer (waitForResponse). Every wait of
+ * the suite has a deadline of its own, so a hanging step fails within
+ * seconds under its own name instead of running into the test timeout
+ * (run 43600377522: 17 clicks without a deadline ate 68 minutes).
+ */
+export const RESPONSE_TIMEOUT = 30_000;
+
 /** The fixtures of ci/make_fixtures.py and the stems that must never leak. */
 export const PDF = 'Bescheid 2026-114.pdf';
 export const DOCX = 'Antrag.docx';
@@ -703,14 +711,35 @@ export function toastClose(shown: Locator): Locator {
 	return shown.getByRole('button');
 }
 
-/** Closes every toast, so none reaches into the next picture. */
+/**
+ * Closes every toast, so none reaches into the next picture. Bounded: one
+ * round per toast open at the start plus one for a success toast that leaves
+ * by itself (10 s) between count and click; every step has its own deadline.
+ * The close button must lie inside the viewport: a toast the user cannot
+ * reach fails here by name instead of a click that retries until the test
+ * timeout.
+ */
 export async function closeToast(page: Page): Promise<void> {
 	const all = toasts(page);
-	for (let left = await all.count(); left > 0; left--) {
-		await toastClose(all.first()).click();
+	for (let round = (await all.count()) + 1; round > 0; round--) {
+		const left = await all.count();
+		if (left === 0) {
+			break;
+		}
+		const close = toastClose(all.first());
+		try {
+			await expect(close, 'close button of the toast inside the viewport').toBeInViewport({ timeout: 5_000 });
+			await close.click({ timeout: 5_000 });
+		} catch (error) {
+			// Only a toast that has left meanwhile excuses the failure.
+			if ((await all.count()) < left) {
+				continue;
+			}
+			throw error;
+		}
 		await expect(all).toHaveCount(left - 1);
 	}
-	await expect(all).toHaveCount(0);
+	await expect(all, 'all toasts closed').toHaveCount(0);
 }
 
 // -- the Files app -------------------------------------------------------------------
@@ -729,12 +758,28 @@ export function rowMenuToggle(entry: Locator): Locator {
 	return entry.locator('[data-cy-files-list-row-actions] .action-item__menutoggle');
 }
 
-/** Opens the action menu of one row (UI-SPEC: data-cy-files-list-row-actions). */
+/** Action menus shown right now; a closing menu stays visible for a moment. */
+function openMenus(page: Page): Locator {
+	return page.locator('[role="menu"]:visible');
+}
+
+/**
+ * Opens the action menu of one row (UI-SPEC: data-cy-files-list-row-actions).
+ * The menu of an earlier row must be gone first, otherwise its entries count
+ * twice (run 43600377522: strict mode, two visible entries after Escape).
+ */
 export async function openRowMenu(page: Page, name: string): Promise<void> {
 	const entry = row(page, name);
 	await expect(entry).toBeVisible();
+	await expect(openMenus(page), 'no other action menu open').toHaveCount(0);
 	await rowMenuToggle(entry).click();
-	await expect(page.locator('[role="menu"]:visible').first()).toBeVisible();
+	await expect(openMenus(page), 'exactly one action menu open').toHaveCount(1);
+}
+
+/** Closes the open action menu and waits until it has left the page. */
+export async function closeRowMenu(page: Page): Promise<void> {
+	await page.keyboard.press('Escape');
+	await expect(openMenus(page), 'action menu closed').toHaveCount(0);
 }
 
 /**

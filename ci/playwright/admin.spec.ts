@@ -26,6 +26,7 @@ import {
 	gap,
 	login,
 	projectUser,
+	RESPONSE_TIMEOUT,
 	resolvedColor,
 	screenshot,
 	users,
@@ -70,7 +71,7 @@ function banner(page: Page, state: string) {
 
 /** "Check again", so the banner shows the state of right now. */
 async function recheck(page: Page): Promise<void> {
-	const answer = page.waitForResponse((response) => STATE_ROUTE.test(new URL(response.url()).pathname));
+	const answer = page.waitForResponse((response) => STATE_ROUTE.test(new URL(response.url()).pathname), { timeout: RESPONSE_TIMEOUT });
 	await page.locator('#pii-recheck').click();
 	await answer;
 	await expect(page.locator('#pii-backend-state')).not.toHaveAttribute('aria-busy', 'true');
