@@ -97,12 +97,12 @@ with open(out_path, "w", encoding="utf-8") as handle:
 PY
 
 # The check: fixed keys, every value a number or null, never a word.
-python3 -c '
+python3 - "${OUT}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
 bad = [key for key, value in data.items() if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)))]
 if bad or not data:
     sys.exit("measurements that are no numbers: " + ", ".join(bad))
 print(json.dumps(data, sort_keys=True))
-' "${OUT}"
+PY
 echo "measurements written to $(basename "${OUT}")"

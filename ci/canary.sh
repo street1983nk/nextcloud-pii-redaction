@@ -93,20 +93,20 @@ PY
 fi
 docker logs "${BACKEND_CONTAINER}" > "${BACKEND_LOG}" 2>&1
 docker logs "${HARP_CONTAINER}" > "${HARP_LOG}" 2>&1
-docker exec "${BACKEND_CONTAINER}" python3 -c '
+docker exec -i "${BACKEND_CONTAINER}" python3 - > "${STATE_DUMP}" <<'PY'
 import os, sqlite3, sys
 path = os.path.join(os.environ["APP_PERSISTENT_STORAGE"], "state.db")
 if not os.path.isfile(path):
     sys.exit("state.db is missing")
 for line in sqlite3.connect(path, timeout=15).iterdump():
     print(line)
-' > "${STATE_DUMP}"
+PY
 
 : > "${COPIES_TEXT}"
 copies=0
 for copy in "${CI_OUT}"/copy-*.pdf; do
 	[ -s "${copy}" ] || continue
-	text="${copy%.pdf}.canary-dump.txt"
+	text="${CI_OUT}/$(basename "${copy}" .pdf).canary-dump.txt"
 	python3 "${CI_DIR}/pdf_text.py" "${copy}" > "${text}"
 	# Positive control per copy: the reader does read its text.
 	grep -qF 'Placeholder from PII Redaction' "${text}" || fail "positive control failed: no text read from $(basename "${copy}")"
@@ -119,8 +119,8 @@ done
 # A server that logged nothing has no nextcloud.log: an empty stand-in in ci/out.
 NC_LOG="${DATA_DIR}/nextcloud.log"
 if [ ! -f "${NC_LOG}" ]; then
+	: > "${CI_OUT}/nextcloud-log-empty-dump.txt"
 	NC_LOG="${CI_OUT}/nextcloud-log-empty-dump.txt"
-	: > "${NC_LOG}"
 fi
 for dump in "${DB_DUMP}" "${PII_DUMP}" "${STATE_DUMP}" "${BACKEND_LOG}" "${HARP_LOG}"; do
 	[ -s "${dump}" ] || fail "$(basename "${dump}") is empty, the scan would prove nothing"

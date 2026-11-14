@@ -21,6 +21,11 @@ db_init
 SAMPLES="${CI_OUT}/queue-samples.log"
 : > "${SAMPLES}"
 
+# The sample: jobs with an active analyze or apply lease right now.
+active_leases() {
+	db_query "SELECT COUNT(*) FROM oc_pii_jobs WHERE status IN ('analyzing','applying') AND lease_until > $(date +%s)"
+}
+
 copy_for_alice() {
 	curl -sfS -u "alice:${CI_PASS}" -X COPY -H "Destination: $(dav_url alice "$2")" -H 'Overwrite: F' \
 		"$(dav_url alice "$1")" > /dev/null || fail "the copy for alice could not be made"
@@ -38,7 +43,7 @@ files=("${file_pdf}" "${file_docx}" "${file_odt}")
 # Nothing of the earlier scripts may still hold a lease, or the first
 # position would count it.
 idle_deadline=$((SECONDS + 120))
-until [ "$(db_query "SELECT COUNT(*) FROM oc_pii_jobs WHERE status IN ('analyzing','applying') AND lease_until > $(date +%s)")" = "0" ]; do
+until [ "$(active_leases)" = "0" ]; do
 	[ "${SECONDS}" -lt "${idle_deadline}" ] || fail "a job of an earlier script still holds a lease"
 	sleep 1
 done
@@ -68,7 +73,7 @@ done
 deadline=$((SECONDS + ${WAIT_SECONDS:-600}))
 round=0
 while :; do
-	count=$(db_query "SELECT COUNT(*) FROM oc_pii_jobs WHERE status IN ('analyzing','applying') AND lease_until > $(date +%s)")
+	count=$(active_leases)
 	[[ "${count}" =~ ^[0-9]+$ ]] || fail "a sample gave no number: '${count}'"
 	echo "sample ${round} active ${count}" >> "${SAMPLES}"
 	[ "${count}" -le 1 ] || fail "${count} jobs hold an active lease at once (sample ${round})"
