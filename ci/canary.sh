@@ -32,7 +32,11 @@
 # search, never out of the canary search: in the PHP server log the access
 # line of a WebDAV request (its path is the one the test client chose), and
 # in data/nextcloud.log the "url" field of an entry made during such a
-# request. The number of lines taken out is printed.
+# request. Since loglevel 1 a 404 of such a request also leaves the core
+# exception Sabre NotFound "File with name P could not be located" in both
+# logs (ci/seed.sh asks for the file behind the ACL as carol on purpose):
+# that line goes too, but only when it belongs to a WebDAV 404 on exactly P
+# (ci/names_filter.py). The numbers of lines taken out are printed.
 #
 # Uses the contract of ci/lib.sh plus DB_KIND, BACKEND_CONTAINER,
 # HARP_CONTAINER and PHP_SERVER_LOG (default ${RUNNER_TEMP}/php-server.log).
@@ -188,28 +192,14 @@ for name in 'Bescheid 2026-114' 'Antrag' 'Vermerk'; do
 done
 echo "positive control: the database dump carries all three test file names"
 
-excluded_php=$(grep -cE '\]: [A-Z]+ /remote\.php/dav/' "${PHP_SERVER_LOG}" || true)
-grep -vE '\]: [A-Z]+ /remote\.php/dav/' "${PHP_SERVER_LOG}" > "${PHP_FOR_NAMES}" || true
-excluded_nc=$(python3 - "${NC_LOG}" "${NC_LOG_FOR_NAMES}" <<'PY'
-import json, sys
-taken = 0
-with open(sys.argv[1], encoding="utf-8", errors="replace") as source, open(sys.argv[2], "w", encoding="utf-8") as target:
-    for line in source:
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            target.write(line)
-            continue
-        if isinstance(entry, dict) and str(entry.get("url", "")).startswith("/remote.php/dav/"):
-            entry["url"] = "(WebDAV request of the test client)"
-            taken += 1
-            target.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        else:
-            target.write(line)
-print(taken)
-PY
-)
+# ci/names_filter.py (self test: backend/tests/test_ci_names_filter.py) takes
+# out the requests of the test client and the Sabre NotFound of a 404 that a
+# test asked for on purpose, nothing else; it prints both numbers.
+read -r excluded_php notfound_php < <(python3 "${CI_DIR}/names_filter.py" php "${PHP_SERVER_LOG}" "${PHP_FOR_NAMES}")
+read -r excluded_nc notfound_nc < <(python3 "${CI_DIR}/names_filter.py" nextcloud "${NC_LOG}" "${NC_LOG_FOR_NAMES}")
+[ -n "${notfound_nc}" ] && [ -n "${notfound_php}" ] || fail "ci/names_filter.py gave no counts"
 echo "request lines taken out of the name search: PHP server log ${excluded_php}, nextcloud.log url fields ${excluded_nc}"
+echo "NotFound of a test 404 taken out: PHP server log ${notfound_php}, nextcloud.log ${notfound_nc}"
 
 hits=0
 for name in "${NAMES[@]}"; do

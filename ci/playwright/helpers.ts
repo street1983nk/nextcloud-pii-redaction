@@ -320,6 +320,35 @@ export async function davStat(who: User, path: string): Promise<{ fileId: number
 	});
 }
 
+/**
+ * File id and etag of one file found in the listing of its folder, or null
+ * when the folder or the file is missing. For "is it there yet?" only: the
+ * PROPFIND goes to the folder, so a miss is a 404 on the folder path. A
+ * PROPFIND on the missing file itself makes Nextcloud log a NotFound
+ * exception with the file name, and ci/canary.sh counts the test file names
+ * in every log (run 43615560742).
+ */
+export async function davFind(who: User, folder: string, name: string): Promise<{ fileId: number; etag: string } | null> {
+	return withApi(who, async (context) => {
+		const response = await context.fetch(davPath(who, folder), { method: 'PROPFIND', headers: { Depth: '1' }, data: PROPFIND });
+		if (response.status() !== 207) {
+			return null;
+		}
+		const body = await response.text();
+		const wanted = decodeURIComponent(davPath(who, `${folder}/${name}`));
+		for (const match of body.matchAll(/<d:response>([\s\S]*?)<\/d:response>/g)) {
+			const href = /<d:href>([^<]*)<\/d:href>/.exec(match[1]);
+			if (href === null || decodeURIComponent(href[1]).replace(/\/$/, '') !== wanted) {
+				continue;
+			}
+			const id = /<oc:fileid>(\d+)<\/oc:fileid>/.exec(match[1]);
+			const etag = /<d:getetag>([^<]*)<\/d:getetag>/.exec(match[1]);
+			return id === null ? null : { fileId: Number(id[1]), etag: etag?.[1] ?? '' };
+		}
+		return null;
+	});
+}
+
 /** The names in one folder, decoded, exactly as the server stores them. */
 export async function davList(who: User, path: string): Promise<string[]> {
 	return withApi(who, async (context) => {
@@ -477,7 +506,9 @@ export async function publish(who: User, jobId: number): Promise<JobView> {
  */
 export async function baseJob(who: User, testInfo: TestInfo): Promise<number> {
 	const folder = `pw-base-${who.name}`;
-	let stat = await davStat(who, `${folder}/${PDF}`);
+	// Asked over the folder listing: a probe of the missing file would leave
+	// its name in nextcloud.log (see davFind).
+	let stat = await davFind(who, folder, PDF);
 	if (stat === null) {
 		await davFreshFolder(who, folder);
 		await upload(who, folder, PDF);
