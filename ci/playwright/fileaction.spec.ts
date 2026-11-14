@@ -22,6 +22,7 @@ import {
 	davFreshFolder,
 	davList,
 	davStat,
+	expectToastKind,
 	fileId,
 	fixture,
 	folderPath,
@@ -32,12 +33,14 @@ import {
 	projectUser,
 	publish,
 	row,
+	rowMenuToggle,
 	screenshot,
 	share,
 	sharer,
 	startAction,
 	startJob,
 	toast,
+	toastClose,
 	unshare,
 	upload,
 	users,
@@ -136,7 +139,7 @@ test.describe('Dateiaktion: wo sie angeboten wird', () => {
 
 		const entry = page.locator('[data-cy-files-list-row-name^="Papierkorb.pdf"]').first();
 		await expect(entry).toBeVisible();
-		await entry.locator('[data-cy-files-list-row-actions] button').first().click();
+		await rowMenuToggle(entry).click();
 		await expect(page.locator('[role="menu"]:visible').first()).toBeVisible();
 		await expectNoAction(page);
 	});
@@ -189,7 +192,7 @@ test.describe('Dateiaktion: wo sie angeboten wird', () => {
 			expect(answer.status()).toBe(403);
 			expect((await answer.json()).reason).toBe('download_blocked');
 			const shown = await toast(page);
-			await expect(shown).toHaveClass(/toast-error/);
+			await expectToastKind(shown, 'error');
 			await expect(shown.locator('a')).toHaveCount(0);
 			await screenshot(page, 'dateien', 'toast-download-gesperrt', testInfo);
 			await closeToast(page);
@@ -225,8 +228,8 @@ test.describe('Start-Rückmeldung', () => {
 		const started = await first.json();
 		expect(started.ahead).toBe(0);
 		let shown = await toast(page);
-		await expect(shown).toHaveClass(/toast-success/);
-		await expect(shown.locator('.toast-close')).toBeVisible();
+		await expectToastKind(shown, 'success');
+		await expect(toastClose(shown)).toBeVisible();
 		await expect(shown.locator('a')).toHaveAttribute('href', REVIEW_LINK);
 		await expect(shown).not.toContainText(PDF);
 		await screenshot(page, 'dateien', 'toast-als-naechstes', testInfo);
@@ -236,7 +239,7 @@ test.describe('Start-Rückmeldung', () => {
 		expect(second.status()).toBe(200);
 		expect((await second.json()).jobId).toBe(started.jobId);
 		shown = await toast(page);
-		await expect(shown).toHaveClass(/toast-info/);
+		await expectToastKind(shown, 'info');
 		await expect(shown.locator('a')).toHaveAttribute('href', REVIEW_LINK);
 		await screenshot(page, 'dateien', 'toast-laeuft-schon', testInfo);
 		await closeToast(page);
@@ -266,7 +269,7 @@ test.describe('Start-Rückmeldung', () => {
 			expect(answer.status()).toBe(shot.code);
 			expect((await answer.json()).reason).toBe(shot.reason);
 			const shown = await toast(page);
-			await expect(shown).toHaveClass(/toast-error/);
+			await expectToastKind(shown, 'error');
 			await screenshot(page, 'dateien', shot.state, testInfo);
 			await closeToast(page);
 		}
@@ -285,17 +288,17 @@ test.describe('Start-Rückmeldung', () => {
 		await openFolder(page, folder, PDF);
 
 		const cases = [
-			{ state: 'toast-n-davor', status: 201, body: { jobId, ahead: 3 }, kind: /toast-success/ },
-			{ state: 'toast-backend-nicht-bereit', status: 503, body: { reason: 'backend_unavailable' }, kind: /toast-warning/ },
-			{ state: 'toast-allgemein', status: 500, body: {}, kind: /toast-error/ },
+			{ state: 'toast-n-davor', status: 201, body: { jobId, ahead: 3 }, kind: 'success' as const },
+			{ state: 'toast-backend-nicht-bereit', status: 503, body: { reason: 'backend_unavailable' }, kind: 'warning' as const },
+			{ state: 'toast-allgemein', status: 500, body: {}, kind: 'error' as const },
 		];
 		for (const shot of cases) {
 			await page.route(START_ROUTE, (route) => route.fulfill({ status: shot.status, contentType: 'application/json', body: JSON.stringify(shot.body) }), { times: 1 });
 			const answer = await clickStart(page, PDF);
 			expect(answer.status()).toBe(shot.status);
 			const shown = await toast(page);
-			await expect(shown).toHaveClass(shot.kind);
-			await expect(shown.locator('.toast-close')).toBeVisible();
+			await expectToastKind(shown, shot.kind);
+			await expect(toastClose(shown)).toBeVisible();
 			if (shot.status !== 201) {
 				// Errors and warnings stay until they are closed (UI-SPEC, 2.2.1).
 				await page.clock.fastForward(12_000);

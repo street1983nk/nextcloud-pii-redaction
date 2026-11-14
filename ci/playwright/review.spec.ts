@@ -1,6 +1,6 @@
 // Surface 2 of the UI-SPEC: the review page /apps/pii_redaction/review/{jobId}
 // in every state of its state table, plus the first page of the placeholder
-// copy through the server preview (surface 4).
+// copy, fetched over WebDAV and rendered in the backend container (surface 4).
 //
 // Real runs for ready (PDF, DOCX, ODT), copy being created and created, file
 // changed, file deleted, download blocked afterwards and every "not
@@ -26,6 +26,7 @@ import {
 	color,
 	davDelete,
 	davFreshFolder,
+	davGet,
 	davPut,
 	fileId,
 	fixture,
@@ -40,11 +41,13 @@ import {
 	login,
 	occ,
 	projectUser,
+	renderFirstPage,
 	resolvedColor,
 	reviewPath,
 	screenshot,
 	setShareDownload,
 	share,
+	showPng,
 	sharer,
 	unshare,
 	upload,
@@ -57,6 +60,7 @@ import {
 
 const NEUTRAL_HEADING = /^(Review|Prüfung|Vérification)$/;
 const STATE = '#pii-review-state';
+const BACKEND_NOT_READY = /^(PII Redaction is not ready|PII Redaction ist gerade nicht bereit|PII Redaction n'est pas prêt)$/;
 
 async function openReview(page: Page, jobId: number): Promise<number> {
 	const response = await page.goto(reviewPath(jobId));
@@ -147,6 +151,7 @@ const FORGED: ForgedShot[] = [
 		state: 'bereit-backend-nicht-bereit',
 		forged: { status: 'review', backendReady: false },
 		check: async (page) => {
+			await expect(page.getByText(BACKEND_NOT_READY)).toBeVisible();
 			await expect(page.locator('#pii-placeholder')).toBeDisabled();
 			await expect(page.locator('#pii-review img')).toHaveCount(0);
 		},
@@ -162,7 +167,14 @@ test('Prüfseite: Warteschlange, Lauf, Fehlgründe und Abgelaufen (geschlossene 
 		await page.unrouteAll({ behavior: 'wait' });
 		await forgeState(page, jobId, shot.forged);
 		expect(await openReview(page, jobId)).toBe(200);
-		await expect(page.locator(STATE)).not.toBeEmpty();
+		if (shot.forged.status === 'review') {
+			// UI-SPEC Fläche 2, Aufbau: in "ready" the status area holds neither
+			// a line nor a card; the backend warning (5) and the placeholder
+			// card (6) follow it.
+			await expect(page.locator(STATE)).toBeEmpty();
+		} else {
+			await expect(page.locator(STATE)).not.toBeEmpty();
+		}
 		await shot.check?.(page);
 		await expectNoCanary(page);
 		await screenshot(page, 'pruefseite', shot.state, testInfo);
@@ -270,11 +282,14 @@ test('Prüfseite: Kopie wird angelegt, Kopie angelegt, erste Seite der Kopie', a
 	await expectNoCanary(page);
 	await screenshot(page, 'pruefseite', 'kopie-angelegt', testInfo);
 
-	// The first page of the copy through the server preview.
+	// The first page of the copy: fetched over WebDAV as the user, rendered in
+	// the backend container (the CI instance has no PDF preview provider).
 	expect(done.outputFileId).not.toBeNull();
-	const preview = await page.goto(`/index.php/core/preview?fileId=${done.outputFileId}&x=1240&y=1754&a=1&forceIcon=0`);
-	expect(preview?.status()).toBe(200);
-	expect(preview?.headers()['content-type'] ?? '').toMatch(/^image\//);
+	expect(done.outputName).not.toBeNull();
+	const copy = await davGet(who, `${folder}/${done.outputName as string}`);
+	expect(new TextDecoder().decode(copy.subarray(0, 5))).toBe('%PDF-');
+	expect(new TextDecoder('latin1').decode(copy)).not.toContain(CANARY);
+	await showPng(page, renderFirstPage(copy));
 	await screenshot(page, 'kopie', 'erste-seite', testInfo);
 });
 
@@ -303,10 +318,20 @@ test('Prüfseite: Original gelöscht (WebDAV-DELETE), kein Dateiname', async ({ 
 	await davFreshFolder(who, folder);
 	const jobId = await jobInReview(who, await upload(who, folder, PDF));
 	await davDelete(who, `${folder}/${PDF}`);
-	await waitFor(who, jobId, ['cancelled']);
+	// The status route cannot tell "deleted" from "not allowed" and answers
+	// 404 once the file is gone (JobController::show, Recheck::Missing); only
+	// the review page shows the initiator cancelled(original_deleted) with 200.
+	const status = await jobStatus(who, jobId);
+	expect(status.code).toBe(404);
+	expect(status.cacheControl).toContain('no-store');
 
 	await login(page, who);
+	// 404 until the delete listener has ended the job, then 200.
+	await expect.poll(async () => (await page.request.get(reviewPath(jobId))).status()).toBe(200);
 	expect(await openReview(page, jobId)).toBe(200);
+	const start = await initialState(page);
+	expect(start.status).toBe('cancelled');
+	expect(start.reason).toBe('original_deleted');
 	await expectNoFileName(page);
 	await expectCardText(page);
 	await screenshot(page, 'pruefseite', 'original-geloescht', testInfo);

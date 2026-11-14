@@ -218,11 +218,63 @@ function davPath(who: User, path: string): string {
 	return `/remote.php/dav/files/${encodeURIComponent(who.name)}/${encoded}`;
 }
 
+/**
+ * The bytes as a Node Buffer: Playwright sends only a Buffer as raw body and
+ * serialises every other Uint8Array (TextEncoder, new Uint8Array) as JSON.
+ */
+function rawBody(bytes: Uint8Array): Uint8Array {
+	return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+}
+
 export async function davPut(who: User, path: string, bytes: Uint8Array): Promise<void> {
 	await withApi(who, async (context) => {
-		const response = await context.put(davPath(who, path), { data: bytes as never });
+		const response = await context.put(davPath(who, path), { data: rawBody(bytes) as never });
 		expect([201, 204]).toContain(response.status());
 	});
+}
+
+/** The bytes of one file as the user reads them over WebDAV. */
+export async function davGet(who: User, path: string): Promise<Uint8Array> {
+	return withApi(who, async (context) => {
+		const response = await context.get(davPath(who, path));
+		expect(response.status()).toBe(200);
+		return response.body();
+	});
+}
+
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+// Page 1 of a PDF read from stdin, as PNG on stdout. Nextcloud has no PDF
+// preview provider without Imagick and Ghostscript, so the CI instance renders
+// the copy in the backend container instead (UI-SPEC, picture "Platzhalter-Kopie":
+// fetch over WebDAV, render in the container).
+const RENDER_FIRST_PAGE = [
+	'import sys, pymupdf',
+	'with pymupdf.open(stream=sys.stdin.buffer.read(), filetype="pdf") as d:',
+	'    sys.stdout.buffer.write(d[0].get_pixmap(dpi=110).tobytes("png"))',
+].join('\n');
+
+/** Shows a PNG alone on the page, decoded and complete, for its picture. */
+export async function showPng(page: Page, png: Uint8Array): Promise<void> {
+	let binary = '';
+	for (const byte of png) {
+		binary += String.fromCharCode(byte);
+	}
+	await page.setContent(`<img id="pii-copy-page" alt="" src="data:image/png;base64,${btoa(binary)}">`);
+	const image = page.locator('#pii-copy-page');
+	await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
+}
+
+/** Page 1 of a PDF as PNG, rendered in the backend container of the CI run. */
+export function renderFirstPage(pdf: Uint8Array): Uint8Array {
+	const png = execFileSync('docker', ['exec', '-i', env('EXAPP_CONTAINER'), '/app/.venv/bin/python', '-I', '-c', RENDER_FIRST_PAGE], {
+		input: rawBody(pdf),
+		stdio: ['pipe', 'pipe', 'ignore'],
+		timeout: 120_000,
+		maxBuffer: 64 * 1024 * 1024,
+	}) as Uint8Array;
+	expect(Array.from(png.subarray(0, PNG_MAGIC.length))).toEqual(PNG_MAGIC);
+	return png;
 }
 
 export async function davDelete(who: User, path: string): Promise<void> {
@@ -619,21 +671,46 @@ export async function screenshot(page: Page, surface: string, state: string, tes
 
 // -- toasts -----------------------------------------------------------------------
 
+// @nextcloud/dialogs 8 (bundled by the app) renders a toast as a Vue
+// component: role "alert" for errors (assertive), role "status" otherwise,
+// CSS module classes _toast_<type>_<hash> and a close button (NcButton). The
+// live regions of its container carry aria-live but no role, so they never
+// match. There is no toastify any more.
+const TOASTS = ':is([role="alert"], [role="status"])[class*="_toast_"]';
+
+export type ToastKind = 'success' | 'info' | 'warning' | 'error';
+
+function toasts(page: Page): Locator {
+	return page.locator(TOASTS);
+}
+
 /** The newest toast once it is fully shown. */
 export async function toast(page: Page): Promise<Locator> {
-	const shown = page.locator('.toastify.on').last();
+	const shown = toasts(page).last();
 	await expect(shown).toBeVisible();
 	await expect.poll(() => shown.evaluate((element) => getComputedStyle(element).opacity)).toBe('1');
 	return shown;
 }
 
+/** Type of a toast: the role the library sets and its type class. */
+export async function expectToastKind(shown: Locator, kind: ToastKind): Promise<void> {
+	await expect(shown).toHaveAttribute('role', kind === 'error' ? 'alert' : 'status');
+	await expect(shown).toHaveClass(new RegExp(`(^|\\s)_toast_${kind}_`));
+}
+
+/** The close button of a toast; the message itself holds no button. */
+export function toastClose(shown: Locator): Locator {
+	return shown.getByRole('button');
+}
+
 /** Closes every toast, so none reaches into the next picture. */
 export async function closeToast(page: Page): Promise<void> {
-	const buttons = page.locator('.toastify .toast-close');
-	while ((await buttons.count()) > 0) {
-		await buttons.first().click();
+	const all = toasts(page);
+	for (let left = await all.count(); left > 0; left--) {
+		await toastClose(all.first()).click();
+		await expect(all).toHaveCount(left - 1);
 	}
-	await expect(page.locator('.toastify')).toHaveCount(0);
+	await expect(all).toHaveCount(0);
 }
 
 // -- the Files app -------------------------------------------------------------------
@@ -642,16 +719,30 @@ export function row(page: Page, name: string): Locator {
 	return page.locator(`[data-cy-files-list-row-name="${name}"]`);
 }
 
+/**
+ * The toggle of the action menu of one row. Inline actions ("Restore" in the
+ * trash bin, "Shared by ..." on a received share) stand in front of it in the
+ * same cell, so the first button is not the menu. NcActions marks its trigger
+ * with the class action-item__menutoggle.
+ */
+export function rowMenuToggle(entry: Locator): Locator {
+	return entry.locator('[data-cy-files-list-row-actions] .action-item__menutoggle');
+}
+
 /** Opens the action menu of one row (UI-SPEC: data-cy-files-list-row-actions). */
 export async function openRowMenu(page: Page, name: string): Promise<void> {
 	const entry = row(page, name);
 	await expect(entry).toBeVisible();
-	await entry.locator('[data-cy-files-list-row-actions] button').first().click();
+	await rowMenuToggle(entry).click();
 	await expect(page.locator('[role="menu"]:visible').first()).toBeVisible();
 }
 
+/**
+ * The action in the menu that is open now. A closed menu of an earlier row
+ * stays in the DOM (hidden), so only the visible entry counts.
+ */
 export function startAction(page: Page): Locator {
-	return page.locator('[data-cy-files-list-row-action="pii_redaction-start"]');
+	return page.locator('[data-cy-files-list-row-action="pii_redaction-start"]').filter({ visible: true });
 }
 
 /** The action label in the three languages (UI-SPEC area 1). */
