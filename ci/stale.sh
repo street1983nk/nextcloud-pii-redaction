@@ -69,8 +69,9 @@ code=$(job_status alice "${job_changed}" "${CI_OUT}/stale-status-${job_changed}.
 [ "${code}" = "200" ] || fail "status of the changed job answered ${code}"
 status=$(json_field "${CI_OUT}/stale-status-${job_changed}.json" status)
 reason=$(json_field "${CI_OUT}/stale-status-${job_changed}.json" reason)
-[ "${status}" = "stale" ] && [ "${reason}" = "original_changed" ] \
-	|| fail "the changed job is ${status}(${reason}), expected stale(original_changed)"
+if [ "${status}" != "stale" ] || [ "${reason}" != "original_changed" ]; then
+	fail "the changed job is ${status}(${reason}), expected stale(original_changed)"
+fi
 code=$(image_code "${job_changed}")
 [ "${code}" = "409" ] || fail "page image of the changed job answered ${code}, expected 409"
 subjects=$(subjects_of "${job_changed}")

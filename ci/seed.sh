@@ -122,25 +122,27 @@ occ files:scan --all > /dev/null
 
 # -- the file ids -------------------------------------------------------------
 
-FILE_PDF_ALICE=$(fileid_of alice "${PDF}")
-FILE_DOCX_ALICE=$(fileid_of alice "${DOCX}")
-FILE_ODT_ALICE=$(fileid_of alice "${ODT}")
-FILE_TXT_ALICE=$(fileid_of alice "${TXT}")
-FILE_PDF_DORA=$(fileid_of dora "${PDF}")
-FILE_PDF_ELKE=$(fileid_of elke "${PDF}")
-FILE_PDF_GRETA=$(fileid_of greta "${PDF}")
-FILE_PDF_FLEUR=$(fileid_of fleur "${PDF}")
-FILE_SHARED_BLOCKED_BOB=$(fileid_of bob "${BLOCKED}")
+# record_id <name> <id>: one line of fileids.env; only a number passes, so an
+# empty answer of fileid_of ends the seed here.
+record_id() {
+	[[ "$2" =~ ^[0-9]+$ ]] || fail "the file id $1 could not be read"
+	echo "$1=$2"
+}
+
 FILE_GF_ALICE=$(fileid_of alice "${GROUP_FOLDER}/${PDF}")
-FILE_GF_CAROL=$(fileid_of alice "${GROUP_FOLDER}/${LOCKED_DIR}/${PDF}")
 
 {
-	for name in FILE_PDF_ALICE FILE_DOCX_ALICE FILE_ODT_ALICE FILE_TXT_ALICE FILE_PDF_DORA FILE_PDF_ELKE \
-		FILE_PDF_GRETA FILE_PDF_FLEUR FILE_SHARED_BLOCKED_BOB FILE_GF_ALICE FILE_GF_CAROL; do
-		value="${!name}"
-		[[ "${value}" =~ ^[0-9]+$ ]] || fail "the file id ${name} could not be read"
-		echo "${name}=${value}"
-	done
+	record_id FILE_PDF_ALICE "$(fileid_of alice "${PDF}")"
+	record_id FILE_DOCX_ALICE "$(fileid_of alice "${DOCX}")"
+	record_id FILE_ODT_ALICE "$(fileid_of alice "${ODT}")"
+	record_id FILE_TXT_ALICE "$(fileid_of alice "${TXT}")"
+	record_id FILE_PDF_DORA "$(fileid_of dora "${PDF}")"
+	record_id FILE_PDF_ELKE "$(fileid_of elke "${PDF}")"
+	record_id FILE_PDF_GRETA "$(fileid_of greta "${PDF}")"
+	record_id FILE_PDF_FLEUR "$(fileid_of fleur "${PDF}")"
+	record_id FILE_SHARED_BLOCKED_BOB "$(fileid_of bob "${BLOCKED}")"
+	record_id FILE_GF_ALICE "${FILE_GF_ALICE}"
+	record_id FILE_GF_CAROL "$(fileid_of alice "${GROUP_FOLDER}/${LOCKED_DIR}/${PDF}")"
 	echo "GROUP_FOLDER_ID=${folder_id}"
 } > "${CI_OUT}/fileids.env"
 
