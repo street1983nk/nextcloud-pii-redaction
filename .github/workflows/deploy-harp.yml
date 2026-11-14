@@ -589,13 +589,21 @@ jobs:
       # The other direction (PLAT-02): the PHP app goes away and the container
       # notices on its own. A job is put into the queue while the container is
       # paused, so it cannot be claimed before the PHP app is disabled. After
-      # the unpause the next claim of the runner gets 404, the runner asks the
-      # handshake at once (runner.py), and the container logs the change to
-      # missing within a minute; it claims nothing after that and the job stays
-      # queued (read in oc_pii_jobs). Positive controls: the container logged
-      # "companion": "ok" before, and the refused claim is in its log. After the
-      # PHP app is back, /status refreshes the stale answer, the admin state is
-      # ok with companion ok and the very same job runs to review.
+      # the unpause the container logs the change to missing within a minute;
+      # it claims nothing after that and the job stays queued (read in
+      # oc_pii_jobs). Which round notices it first is timing: the next claim
+      # (404, "claim refused", runner.py asks the handshake at once) or the
+      # handshake round of companion.py, which still repeats every 15 s when an
+      # earlier drift left it unknown (run 43624117588, stable34 sqlite:
+      # handshake 412 at 19:05:09, 404 at 19:05:24, no claim in between). Both
+      # are PLAT-02; the claim path on its own is backend/tests/test_runner.py.
+      # "No claim after it" is read twice: no new refused claim in the
+      # container log and no new claim request in the PHP server log, the
+      # witness outside the container. Positive controls: the container logged
+      # "companion": "ok" before, and the PHP server log carries the claim
+      # requests of this container. After the PHP app is back, /status
+      # refreshes the stale answer, the admin state is ok with companion ok and
+      # the very same job runs to review.
       - name: Drift 7, PHP app disabled gives companion missing and no claim
         run: |
           . app-src/ci/lib.sh
@@ -624,13 +632,19 @@ jobs:
             sleep 2
           done
           [ "${seen}" = "yes" ] || fail "the container did not log companion missing within 60 s"
-          grep -qF '"msg": "claim refused"' <<<"${logs}" || fail "positive control failed: no refused claim in the container log"
-          refused=$(grep -cF '"msg": "claim refused"' <<<"${logs}")
+          php_log="${RUNNER_TEMP}/php-server.log"
+          claim_route='/ocs/v2.php/apps/pii_redaction/api/v1/queue/claim'
+          refused=$(grep -cF '"msg": "claim refused"' <<<"${logs}" || true)
+          claims=$(grep -cF "${claim_route}" "${php_log}" || true)
+          [ "${claims}" -ge 1 ] || fail "positive control failed: the PHP server log carries no claim request"
+          echo "companion missing logged; refused claims since the pause: ${refused}, claim requests in the PHP server log: ${claims}"
           # Two idle rounds of the runner and more (10 s each): no claim after it.
           sleep 25
           logs=$(docker logs --since "${since}" "${container}" 2>&1)
-          test "$(grep -cF '"msg": "claim refused"' <<<"${logs}")" = "${refused}" \
+          test "$(grep -cF '"msg": "claim refused"' <<<"${logs}" || true)" = "${refused}" \
             || fail "the container went on claiming while the companion is missing"
+          test "$(grep -cF "${claim_route}" "${php_log}" || true)" = "${claims}" \
+            || fail "the PHP server log shows a claim while the companion is missing"
           status=$(db_query "SELECT status FROM oc_pii_jobs WHERE id = ${job}")
           echo "job ${job} is ${status} while the PHP app is disabled"
           test "${status}" = "queued"
