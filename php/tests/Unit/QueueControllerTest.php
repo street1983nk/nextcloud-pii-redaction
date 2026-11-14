@@ -139,6 +139,20 @@ final class QueueControllerTest extends TestCase {
 		self::assertSame([], self::data($response));
 	}
 
+	public function testAnIdleClaimWritesNoSlotRow(): void {
+		// The container asks every one to ten seconds; an empty queue must
+		// cost reads only (SQLite instances, "database is locked" at login).
+		self::assertSame([], self::data($this->controller()->claim()));
+		self::assertSame([], self::data($this->controller()->claim()));
+
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->func()->count('id'))->from('pii_slot');
+		$result = $qb->executeQuery();
+		$count = (int)$result->fetchOne();
+		$result->closeCursor();
+		self::assertSame(0, $count, 'an idle claim inserted the slot row');
+	}
+
 	public function testAClaimHandsOutOneTaskWithItsFields(): void {
 		$job = $this->service->start('alice', 42)['job'];
 		self::assertNotNull($job);

@@ -3,7 +3,7 @@
 The development machine has no PHP, so ``php -l`` and phpunit run in CI only
 (``.github/workflows/php.yml``). What can be decided by reading the sources is
 decided here, on every local test run. Taken over from Audio & Video Search
-(rules 1 to 11) and extended by the rules of PII Redaction (12 to 20):
+(rules 1 to 11) and extended by the rules of PII Redaction (12 to 21):
 
 1. Every method carrying ``ExAppRequired`` opens with
    ``$foreign = $this->rejectForeignCaller();``.
@@ -32,6 +32,9 @@ decided here, on every local test run. Taken over from Audio & Video Search
     ``php/lib``: the download block fails closed and knows no exception.
 20. No ``time()`` call in ``php/lib/Db`` and ``php/lib/Service``: the only
     clock is ``ITimeFactory``.
+21. An idle claim reads only: ``JobMapper::claimNext`` calls no write before
+    its read-only ``nextCandidate(`` check (``claimPurge`` writes only after
+    its own read), and ``QueueController::claim`` writes nothing itself.
 
 The gates judge the files that exist (later plans add controllers and
 services); plan 17 adds the check that every file of phase 1 is present. Each
@@ -298,7 +301,7 @@ def weak_hidden_rules(source: str) -> list[str]:
     ]
 
 
-# -- rules 12 to 20 ------------------------------------------------------------------
+# -- rules 12 to 21 ------------------------------------------------------------------
 
 
 def routes_without_recheck(source: str, attribute: str) -> list[str]:
@@ -350,6 +353,48 @@ def download_exceptions(source: str) -> list[str]:
 def time_calls(source: str) -> int:
     """Rule 20: a bare time() call (getTime() and $this->time() do not count)."""
     return len(_TIME_CALL.findall(source))
+
+
+# Rule 21: an idle claim reads only. Before the read-only candidate check in
+# JobMapper::claimNext only claimPurge may run (it writes after its own read
+# found a purge job); the claim route leaves the slot row to claimNext.
+CANDIDATE_CHECK = "nextCandidate("
+IDLE_WRITE_CALLS = (
+    "ensureSlot(",
+    "takeSlot(",
+    "freeSlot(",
+    "claimJob(",
+    "giveUp(",
+    "->update(",
+    "->insert(",
+    "->delete(",
+    "executeStatement(",
+)
+
+
+def _method_named(source: str, name: str) -> str:
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        match = _FUNCTION.match(line)
+        if match is not None and match.group(1) == name:
+            return _method_body(lines, index)
+    return ""
+
+
+def idle_claim_writes(mapper: str, controller: str) -> list[str]:
+    """Rule 21: write calls an idle claim reaches before any candidate was found."""
+    found = []
+    claim_next = _method_named(mapper, "claimNext")
+    if not claim_next:
+        return ["JobMapper::claimNext missing"]
+    check = claim_next.find(CANDIDATE_CHECK)
+    if check < 0:
+        found.append("claimNext has no candidate check")
+        check = len(claim_next)
+    found.extend(f"claimNext: {call}" for call in IDLE_WRITE_CALLS if -1 < claim_next.find(call) < check)
+    route = _method_named(controller, "claim")
+    found.extend(f"QueueController::claim: {call}" for call in IDLE_WRITE_CALLS if call in route)
+    return found
 
 
 # -- the real tree -------------------------------------------------------------------
@@ -557,6 +602,12 @@ def test_rule20_no_bare_time_call_in_db_and_service() -> None:
     assert [name for name, text in sources.items() if time_calls(text)] == []
 
 
+def test_rule21_an_idle_claim_reads_only() -> None:
+    mapper = (LIB / "Db" / "JobMapper.php").read_text(encoding="utf-8")
+    controller = (LIB / "Controller" / "QueueController.php").read_text(encoding="utf-8")
+    assert idle_claim_writes(mapper, controller) == []
+
+
 # -- the self tests: every rule has to fire on a staged violation --------------------
 
 GUARDED_ROUTE = """
@@ -732,3 +783,49 @@ def test_self_rule20_fires_on_a_bare_time_call() -> None:
     assert time_calls("$now = time();") == 1
     assert time_calls("$now = \\time();") == 1
     assert time_calls("$now = $this->time->getTime(); $x = microtime(true);") == 0
+
+
+READ_FIRST_CLAIM = """
+	public function claimNext(): ?array {
+		$now = $this->time->getTime();
+		$purge = $this->claimPurge($now, $token);
+		if ($purge !== null) {
+			return $purge;
+		}
+		if ($this->nextCandidate($now) === null) {
+			return null;
+		}
+		$this->ensureSlot();
+		if (!$this->takeSlot($now, $token)) {
+			return null;
+		}
+		$this->freeSlot($token);
+		return null;
+	}
+"""
+QUIET_ROUTE = """
+	public function claim(): DataResponse {
+		$claim = $this->jobs->claimNext();
+		return new DataResponse([]);
+	}
+"""
+
+
+def test_self_rule21_fires_on_a_write_before_the_candidate_check() -> None:
+    assert idle_claim_writes(READ_FIRST_CLAIM, QUIET_ROUTE) == []
+    slot_first = READ_FIRST_CLAIM.replace(
+        "\t\tif ($this->nextCandidate($now) === null) {\n\t\t\treturn null;\n\t\t}\n\t\t$this->ensureSlot();",
+        "\t\t$this->ensureSlot();\n\t\tif ($this->nextCandidate($now) === null) {\n\t\t\treturn null;\n\t\t}",
+    )
+    assert slot_first != READ_FIRST_CLAIM
+    assert idle_claim_writes(slot_first, QUIET_ROUTE) == ["claimNext: ensureSlot("]
+    no_check = READ_FIRST_CLAIM.replace("$this->nextCandidate($now) === null", "false")
+    assert idle_claim_writes(no_check, QUIET_ROUTE) == [
+        "claimNext has no candidate check",
+        "claimNext: ensureSlot(",
+        "claimNext: takeSlot(",
+        "claimNext: freeSlot(",
+    ]
+    slot_route = QUIET_ROUTE.replace("$claim =", "$this->jobs->ensureSlot();\n\t\t$claim =")
+    assert idle_claim_writes(READ_FIRST_CLAIM, slot_route) == ["QueueController::claim: ensureSlot("]
+    assert idle_claim_writes("", QUIET_ROUTE) == ["JobMapper::claimNext missing"]

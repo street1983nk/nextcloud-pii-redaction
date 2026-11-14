@@ -13,6 +13,7 @@ use OCA\PiiRedaction\Model\Reason;
 use OCA\PiiRedaction\Model\Status;
 use OCA\PiiRedaction\Model\Task;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use OCP\Server;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -240,6 +241,61 @@ final class QueueMapperTest extends TestCase {
 		$this->mapper->update($job);
 		self::assertNull($this->mapper->findOpenFor(10, 'alice', 'etag-1'), 'a finished job counted as open');
 		self::assertSame([], $this->mapper->findOpenByFile(10));
+	}
+
+	/** @return list<array<string, mixed>> */
+	private function slotRows(): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'job_id', 'claim_token', 'lease_until')
+			->from(JobMapper::SLOT_TABLE)
+			->orderBy('id', 'ASC');
+		$result = $qb->executeQuery();
+		$rows = $result->fetchAll();
+		$result->closeCursor();
+		return $rows;
+	}
+
+	public function testAnIdleClaimLeavesTheSlotRowAlone(): void {
+		// The slot row after an earlier claim whose lease ran out. An idle
+		// round must not take and give back the slot: on SQLite every write
+		// competes with the logins of the instance (CI runs 43590559351 and
+		// 43600377522, "database is locked" beside a claim).
+		$qb = $this->db->getQueryBuilder();
+		$qb->insert(JobMapper::SLOT_TABLE)
+			->values([
+				'id' => $qb->createNamedParameter(JobMapper::SLOT_ID, IQueryBuilder::PARAM_INT),
+				'claim_token' => $qb->createNamedParameter(str_repeat('e', 32)),
+				'lease_until' => $qb->createNamedParameter($this->now - 5, IQueryBuilder::PARAM_INT),
+			]);
+		$qb->executeStatement();
+		$done = $this->waiting(10);
+		$done->setStatus(Status::Published->value);
+		$this->mapper->update($done);
+		$before = $this->slotRows();
+
+		self::assertNull($this->mapper->claimNext());
+		self::assertSame($before, $this->slotRows(), 'an idle claim wrote the slot row');
+		self::assertSame(Status::Published, $this->reload($done)->getStatusEnum());
+	}
+
+	public function testAnIdleClaimOnAFreshInstanceCreatesNoSlotRow(): void {
+		self::assertNull($this->mapper->claimNext());
+		self::assertSame([], $this->slotRows(), 'an idle claim inserted the slot row');
+	}
+
+	public function testAClaimAfterIdleRoundsHandsOutTheNextJob(): void {
+		self::assertNull($this->mapper->claimNext());
+		self::assertNull($this->mapper->claimNext());
+		$job = $this->waiting(10);
+
+		$claim = $this->mapper->claimNext();
+		self::assertNotNull($claim);
+		self::assertSame($job->getId(), $claim['job']->getId());
+		self::assertSame(Status::Analyzing, $this->reload($job)->getStatusEnum());
+		$rows = $this->slotRows();
+		self::assertCount(1, $rows);
+		self::assertSame($claim['token'], $rows[0]['claim_token']);
+		self::assertNull($this->mapper->claimNext(), 'the slot was handed out twice');
 	}
 
 	public function testEnsureSlotIsIdempotent(): void {
