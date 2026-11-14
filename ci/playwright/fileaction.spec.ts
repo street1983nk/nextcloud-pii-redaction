@@ -161,7 +161,8 @@ test.describe('Dateiaktion: wo sie angeboten wird', () => {
 		await upload(who, folder, PDF);
 		const link = await share(who, folder, { download: true });
 		try {
-			const context = await browser.newContext();
+			// No use options here (plain library call): block the worker like playwright.config.ts.
+			const context = await browser.newContext({ serviceWorkers: 'block' });
 			const page = await context.newPage();
 			await page.goto(`/index.php/s/${link.token}`);
 			await expect(row(page, PDF)).toBeVisible();

@@ -64,6 +64,18 @@ export default defineConfig({
 		navigationTimeout: 30_000,
 		screenshot: 'only-on-failure',
 		trace: 'retain-on-failure',
+		// The Files app of Nextcloud 33+ registers preview-service-worker.js.
+		// Once it controls the page, requests go through the worker, and
+		// page.route and the response events of the page no longer see them
+		// (Playwright docs of page.route, issue 1090: "We recommend disabling
+		// Service Workers when using request interception"). Run 43615560742:
+		// the forged start of fileaction.spec.ts reached the server unchanged
+		// (201 on the real file id) and waitForResponse ran into its 30 s
+		// deadline, depending on when the worker took over. No test needs the
+		// worker: the CI instance has no PDF preview provider anyway.
+		// Contexts opened by hand with browser.newContext() do not inherit
+		// this option and set it themselves.
+		serviceWorkers: 'block',
 	},
 	projects: SHOTS.map((shot) => ({
 		name: shot.name,

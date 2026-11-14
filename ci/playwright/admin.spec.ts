@@ -120,7 +120,7 @@ async function expectAppsLink(page: Page, state: string, testInfo: TestInfo): Pr
 	if (projectUser(testInfo).name !== 'dora') {
 		const browser = page.context().browser();
 		expect(browser).not.toBeNull();
-		const context = await browser!.newContext({ baseURL: process.env.NC_URL ?? 'http://localhost:8080' });
+		const context = await browser!.newContext({ baseURL: process.env.NC_URL ?? 'http://localhost:8080', serviceWorkers: 'block' });
 		try {
 			const dora = await context.newPage();
 			await login(dora, users.dora());
