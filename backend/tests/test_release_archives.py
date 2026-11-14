@@ -219,7 +219,9 @@ def test_the_backend_rule_fires_on_extra_content_and_a_missing_cmp() -> None:
 
 def test_the_pin_rule_fires_on_a_wrong_missing_or_shared_pin() -> None:
     release = read(WORKFLOWS / "release.yml")
-    shared = re.sub(r"(?m)^  BACKEND_CERT_PUBKEY_SHA256: .*$", f"  BACKEND_CERT_PUBKEY_SHA256: {COMPANION_PIN}", release)
+    shared = re.sub(
+        r"(?m)^  BACKEND_CERT_PUBKEY_SHA256: .*$", f"  BACKEND_CERT_PUBKEY_SHA256: {COMPANION_PIN}", release
+    )
     assert release_findings(shared) == ["release.yml pins both certificates to the same key"]
 
     gone = re.sub(r"(?m)^  BACKEND_CERT_PUBKEY_SHA256: .*$", "  BACKEND_CERT_PUBKEY_SHA256: ''", release)
@@ -280,8 +282,11 @@ TAR = shutil.which("tar")
 needs_sh = pytest.mark.skipif(SH is None, reason="no POSIX sh on this machine")
 
 
-def fake_root(tmp_path: Path, script: str | None = None, *, bundle: bytes = b"export {}\n") -> Path:
-    """The parts of the repository the script reads, plus what it must leave out."""
+def fake_root(tmp_path: Path, script: str | None = None, *, bundle: bytes | None = b"export {}\n") -> Path:
+    """The parts of the repository the script reads, plus what it must leave out.
+
+    ``bundle`` is the content of js/pii_redaction-init.mjs; None leaves it out.
+    """
     root = tmp_path / "repo"
     (root / "scripts" / "release").mkdir(parents=True)
     (root / "scripts" / "release" / "store-archive.sh").write_bytes(
@@ -290,10 +295,8 @@ def fake_root(tmp_path: Path, script: str | None = None, *, bundle: bytes = b"ex
     for name in ("appinfo", "lib", "templates", "css", "img", "l10n"):
         shutil.copytree(REPO_ROOT / "php" / name, root / "php" / name)
     (root / "php" / "js").mkdir()
-    if bundle:
+    if bundle is not None:
         (root / "php" / INIT_BUNDLE).write_bytes(bundle)
-    elif bundle == b"":
-        (root / "php" / INIT_BUNDLE).write_bytes(b"")
     (root / "php" / "lib" / ".gitkeep").write_bytes(b"")
     for leftover in ("src/main.ts", "node_modules/x/index.js", "tests/Unit/XTest.php"):
         path = root / "php" / leftover
@@ -331,9 +334,7 @@ def test_the_companion_stage_holds_the_include_list_and_nothing_else(tmp_path: P
     assert INIT_BUNDLE in files
     assert "appinfo/info.xml" in files
     assert not [
-        name
-        for name in files
-        if name.endswith(".gitkeep") or name.split("/", 1)[0] in {"src", "node_modules", "tests"}
+        name for name in files if name.endswith(".gitkeep") or name.split("/", 1)[0] in {"src", "node_modules", "tests"}
     ]
     assert (app / "appinfo" / "info.xml").read_bytes() == (REPO_ROOT / "php" / "appinfo" / "info.xml").read_bytes()
 
@@ -341,9 +342,7 @@ def test_the_companion_stage_holds_the_include_list_and_nothing_else(tmp_path: P
 @needs_sh
 @pytest.mark.parametrize("bundle", [None, b""], ids=["missing", "empty"])
 def test_the_companion_stage_stops_without_the_init_bundle(tmp_path: Path, bundle: bytes | None) -> None:
-    root = fake_root(tmp_path, bundle=b"" if bundle == b"" else b"")
-    if bundle is None:
-        (root / "php" / INIT_BUNDLE).unlink(missing_ok=True)
+    root = fake_root(tmp_path, bundle=bundle)
     result = run(root, "stage-companion", "stage")
 
     assert result.returncode != 0
@@ -356,8 +355,7 @@ def test_self_a_script_without_the_bundle_check_stages_an_app_without_its_file_a
     # The counter sample on the running script: with the check taken out, the
     # stage succeeds although the bundle is missing, which the text rule names.
     manipulated = read(SCRIPT).replace(f'[ -s "php/{INIT_BUNDLE}" ]', "true")
-    root = fake_root(tmp_path, manipulated, bundle=b"")
-    (root / "php" / INIT_BUNDLE).unlink(missing_ok=True)
+    root = fake_root(tmp_path, manipulated, bundle=None)
 
     assert run(root, "stage-companion", "stage").returncode == 0
     assert INIT_BUNDLE not in tree(root / "stage" / COMPANION)
@@ -398,7 +396,9 @@ def test_packed_archives_pass_their_assertions_and_a_signed_backend_does_not(tmp
     assert run(root, "stage-companion", "stage-php").returncode == 0
     assert run(root, "stage-backend", "stage-backend").returncode == 0
     # occ integrity:sign-app writes this file in release.yml; a stand-in here.
-    (root / "stage-php" / COMPANION / "appinfo" / "signature.json").write_text("{}\n", encoding="utf-8")
+    # Bytes, not text: on Windows write_text would add a carriage return, and
+    # pack refuses that (seen here once, the CRLF guard at work).
+    (root / "stage-php" / COMPANION / "appinfo" / "signature.json").write_bytes(b"{}\n")
     for stage, app in (("stage-php", COMPANION), ("stage-backend", BACKEND)):
         packed = run(root, "pack", stage, app, f"dist/{app}.tar.gz")
         assert packed.returncode == 0, packed.stdout + packed.stderr
