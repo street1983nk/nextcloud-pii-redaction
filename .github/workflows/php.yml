@@ -97,22 +97,28 @@ jobs:
         working-directory: php
         run: composer validate --strict --no-check-publish
 
-      # The repository carries no composer.lock yet (no PHP on the development
-      # machine), so the lock is resolved here without installing anything and
-      # without running a single package script, then audited. Any advisory
-      # turns the job red.
-      - name: Resolve the lock and check it for known advisories
+      # Moving a pin in composer.json: run this workflow by hand, download the
+      # artifact below and check the refreshed lock in (there is no PHP on the
+      # development machine to resolve one locally). The refresh runs before
+      # the check, so a moved pin does not die on the stale repo lock.
+      - name: Resolve a fresh lock (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: php
+        run: composer update --no-install --no-scripts --no-interaction --no-progress
+
+      # php/composer.lock is checked in (T-01-SC): the transitive dev
+      # dependencies are pinned, every install in this workflow uses the lock.
+      # --strict makes an out-of-sync lock an error, the dry run proves the
+      # lock still resolves, and any known advisory turns the job red.
+      - name: The lock is present, in sync and free of known advisories
         working-directory: php
         run: |
-          composer update --no-install --no-scripts --no-interaction --no-progress
           test -s composer.lock
           composer validate --strict --no-check-publish
+          composer install --dry-run --no-scripts --no-interaction --no-progress
           composer audit --locked --no-interaction
 
-      # The resolved lock is published as an artifact so it can be checked in
-      # (T-01-SC: a repo without a lock leaves the transitive dev dependencies
-      # floating; the development machine has no PHP to resolve one locally).
-      - name: Publish the resolved lock
+      - name: Publish the lock of this run
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: composer-lock

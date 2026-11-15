@@ -2,7 +2,7 @@
 phase: 01
 slug: zwei-app-ger-st-und-integrationsbeweis
 status: open
-threats_open: 1
+threats_open: 0
 asvs_level: 2
 created: 2026-11-15
 audited_commit: 7f71f9e
@@ -41,7 +41,7 @@ Beleg-Konvention: Pfade relativ zum Repo-Wurzelverzeichnis, `Datei:Zeile`. Lokal
 
 | Threat ID | Category | Component | Disposition | Mitigation | Status |
 |-----------|----------|-----------|-------------|------------|--------|
-| T-01-SC | Tampering (high) | npm-, PyPI-, Packagist-Pakete | mitigate | npm: exakte Pins plus `php/package-lock.json`, `ci/playwright/package-lock.json`, `npm ci --ignore-scripts` (`.github/workflows/php.yml:57`, `deploy-harp.yml:248`, `release.yml:186`); PyPI: `backend/uv.lock`, `uv run --frozen`. **Lücke:** Packagist ohne Lockdatei; `php/composer.lock` fehlt im Repo, `php.yml:186` löst `composer install` ohne Lock auf (transitive phpunit-Abhängigkeiten schwimmen). Ausgleich nur teilweise: exakter Pin `phpunit/phpunit 11.5.57` (`php/composer.json:16`), `--no-scripts`, `composer audit` auf frisch aufgelöstem Lock (`php.yml:104-108`) | open |
+| T-01-SC | Tampering (high) | npm-, PyPI-, Packagist-Pakete | mitigate | npm: exakte Pins plus `php/package-lock.json`, `ci/playwright/package-lock.json`, `npm ci --ignore-scripts` (`.github/workflows/php.yml:57`, `deploy-harp.yml:248`, `release.yml:186`); PyPI: `backend/uv.lock`, `uv run --frozen`. Packagist seit 15.11.2026 mit eingecheckter Lockdatei `php/composer.lock` (27 Dev-Pakete, 0 Laufzeitpakete); php.yml erzwingt den Lock (validate --strict, install --dry-run, audit --locked), phpunit-Job installiert dagegen; dazu exakter Pin `phpunit/phpunit 11.5.57` und `--no-scripts` | closed |
 | T-01-01-01 | Tampering | php.yml, docker.yml | mitigate | alle `uses:` per 40-stelligem SHA mit Versionskommentar (grep über `.github/workflows/*.yml` ohne Treffer für bewegliche Referenzen), Gate `backend/tests/test_workflow_pins.py:283` | closed |
 | T-01-01-02 | Elevation of Privilege | Workflows | mitigate | `permissions: contents: read` in `php.yml:27`, `python.yml:15`, `deploy-harp.yml:50`, `docker.yml:24`, `security.yml:12`, `release.yml:34`; Test-Workflows ohne `secrets.`; `packages: write` nur in `docker.yml:39-41` (Build/Push, nur main, Tags, Zeitplan) | closed |
 | T-01-01-03 | Elevation of Privilege | Container-Routen | mitigate | `backend/appinfo/info.xml:75` `<routes/>`, Gate `backend/tests/test_store_metadata.py:135` plus Selbsttest `:144` | closed |
@@ -188,7 +188,7 @@ Geprüft gegen die zwei Muster aus Audio & Video Search: (a) Python-Logs nie mit
 |------------|---------------|--------|------|--------|
 | 2026-11-15 | 103 | 102 | 1 | gsd-security-auditor (rückwirkend, HEAD 7f71f9e) |
 
-Offen: T-01-SC (Packagist ohne Lockdatei). Owner-Entscheid 15.11.2026: Lock einchecken. Schritt 1 umgesetzt: php.yml veröffentlicht den in CI aufgelösten Lock als Artefakt `composer-lock`; nach dem nächsten grünen Lauf wird `php/composer.lock` eingecheckt und `php.yml` auf Installation gegen den Lock umgestellt, dann schließt T-01-SC.
+T-01-SC GESCHLOSSEN 15.11.2026 (Owner-Entscheid Lock einchecken): `php/composer.lock` ist eingecheckt (aus dem gruenen Lauf 43724117413 geholt; 0 Laufzeitpakete, 27 Dev-Pakete, phpunit exakt 11.5.57); php.yml prueft jetzt Vorhandensein, Synchronitaet (validate --strict), Aufloesbarkeit (install --dry-run) und Advisories (audit --locked) gegen den Repo-Lock, und der phpunit-Job installiert gegen den Lock. Pin-Wechsel laufen ueber workflow_dispatch (frischer Lock als Artefakt).
 
 ---
 
@@ -196,7 +196,7 @@ Offen: T-01-SC (Packagist ohne Lockdatei). Owner-Entscheid 15.11.2026: Lock einc
 
 - [x] All threats have a disposition (mitigate / accept / transfer)
 - [x] Accepted risks documented in Accepted Risks Log (Owner-Bestätigung ausstehend)
-- [ ] `threats_open: 0` confirmed
+- [x] `threats_open: 0` confirmed
 - [ ] `status: verified` set in frontmatter
 
-**Approval:** AR-01 bis AR-03 vom Owner einzeln bestätigt 15.11.2026; E-01 und E-02 behoben; T-01-SC in Arbeit (Lock einchecken, Owner-Entscheid 15.11.2026).
+**Approval:** AR-01 bis AR-03 vom Owner einzeln bestätigt 15.11.2026; E-01 und E-02 behoben; T-01-SC geschlossen (Lock eingecheckt 15.11.2026).
