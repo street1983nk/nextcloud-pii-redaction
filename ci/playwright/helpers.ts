@@ -216,6 +216,26 @@ export async function withApi<T>(who: User, run: (context: APIRequestContext) =>
 	}
 }
 
+/**
+ * One context per user for the WebDAV helpers, kept for the whole worker: the
+ * session cookie of the first request spares the server a fresh login per
+ * call. Each login writes on oc_authtoken (createSessionToken invalidates old
+ * tokens) and collided on SQLite with the writes of the backend, which the
+ * server answers with 503 (run 43681966899). Real clients keep their session
+ * too. Only for remote.php: the app routes need the cookie-free context of
+ * api(), see there.
+ */
+const davContexts = new Map<string, Promise<APIRequestContext>>();
+
+function davApi(who: User): Promise<APIRequestContext> {
+	let context = davContexts.get(who.name);
+	if (context === undefined) {
+		context = api(who);
+		davContexts.set(who.name, context);
+	}
+	return context;
+}
+
 function davPath(who: User, path: string): string {
 	const encoded = path
 		.normalize('NFC')
@@ -235,19 +255,17 @@ function rawBody(bytes: Uint8Array): Uint8Array {
 }
 
 export async function davPut(who: User, path: string, bytes: Uint8Array): Promise<void> {
-	await withApi(who, async (context) => {
-		const response = await context.put(davPath(who, path), { data: rawBody(bytes) as never });
-		expect([201, 204]).toContain(response.status());
-	});
+	const context = await davApi(who);
+	const response = await context.put(davPath(who, path), { data: rawBody(bytes) as never });
+	expect([201, 204]).toContain(response.status());
 }
 
 /** The bytes of one file as the user reads them over WebDAV. */
 export async function davGet(who: User, path: string): Promise<Uint8Array> {
-	return withApi(who, async (context) => {
-		const response = await context.get(davPath(who, path));
-		expect(response.status()).toBe(200);
-		return response.body();
-	});
+	const context = await davApi(who);
+	const response = await context.get(davPath(who, path));
+	expect(response.status()).toBe(200);
+	return response.body();
 }
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -286,38 +304,35 @@ export function renderFirstPage(pdf: Uint8Array): Uint8Array {
 }
 
 export async function davDelete(who: User, path: string): Promise<void> {
-	await withApi(who, async (context) => {
-		const response = await context.delete(davPath(who, path));
-		expect([204, 404]).toContain(response.status());
-	});
+	const context = await davApi(who);
+	const response = await context.delete(davPath(who, path));
+	expect([204, 404]).toContain(response.status());
 }
 
 /** A fresh, empty folder: removed first, so a repeated run starts clean. */
 export async function davFreshFolder(who: User, path: string): Promise<void> {
 	await davDelete(who, path);
 	const parts = path.split('/').filter((part) => part !== '');
-	await withApi(who, async (context) => {
-		for (let i = 1; i <= parts.length; i++) {
-			const response = await context.fetch(davPath(who, parts.slice(0, i).join('/')), { method: 'MKCOL' });
-			expect([201, 405]).toContain(response.status());
-		}
-	});
+	const context = await davApi(who);
+	for (let i = 1; i <= parts.length; i++) {
+		const response = await context.fetch(davPath(who, parts.slice(0, i).join('/')), { method: 'MKCOL' });
+		expect([201, 405]).toContain(response.status());
+	}
 }
 
 const PROPFIND = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/><d:getetag/></d:prop></d:propfind>';
 
 /** File id and etag of one path, or null when the user cannot see it. */
 export async function davStat(who: User, path: string): Promise<{ fileId: number; etag: string } | null> {
-	return withApi(who, async (context) => {
-		const response = await context.fetch(davPath(who, path), { method: 'PROPFIND', headers: { Depth: '0' }, data: PROPFIND });
-		if (response.status() !== 207) {
-			return null;
-		}
-		const body = await response.text();
-		const id = /<oc:fileid>(\d+)<\/oc:fileid>/.exec(body);
-		const etag = /<d:getetag>([^<]*)<\/d:getetag>/.exec(body);
-		return id === null ? null : { fileId: Number(id[1]), etag: etag?.[1] ?? '' };
-	});
+	const context = await davApi(who);
+	const response = await context.fetch(davPath(who, path), { method: 'PROPFIND', headers: { Depth: '0' }, data: PROPFIND });
+	if (response.status() !== 207) {
+		return null;
+	}
+	const body = await response.text();
+	const id = /<oc:fileid>(\d+)<\/oc:fileid>/.exec(body);
+	const etag = /<d:getetag>([^<]*)<\/d:getetag>/.exec(body);
+	return id === null ? null : { fileId: Number(id[1]), etag: etag?.[1] ?? '' };
 }
 
 /**
@@ -329,42 +344,40 @@ export async function davStat(who: User, path: string): Promise<{ fileId: number
  * in every log (run 43615560742).
  */
 export async function davFind(who: User, folder: string, name: string): Promise<{ fileId: number; etag: string } | null> {
-	return withApi(who, async (context) => {
-		const response = await context.fetch(davPath(who, folder), { method: 'PROPFIND', headers: { Depth: '1' }, data: PROPFIND });
-		if (response.status() !== 207) {
-			return null;
-		}
-		const body = await response.text();
-		const wanted = decodeURIComponent(davPath(who, `${folder}/${name}`));
-		for (const match of body.matchAll(/<d:response>([\s\S]*?)<\/d:response>/g)) {
-			const href = /<d:href>([^<]*)<\/d:href>/.exec(match[1]);
-			if (href === null || decodeURIComponent(href[1]).replace(/\/$/, '') !== wanted) {
-				continue;
-			}
-			const id = /<oc:fileid>(\d+)<\/oc:fileid>/.exec(match[1]);
-			const etag = /<d:getetag>([^<]*)<\/d:getetag>/.exec(match[1]);
-			return id === null ? null : { fileId: Number(id[1]), etag: etag?.[1] ?? '' };
-		}
+	const context = await davApi(who);
+	const response = await context.fetch(davPath(who, folder), { method: 'PROPFIND', headers: { Depth: '1' }, data: PROPFIND });
+	if (response.status() !== 207) {
 		return null;
-	});
+	}
+	const body = await response.text();
+	const wanted = decodeURIComponent(davPath(who, `${folder}/${name}`));
+	for (const match of body.matchAll(/<d:response>([\s\S]*?)<\/d:response>/g)) {
+		const href = /<d:href>([^<]*)<\/d:href>/.exec(match[1]);
+		if (href === null || decodeURIComponent(href[1]).replace(/\/$/, '') !== wanted) {
+			continue;
+		}
+		const id = /<oc:fileid>(\d+)<\/oc:fileid>/.exec(match[1]);
+		const etag = /<d:getetag>([^<]*)<\/d:getetag>/.exec(match[1]);
+		return id === null ? null : { fileId: Number(id[1]), etag: etag?.[1] ?? '' };
+	}
+	return null;
 }
 
 /** The names in one folder, decoded, exactly as the server stores them. */
 export async function davList(who: User, path: string): Promise<string[]> {
-	return withApi(who, async (context) => {
-		const response = await context.fetch(davPath(who, path), { method: 'PROPFIND', headers: { Depth: '1' }, data: PROPFIND });
-		expect(response.status()).toBe(207);
-		const body = await response.text();
-		const own = decodeURIComponent(davPath(who, path)).replace(/\/$/, '');
-		const names: string[] = [];
-		for (const match of body.matchAll(/<d:href>([^<]*)<\/d:href>/g)) {
-			const href = decodeURIComponent(match[1]).replace(/\/$/, '');
-			if (href !== own) {
-				names.push(href.slice(href.lastIndexOf('/') + 1));
-			}
+	const context = await davApi(who);
+	const response = await context.fetch(davPath(who, path), { method: 'PROPFIND', headers: { Depth: '1' }, data: PROPFIND });
+	expect(response.status()).toBe(207);
+	const body = await response.text();
+	const own = decodeURIComponent(davPath(who, path)).replace(/\/$/, '');
+	const names: string[] = [];
+	for (const match of body.matchAll(/<d:href>([^<]*)<\/d:href>/g)) {
+		const href = decodeURIComponent(match[1]).replace(/\/$/, '');
+		if (href !== own) {
+			names.push(href.slice(href.lastIndexOf('/') + 1));
 		}
-		return names;
-	});
+	}
+	return names;
 }
 
 /** Uploads one fixture into a folder and returns its file id. */
