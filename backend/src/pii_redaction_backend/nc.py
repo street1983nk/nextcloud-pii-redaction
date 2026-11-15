@@ -49,7 +49,6 @@ from typing import Any, BinaryIO, Final
 import httpx
 from nc_py_api import AsyncNextcloudApp, NextcloudException
 from nc_py_api.ex_app import AppAPIAuthMiddleware, run_app, set_handlers
-from nc_py_api.ex_app.ui.settings import SettingsField, SettingsFieldType, SettingsForm
 
 from pii_redaction_backend.model import AckResult, Reason, Stage, Task
 
@@ -60,9 +59,6 @@ __all__ = [
     "CompanionGone",
     "FetchResult",
     "NextcloudException",
-    "SettingsField",
-    "SettingsFieldType",
-    "SettingsForm",
     "ack",
     "app_api_headers",
     "claim",

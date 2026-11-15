@@ -37,7 +37,7 @@ from pii_redaction_backend.runner.runner import Runner
 LOGGER = logging.getLogger(APP_ID)
 
 # What AppAPI shows the admin when enabling fails. The detail goes to the log.
-ENABLE_FAILED: Final = "PII Redaction could not register its settings page. Details are in the log of the ExApp."
+ENABLE_FAILED: Final = "PII Redaction could not remove its old settings page. Details are in the log of the ExApp."
 
 # How long the shutdown waits for background tasks before it cancels them.
 TASK_STOP_SECONDS: Final = 5.0
@@ -67,12 +67,9 @@ async def stop_background(deadline: float = TASK_STOP_SECONDS) -> int:
 
 
 async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
-    """Register or remove the settings page. An empty string is success for AppAPI."""
+    """Remove the settings page of earlier builds. An empty string is success for AppAPI."""
     try:
-        if enabled:
-            await settings.register(nc)
-        else:
-            await settings.unregister(nc)
+        await settings.unregister(nc)
     except Exception as exc:
         LOGGER.error("enable handler failed", extra={"enabled": enabled, "exc_type": type(exc).__name__})
         return ENABLE_FAILED

@@ -92,30 +92,26 @@ def test_init_acknowledges_at_once(client: TestClient, monkeypatch: pytest.Monke
 def test_the_enabled_route_reaches_the_handler(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 
-    async def register(_nc: object) -> None:
-        calls.append("register")
+    async def unregister(_nc: object) -> None:
+        calls.append("unregister")
 
-    monkeypatch.setattr(settings, "register", register)
+    monkeypatch.setattr(settings, "unregister", unregister)
 
     response = client.put("/enabled?enabled=1", headers=signed_headers())
 
     assert response.status_code == 200
     assert response.json() == {"error": ""}
-    assert calls == ["register"]
+    assert calls == ["unregister"]
 
 
 class _FakeSettingsApi:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
-        self.registered: list[Any] = []
         self.unregistered: list[str] = []
 
-    async def register_form(self, form: Any) -> None:
+    async def unregister_form(self, form_id: str) -> None:
         if self.fail:
             raise RuntimeError("nextcloud is down")
-        self.registered.append(form)
-
-    async def unregister_form(self, form_id: str) -> None:
         self.unregistered.append(form_id)
 
 
@@ -123,14 +119,13 @@ def _fake_nc(api: _FakeSettingsApi) -> Any:
     return SimpleNamespace(ui=SimpleNamespace(settings=api))
 
 
-async def test_enabling_registers_the_form_and_disabling_removes_it() -> None:
+async def test_enabling_and_disabling_both_remove_the_form_of_earlier_builds() -> None:
     api = _FakeSettingsApi()
 
     assert await main.enabled_handler(True, _fake_nc(api)) == ""
     assert await main.enabled_handler(False, _fake_nc(api)) == ""
 
-    assert [form.id for form in api.registered] == [settings.FORM_ID]
-    assert api.unregistered == [settings.FORM_ID]
+    assert api.unregistered == [settings.FORM_ID, settings.FORM_ID]
 
 
 async def test_a_failing_enable_returns_a_message_and_logs_the_type(caplog: pytest.LogCaptureFixture) -> None:

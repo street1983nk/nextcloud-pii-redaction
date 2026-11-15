@@ -1,4 +1,4 @@
-"""The declarative admin page and the l10n catalogue pair (.json and .js)."""
+"""The removed admin page and the l10n catalogue pair (.json and .js)."""
 
 import subprocess
 import sys
@@ -9,31 +9,16 @@ from pii_redaction_backend import APP_ID, settings
 from tests.conftest import BACKEND_ROOT, REPO_ROOT
 
 
-def test_the_form_is_an_admin_form_with_stable_ids() -> None:
-    form = settings.admin_form().to_dict()
+async def test_unregister_removes_the_form_of_earlier_builds_by_its_old_id() -> None:
+    removed: list[str] = []
 
-    assert form["id"] == f"{APP_ID}_admin"
-    assert form["section_type"] == "admin"
-    assert [field["id"] for field in form["fields"]] == ["processing_enabled", "max_file_size_mb"]
-    assert set(settings.DEFAULTS) == {field["id"] for field in form["fields"]}
+    async def unregister_form(form_id: str) -> None:
+        removed.append(form_id)
 
+    nc: Any = SimpleNamespace(ui=SimpleNamespace(settings=SimpleNamespace(unregister_form=unregister_form)))
+    await settings.unregister(nc)
 
-def test_user_visible_strings_skip_numbers_and_empty_texts() -> None:
-    texts = settings.user_visible_strings(settings.admin_form())
-
-    assert "100" not in texts
-    assert "" not in texts
-    assert "Processing" in texts
-
-
-async def test_read_fills_in_defaults_and_takes_saved_values() -> None:
-    async def get_values(keys: list[str]) -> list[Any]:
-        assert set(keys) == set(settings.DEFAULTS)
-        return [SimpleNamespace(key="max_file_size_mb", value="5"), SimpleNamespace(key="unknown", value="x")]
-
-    nc: Any = SimpleNamespace(appconfig_ex=SimpleNamespace(get_values=get_values))
-
-    assert await settings.read(nc) == {"processing_enabled": "1", "max_file_size_mb": "5"}
+    assert removed == [f"{APP_ID}_admin"]
 
 
 def test_the_js_catalogues_match_their_json_source() -> None:

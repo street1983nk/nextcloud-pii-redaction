@@ -8,7 +8,7 @@ German comes first (README.md is German). The rule covers, and this module holds
 - the store texts: name, summary and description of backend/appinfo/info.xml in the
   English default, lang="de" and lang="fr"
 - the l10n catalogues: backend/l10n/de.json, en.json, fr.json with exactly the
-  same keys, no empty value, and every string of the settings page among them
+  same keys and no empty value (empty since the settings page was removed)
 - the PHP app catalogues php/l10n/{de,de_DE,en,fr}.json (section at the end)
 
 Each rule has a mutated sample that has to make it fire, so a gate whose body
@@ -20,7 +20,6 @@ import re
 from pathlib import Path
 from xml.etree import ElementTree
 
-from pii_redaction_backend import settings
 from tests.conftest import BACKEND_ROOT, REPO_ROOT
 
 LANGUAGES = ("de", "en", "fr")
@@ -97,14 +96,6 @@ def test_the_store_texts_exist_in_three_languages() -> None:
 
 def test_the_catalogues_carry_the_same_keys_in_three_languages() -> None:
     assert catalogue_findings(load_catalogues()) == []
-
-
-def test_every_string_of_the_settings_page_is_translated() -> None:
-    catalogues = load_catalogues()
-
-    for text in settings.user_visible_strings(settings.admin_form()):
-        for language in LANGUAGES:
-            assert text in catalogues[language], f"{text!r} missing in l10n/{language}.json"
 
 
 # -- self tests: every rule has to be able to fire ------------------------------

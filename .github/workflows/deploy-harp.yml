@@ -362,9 +362,12 @@ jobs:
           timeout 30 ./occ app_api:app:list | tee app-list.txt
           grep -q "${BACKEND_APP_ID}" app-list.txt
 
-      - name: The settings form is registered and no unsigned call reaches the container
+      - name: No settings form stays registered and no unsigned call reaches the container
         run: |
-          # PUT /enabled registered the form into AppAPI's table ex_settings_forms.
+          # PUT /enabled removes the form an earlier build registered; the
+          # query against AppAPI's table ex_settings_forms has to come back
+          # empty of our form id (the table itself has to exist, so a broken
+          # query fails the step instead of passing it).
           query="SELECT CONCAT(appid, ':', formid) FROM oc_ex_settings_forms"
           if [ "${DB_KIND}" = "mariadb" ]; then
             forms=$(docker exec "${DB_CONTAINER}" mariadb -u"${DB_USER}" -p"${DB_PASS}" "${DB_NAME}" -N -e "${query}")
@@ -372,8 +375,8 @@ jobs:
             # The running server may hold a write lock; wait for it.
             forms=$(sqlite3 -cmd '.timeout 15000' data/owncloud.db "SELECT appid || ':' || formid FROM oc_ex_settings_forms")
           fi
-          echo "registered forms: ${forms}"
-          grep -qx "${BACKEND_APP_ID}:${BACKEND_APP_ID}_admin" <<<"${forms}"
+          echo "registered forms: ${forms:-none}"
+          ! grep -q "^${BACKEND_APP_ID}:" <<<"${forms}"
           anonymous=$(curl -s -o anonymous.txt -w '%{http_code}' \
             "http://localhost:8090/exapps/${BACKEND_APP_ID}/status")
           admin=$(curl -s -o admin.txt -w '%{http_code}' -u "${ADMIN_USER}:${ADMIN_PASS}" \
