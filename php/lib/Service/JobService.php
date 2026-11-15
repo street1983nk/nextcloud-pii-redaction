@@ -7,6 +7,7 @@ namespace OCA\PiiRedaction\Service;
 use OCA\PiiRedaction\Db\Job;
 use OCA\PiiRedaction\Db\JobEventMapper;
 use OCA\PiiRedaction\Db\JobMapper;
+use OCA\PiiRedaction\Db\RetriedTransaction;
 use OCA\PiiRedaction\Model\Lang;
 use OCA\PiiRedaction\Model\Mode;
 use OCA\PiiRedaction\Model\Reason;
@@ -94,20 +95,24 @@ final class JobService {
 			return self::refused(Reason::NotReadable);
 		}
 
+		// The transaction reads first and writes after; on SQLite a writer in
+		// between (cron placing a copy, the container claiming work) locks it
+		// out at once, so a lock rolls back and runs the whole closure again
+		// (CI run 43667132427). findOpenFor answers anew on every attempt.
 		$created = false;
-		$this->db->beginTransaction();
-		try {
-			$job = $this->jobs->findOpenFor($fileId, $uid, $etag);
-			if ($job === null) {
-				$job = $this->jobs->enqueue($fileId, $uid, $etag, Mode::Redact, $this->languageOf($uid));
-				$this->events->record($job->getId(), $uid, Status::Queued->value);
-				$created = true;
+		$transaction = new RetriedTransaction($this->db, $this->logger);
+		/** @var Job $job */
+		$job = $transaction->run(function () use ($fileId, $uid, $etag, &$created): Job {
+			$created = false;
+			$open = $this->jobs->findOpenFor($fileId, $uid, $etag);
+			if ($open !== null) {
+				return $open;
 			}
-			$this->db->commit();
-		} catch (\Throwable $e) {
-			$this->db->rollBack();
-			throw $e;
-		}
+			$job = $this->jobs->enqueue($fileId, $uid, $etag, Mode::Redact, $this->languageOf($uid));
+			$this->events->record($job->getId(), $uid, Status::Queued->value);
+			$created = true;
+			return $job;
+		});
 
 		$ahead = $job->getStatusEnum() === Status::Queued ? $this->jobs->ahead($job) : 0;
 		return ['job' => $job, 'created' => $created, 'ahead' => $ahead, 'reason' => null];
