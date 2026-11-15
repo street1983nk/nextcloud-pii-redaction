@@ -8,6 +8,9 @@
 #pii-review {
 	padding: calc(var(--default-grid-baseline) * 4);
 	color: var(--color-main-text);
+	/* The page ground (UI-SPEC Color, dominant): without it the heading and
+	 * the muted lines stand on the theme picture of the body. */
+	background-color: var(--color-main-background);
 }
 
 @media (min-width: 768px) {

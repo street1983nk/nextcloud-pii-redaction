@@ -24,6 +24,7 @@ import {
 	PDF,
 	baseJob,
 	color,
+	contrastRatio,
 	davDelete,
 	davFreshFolder,
 	davGet,
@@ -49,6 +50,7 @@ import {
 	share,
 	showPng,
 	sharer,
+	textContrast,
 	unshare,
 	upload,
 	users,
@@ -65,7 +67,24 @@ const BACKEND_NOT_READY = /^(PII Redaction is not ready|PII Redaction ist gerade
 async function openReview(page: Page, jobId: number): Promise<number> {
 	const response = await page.goto(reviewPath(jobId));
 	await expect(page.locator('#pii-review h2')).toBeVisible();
+	await expectReadableFrame(page);
 	return response?.status() ?? 0;
+}
+
+/**
+ * Heading, meta line and page counter reach 4.5:1 against what actually
+ * paints behind them. textContrast refuses a theme picture below the text,
+ * so a review page without its own page ground fails here in every state.
+ */
+async function expectReadableFrame(page: Page): Promise<void> {
+	expect(await textContrast(page.locator('#pii-review h2'))).toBeGreaterThanOrEqual(4.5);
+	for (const muted of ['.pii-review__meta', '.pii-review__counter', '.pii-review__caption']) {
+		const lines = page.locator(`#pii-review ${muted}:visible`);
+		const count = await lines.count();
+		for (let i = 0; i < count; i++) {
+			expect(await textContrast(lines.nth(i))).toBeGreaterThanOrEqual(4.5);
+		}
+	}
 }
 
 /** The canary of the fixtures is never on the page: only the image shows content. */
@@ -96,6 +115,7 @@ async function expectCardText(page: Page): Promise<void> {
 	const count = await texts.count();
 	expect(count).toBeGreaterThan(0);
 	for (let i = 0; i < count; i++) {
+		expect(await textContrast(texts.nth(i))).toBeGreaterThanOrEqual(4.5);
 		expect(await color(texts.nth(i))).toBe(main);
 		if (main !== muted) {
 			expect(await color(texts.nth(i))).not.toBe(muted);
@@ -426,4 +446,31 @@ test('Prüfseite nicht verfügbar: carol nach ACL -read im Gruppenordner', async
 
 	await login(page, carol);
 	await expectUnavailable(page, jobId, testInfo, 'nicht-verfuegbar-acl');
+});
+
+// -- self test of the contrast gate -------------------------------------------
+
+test('Kontrast-Selbsttest: Messung kalibriert, Theme-Bild wird verweigert', async ({ page }, testInfo) => {
+	// Calibration (WCAG reference points): the measurement has to be able to
+	// fail, otherwise every green ratio above would be worthless.
+	expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 6);
+	expect(contrastRatio('#767676', '#ffffff')).toBeGreaterThanOrEqual(4.5);
+	expect(contrastRatio('#999999', '#ffffff')).toBeLessThan(4.5);
+
+	// Positive control on the live page: a probe over a background image has
+	// to be refused, never measured against an assumed white.
+	const who = projectUser(testInfo);
+	await login(page, who);
+	await page.evaluate(() => {
+		const probe = document.createElement('div');
+		probe.id = 'pii-contrast-probe';
+		probe.style.backgroundImage = 'linear-gradient(#ffffff, #000000)';
+		const inner = document.createElement('span');
+		inner.id = 'pii-contrast-probe-text';
+		inner.textContent = 'probe';
+		probe.appendChild(inner);
+		document.body.appendChild(probe);
+	});
+	await expect(textContrast(page.locator('#pii-contrast-probe-text'))).rejects.toThrow('background image');
+	await page.evaluate(() => document.getElementById('pii-contrast-probe')?.remove());
 });

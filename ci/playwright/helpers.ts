@@ -673,6 +673,109 @@ export async function color(element: Locator): Promise<string> {
 	return element.evaluate((node) => getComputedStyle(node).color);
 }
 
+/* -- contrast measurement (WCAG 2.1) ------------------------------------------ */
+
+/** A colour with channels 0 to 255 and alpha 0 to 1. */
+export type Rgba = { r: number; g: number; b: number; a: number };
+
+const HEX_COLOUR = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const FUNCTION_COLOUR = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[,/]\s*([\d.]+%?)\s*)?\)$/i;
+
+/**
+ * A colour as getComputedStyle writes it (rgb(), rgba(), the space form with
+ * a slash, transparent) or as hex. Anything else throws: a colour this cannot
+ * read must fail the measurement, never pass as black or white.
+ */
+export function parseColor(text: string): Rgba {
+	const value = text.trim();
+	if (value.toLowerCase() === 'transparent') {
+		return { r: 0, g: 0, b: 0, a: 0 };
+	}
+	const hex = HEX_COLOUR.exec(value);
+	if (hex !== null) {
+		const digits = hex[1].length === 3 ? [...hex[1]].map((digit) => digit + digit).join('') : hex[1];
+		const channel = (at: number) => Number.parseInt(digits.slice(at, at + 2), 16);
+		return { r: channel(0), g: channel(2), b: channel(4), a: digits.length === 8 ? channel(6) / 255 : 1 };
+	}
+	const fn = FUNCTION_COLOUR.exec(value);
+	if (fn !== null) {
+		const alpha = fn[4] === undefined ? 1 : fn[4].endsWith('%') ? Number.parseFloat(fn[4]) / 100 : Number.parseFloat(fn[4]);
+		return { r: Number(fn[1]), g: Number(fn[2]), b: Number(fn[3]), a: alpha };
+	}
+	throw new Error(`colour not readable for the contrast measurement: ${text}`);
+}
+
+/** The colour that shows when top lies over an opaque bottom (source over). */
+export function composite(top: Rgba, bottom: Rgba): Rgba {
+	const mix = (upper: number, lower: number) => upper * top.a + lower * (1 - top.a);
+	return { r: mix(top.r, bottom.r), g: mix(top.g, bottom.g), b: mix(top.b, bottom.b), a: 1 };
+}
+
+/** Relative luminance after WCAG 2.1 (definition "relative luminance", sRGB). */
+function relativeLuminance(colour: Rgba): number {
+	const linear = (channel: number) => {
+		const c = channel / 255;
+		return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+	};
+	return 0.2126 * linear(colour.r) + 0.7152 * linear(colour.g) + 0.0722 * linear(colour.b);
+}
+
+/**
+ * The contrast ratio after WCAG 2.1, (L1 + 0.05) / (L2 + 0.05) with the
+ * lighter colour on top. A foreground with alpha is laid over the background
+ * first; the background has to be opaque.
+ */
+export function contrastRatio(fg: string | Rgba, bg: string | Rgba): number {
+	const background = typeof bg === 'string' ? parseColor(bg) : bg;
+	if (background.a !== 1) {
+		throw new Error('the background of a contrast measurement has to be opaque');
+	}
+	const foreground = composite(typeof fg === 'string' ? parseColor(fg) : fg, background);
+	const [light, dark] = [relativeLuminance(foreground), relativeLuminance(background)].sort((x, y) => y - x);
+	return (light + 0.05) / (dark + 0.05);
+}
+
+/**
+ * The contrast of an element's text against what actually paints behind it:
+ * the background colours from the element up to the first opaque layer. A
+ * background image anywhere below the transparent part of the stack fails the
+ * measurement, because the theme picture decides the contrast then; that is
+ * exactly the bug this gate exists for (review page without a page ground).
+ */
+export async function textContrast(target: Locator): Promise<number> {
+	const colours = await target.evaluate((node) => {
+		const layers: Array<{ color: string; image: boolean }> = [];
+		for (let element: Element | null = node; element !== null; element = element.parentElement) {
+			const style = getComputedStyle(element);
+			layers.push({ color: style.backgroundColor, image: style.backgroundImage !== 'none' });
+		}
+		return { fg: getComputedStyle(node).color, layers };
+	});
+	const translucent: Rgba[] = [];
+	let ground: Rgba | null = null;
+	for (const layer of colours.layers) {
+		if (layer.image) {
+			throw new Error('the text stands on a background image without an opaque ground');
+		}
+		const colour = parseColor(layer.color);
+		if (colour.a === 1) {
+			ground = colour;
+			break;
+		}
+		if (colour.a > 0) {
+			translucent.push(colour);
+		}
+	}
+	if (ground === null) {
+		throw new Error('no opaque ground behind the text');
+	}
+	let background = ground;
+	for (const layer of translucent.reverse()) {
+		background = composite(layer, background);
+	}
+	return contrastRatio(colours.fg, background);
+}
+
 /** Vertical gap between the bottom of one element and the top of another. */
 export async function gap(upper: Locator, lower: Locator): Promise<number> {
 	const a = await upper.boundingBox();
