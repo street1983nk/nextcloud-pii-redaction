@@ -1,7 +1,7 @@
 ---
 phase: 01
 slug: zwei-app-ger-st-und-integrationsbeweis
-status: open
+status: verified
 threats_open: 0
 asvs_level: 2
 created: 2026-11-15
