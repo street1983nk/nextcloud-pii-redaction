@@ -2,19 +2,26 @@
 
 usage: python3 ci/make_fixtures.py <outdir>
 
-Four files, standard library only (the runner has no PyMuPDF):
+Four files, standard library only (the runner has no PyMuPDF), styled like the
+real paperwork of the target group (owner request 15.11.2026: realistic
+documents, not plainly typed lines), with invented people and places only:
 
-  Bescheid 2026-114.pdf  two pages, Helvetica, content streams without a
-                         filter, so the canary stands in the raw bytes
-  Antrag.docx            the four parts a word processor needs, nothing else
-  Vermerk.odt            mimetype first and stored, manifest, content, styles
+  Bescheid 2026-114.pdf  two pages, letter head, address field, reference
+                         block, subject in bold, reasons and appeal
+                         instruction; Helvetica and Helvetica-Bold, content
+                         streams without a filter, so the canary stands in
+                         the raw bytes
+  Antrag.docx            the request letter of the citizen: sender block,
+                         recipient, date line, bold subject, body, signature
+  Vermerk.odt            the file note of the clerk with numbered findings
   notes.txt              plain text, the format the file action must not offer
 
 The canary PIIKANARIE7Q4XZ9 stands in the body text of the three documents and
 nowhere else: not in a file name, not in an info dictionary, no docProps, no
 meta.xml (01-RESEARCH.md, decision 10 and pitfall I). The scan at the end of
 the run first finds it in the uploaded originals (positive control) and then
-must not find it in any database, log or copy.
+must not find it in any database, log or copy. Addresses use invented places
+and the reserved .example domain; every person is fictional.
 """
 
 import sys
@@ -28,20 +35,53 @@ DOCX_NAME: Final = "Antrag.docx"
 ODT_NAME: Final = "Vermerk.odt"
 TXT_NAME: Final = "notes.txt"
 
-# Synthetic German body text with umlauts and the canary in one sentence.
-LINES: Final = (
-    "Bescheid über die Gewährung von Akteneinsicht",
-    "Sehr geehrte Frau Jürgensen,",
-    "Ihr Antrag vom 3. März 2026 wurde geprüft und ist zulässig.",
-    f"Bitte geben Sie bei Rückfragen das Merkzeichen {CANARY} an.",
-    "Die Unterlagen liegen zur Einsicht im Bürgerbüro bereit.",
-)
-PAGE_TWO: Final = (
-    "Rechtsbehelfsbelehrung",
-    "Gegen diesen Bescheid kann innerhalb eines Monats Widerspruch erhoben werden.",
-    "Mit freundlichen Grüßen",
-)
 NOTES: Final = "Notizen zur Besprechung, ohne Personenbezug.\n"
+
+# The fictional cast, shared by the three documents.
+SENDER_LINE: Final = "Stadt Musterhausen · Amt für Zentrale Dienste · Rathausplatz 1 · 21345 Musterhausen"
+ADDRESS: Final = ("Frau", "Mareike Jürgensen", "Lindenweg 12", "21345 Musterhausen")
+REFERENCE: Final = (
+    "Aktenzeichen: 30-1-114/2026",
+    "Sachbearbeiter: Herr Petersen",
+    "Zimmer: 214",
+    "Telefon: 04321 909-214",
+    "E-Mail: ifg@musterhausen.example",
+    "Datum: 6. November 2026",
+)
+SUBJECT: Final = (
+    "Bescheid über die Gewährung von Akteneinsicht",
+    "Ihr Antrag vom 3. März 2026 nach dem Informationsfreiheitsgesetz",
+)
+BODY: Final = (
+    "Sehr geehrte Frau Jürgensen,",
+    "",
+    "auf Ihren Antrag vom 3. März 2026 ergeht folgender Bescheid:",
+    "",
+    "1. Ihnen wird Einsicht in die Akte 30-1-114/2026 gewährt.",
+    "2. Die Einsicht erfolgt in den Räumen des Bürgerbüros.",
+    "",
+    "Begründung:",
+    "Die Voraussetzungen des § 1 Absatz 1 IFG liegen vor. Schutzwürdige",
+    "Belange Dritter stehen der Einsicht nach Schwärzung der betroffenen",
+    "Stellen nicht entgegen.",
+    "",
+    f"Bitte geben Sie bei Rückfragen das Merkzeichen {CANARY} an.",
+    "Die Unterlagen liegen ab dem 24. November 2026 zur Einsicht im",
+    "Bürgerbüro bereit. Bringen Sie bitte Ihren Personalausweis mit.",
+)
+APPEAL_TITLE: Final = "Rechtsbehelfsbelehrung"
+APPEAL: Final = (
+    "Gegen diesen Bescheid kann innerhalb eines Monats nach Bekanntgabe",
+    "Widerspruch erhoben werden. Der Widerspruch ist schriftlich oder zur",
+    "Niederschrift bei der Stadt Musterhausen, Rathausplatz 1,",
+    "21345 Musterhausen, einzulegen.",
+    "",
+    "Mit freundlichen Grüßen",
+    "Im Auftrag",
+    "",
+    "Petersen",
+)
+FOOTER: Final = "Sprechzeiten des Bürgerbüros: Montag bis Freitag 8 bis 12 Uhr"
 
 
 def _pdf_literal(text: str) -> bytes:
@@ -50,26 +90,52 @@ def _pdf_literal(text: str) -> bytes:
     return b"(" + raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)") + b")"
 
 
-def _content(lines: tuple[str, ...]) -> bytes:
-    parts = [b"BT", b"/F1 12 Tf", b"14 TL", b"72 770 Td"]
+def _block(font: bytes, size: int, leading: int, x: int, y: int, lines: tuple[str, ...]) -> bytes:
+    """One positioned text block; an empty line only moves the cursor."""
+    parts = [b"BT", b"/" + font + b" " + str(size).encode() + b" Tf", str(leading).encode() + b" TL"]
+    parts.append(str(x).encode() + b" " + str(y).encode() + b" Td")
     for line in lines:
-        parts.append(_pdf_literal(line) + b" Tj T*")
+        parts.append((_pdf_literal(line) + b" Tj T*") if line else b"T*")
     parts.append(b"ET")
     return b"\n".join(parts) + b"\n"
 
 
+def _page_one() -> bytes:
+    return b"".join(
+        (
+            _block(b"F1", 8, 10, 72, 785, (SENDER_LINE,)),
+            _block(b"F1", 11, 14, 72, 720, ADDRESS),
+            _block(b"F1", 9, 12, 360, 722, REFERENCE),
+            _block(b"F2", 11, 14, 72, 640, SUBJECT),
+            _block(b"F1", 11, 15, 72, 596, BODY),
+        )
+    )
+
+
+def _page_two() -> bytes:
+    return b"".join(
+        (
+            _block(b"F1", 8, 10, 72, 785, (SENDER_LINE,)),
+            _block(b"F2", 11, 14, 72, 740, (APPEAL_TITLE,)),
+            _block(b"F1", 11, 15, 72, 712, APPEAL),
+            _block(b"F1", 8, 10, 72, 72, (FOOTER,)),
+        )
+    )
+
+
 def make_pdf() -> bytes:
     """Hand written objects with exact xref offsets; no /Info in the trailer."""
-    contents = (_content(LINES), _content(PAGE_TWO))
+    contents = (_page_one(), _page_two())
     objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [4 0 R 5 0 R] /Count 2 >>",
+        b"<< /Type /Pages /Kids [5 0 R 6 0 R] /Count 2 >>",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
     ]
-    for number in (6, 7):
+    for number in (7, 8):
         objects.append(
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
-            b"/Resources << /Font << /F1 3 0 R >> >> /Contents " + str(number).encode() + b" 0 R >>"
+            b"/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents " + str(number).encode() + b" 0 R >>"
         )
     for stream in contents:
         objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream")
@@ -114,9 +180,41 @@ DOCX_DOCUMENT_RELS: Final = (
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>'
 )
 
+# The request letter of the citizen: (bold, text) per paragraph.
+DOCX_PARAGRAPHS: Final = (
+    (False, "Mareike Jürgensen"),
+    (False, "Lindenweg 12"),
+    (False, "21345 Musterhausen"),
+    (False, "Telefon: 0171 5550214"),
+    (False, "E-Mail: m.juergensen@mail.example"),
+    (False, ""),
+    (False, "Stadt Musterhausen"),
+    (False, "Amt für Zentrale Dienste"),
+    (False, "Rathausplatz 1"),
+    (False, "21345 Musterhausen"),
+    (False, ""),
+    (False, "Musterhausen, den 3. März 2026"),
+    (False, ""),
+    (True, "Antrag auf Akteneinsicht nach dem Informationsfreiheitsgesetz"),
+    (False, ""),
+    (False, "Sehr geehrte Damen und Herren,"),
+    (False, "hiermit beantrage ich Einsicht in die Unterlagen zum Vorgang 30-1-114/2026."),
+    (False, "Ich bin am 14. Februar 1983 geboren und wohne seit 2011 in Musterhausen."),
+    (False, f"Bitte geben Sie bei Rückfragen das Merkzeichen {CANARY} an."),
+    (False, "Für Kopien übernehme ich die anfallenden Gebühren."),
+    (False, ""),
+    (False, "Mit freundlichen Grüßen"),
+    (False, "Mareike Jürgensen"),
+)
+
 
 def make_docx() -> bytes:
-    paragraphs = "".join(f'<w:p><w:r><w:t xml:space="preserve">{_xml_text(line)}</w:t></w:r></w:p>' for line in LINES)
+    paragraphs = "".join(
+        "<w:p><w:r>"
+        + ("<w:rPr><w:b/></w:rPr>" if bold else "")
+        + f'<w:t xml:space="preserve">{_xml_text(text)}</w:t></w:r></w:p>'
+        for bold, text in DOCX_PARAGRAPHS
+    )
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -150,9 +248,24 @@ ODT_STYLES: Final = (
     f"<office:document-styles {ODT_NS}><office:styles/></office:document-styles>"
 )
 
+# The file note of the clerk.
+ODT_LINES: Final = (
+    "Aktenvermerk zum Vorgang 30-1-114/2026",
+    "Verfasser: Herr Petersen, Amt für Zentrale Dienste",
+    "Datum: 10. März 2026",
+    "Betreff: Antrag von Frau Mareike Jürgensen auf Akteneinsicht",
+    "",
+    "1. Der Antrag vom 3. März 2026 ist am 5. März 2026 eingegangen.",
+    "2. Die Akte enthält personenbezogene Daten Dritter auf den Seiten 4 und 7.",
+    "3. Die Einsicht kann nach Schwärzung dieser Stellen gewährt werden.",
+    f"4. Rückfragen bitte unter dem Merkzeichen {CANARY}.",
+    "",
+    "gez. Petersen",
+)
+
 
 def make_odt() -> bytes:
-    paragraphs = "".join(f"<text:p>{_xml_text(line)}</text:p>" for line in LINES)
+    paragraphs = "".join(f"<text:p>{_xml_text(line)}</text:p>" for line in ODT_LINES)
     content = (
         f'<?xml version="1.0" encoding="UTF-8"?>\n<office:document-content {ODT_NS}>'
         f"<office:body><office:text>{paragraphs}</office:text></office:body></office:document-content>"
