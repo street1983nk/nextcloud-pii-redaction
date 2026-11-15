@@ -195,6 +195,11 @@ trait JobServiceFactory {
 				throw $this->newFileFails;
 			}
 			$this->created[] = ['name' => $name, 'bytes' => is_resource($content) ? (string)stream_get_contents($content) : (string)$content];
+			if (is_resource($content)) {
+				// The real server closes the stream it was handed
+				// (View::file_put_contents), so the fake does too.
+				fclose($content);
+			}
 			$copy = $this->createMock(File::class);
 			$copy->method('getId')->willReturn(99);
 			return $copy;

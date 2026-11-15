@@ -79,7 +79,11 @@ final class PublishService {
 
 			$this->place($job, $uid, $temp);
 		} finally {
-			fclose($temp);
+			// newFile() hands the stream to the server, which closes it after
+			// the copy; fclose() on a closed stream is a TypeError since PHP 8.
+			if (is_resource($temp)) {
+				fclose($temp);
+			}
 		}
 	}
 
