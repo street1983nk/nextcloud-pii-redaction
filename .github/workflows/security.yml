@@ -55,6 +55,11 @@ jobs:
     name: pip-audit over the locked set
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # pyproject.toml and uv.lock live in backend/ (the PHP half has no Python):
+    # without this the export dies with "No pyproject.toml found".
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
