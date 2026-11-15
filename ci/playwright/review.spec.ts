@@ -461,6 +461,9 @@ test('Kontrast-Selbsttest: Messung kalibriert, Theme-Bild wird verweigert', asyn
 	// to be refused, never measured against an assumed white.
 	const who = projectUser(testInfo);
 	await login(page, who);
+	// login() only waits for the redirect to commit; the new document may still
+	// be parsing and document.body can be null. goto waits for the load event.
+	await page.goto('/index.php/apps/files/');
 	await page.evaluate(() => {
 		const probe = document.createElement('div');
 		probe.id = 'pii-contrast-probe';
