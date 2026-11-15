@@ -74,7 +74,9 @@ RECHECK_CALL = re.compile(r"recheck\w*\(")
 FORBIDDEN_COLUMN_PARTS = ("name", "path", "mime", "text", "value", "snippet", "title", "comment", "content")
 _ADD_COLUMN = re.compile(r"addColumn\(\s*'([^']+)'")
 LOG_PREFIX = "PII Redaction: "
-LOG_CONTEXT_KEYS = frozenset({"jobId", "fileId", "status", "reason", "app", "exception", "class", "attempt", "at"})
+# No 'exception' (Nextcloud would log message and trace) and no 'at' (an
+# absolute server path): only names, ids and codes may reach nextcloud.log.
+LOG_CONTEXT_KEYS = frozenset({"jobId", "fileId", "status", "reason", "app", "class", "attempt"})
 OVERRIDE_ATTRIBUTE = "#[\\Override]"
 NOTIFIER_FORBIDDEN = ("getName(", "getPath(", "getInternalPath(")
 _NOTIFIER_NAME_DECLARATION = re.compile(r"\bfunction\s+getName\s*\(")
@@ -739,11 +741,13 @@ def test_self_rule13_fires_on_a_name_column() -> None:
 
 
 def test_self_rule14_fires_on_a_missing_prefix_and_a_foreign_key() -> None:
-    good = "$this->logger->warning('PII Redaction: job failed', ['jobId' => $id, 'exception' => $e]);"
+    good = "$this->logger->warning('PII Redaction: job failed', ['jobId' => $id, 'class' => $e::class]);"
     assert log_contract_problems(good) == []
     assert log_contract_problems(good.replace("PII Redaction: ", "")) == ["message is not a literal with the prefix"]
     assert log_contract_problems(good.replace("'jobId'", "'file'")) == ["context key file"]
     assert log_contract_problems("$this->logger->error($message);") == ["message is not a literal with the prefix"]
+    assert log_contract_problems(good.replace("'class' => $e::class", "'exception' => $e")) == ["context key exception"]
+    assert log_contract_problems(good.replace("'class' => $e::class", "'at' => $e->getFile()")) == ["context key at"]
 
 
 def test_self_rule15_fires_on_get_message() -> None:
