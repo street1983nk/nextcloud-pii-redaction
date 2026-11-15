@@ -52,8 +52,10 @@ final class PublishJob extends QueuedJob {
 		try {
 			$this->publisher->publish($job);
 		} catch (\Throwable $e) {
-			// The class only: a storage message is where a path shows up.
-			$this->logger->error('PII Redaction: publishing failed', ['jobId' => $jobId, 'class' => $e::class]);
+			// The class and the code line that threw, never the message: a
+			// storage message is where a user path shows up, getFile() only
+			// names our code.
+			$this->logger->error('PII Redaction: publishing failed', ['jobId' => $jobId, 'class' => $e::class, 'at' => $e->getFile() . ':' . $e->getLine()]);
 			$this->failQuietly($jobId);
 		}
 	}
