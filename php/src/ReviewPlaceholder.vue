@@ -315,7 +315,7 @@ const card = computed<Card | null>(() => {
 	case 'cancelled':
 		return { type: 'info', title: t('pii_redaction', 'The file was deleted'), text: t('pii_redaction', 'The analysis was stopped.'), link: goFiles }
 	case 'expired':
-		return { type: 'info', title: t('pii_redaction', 'This review has expired'), text: t('pii_redaction', 'Reviews are deleted after 14 days. Analyse the file again.'), link: null }
+		return { type: 'info', title: t('pii_redaction', 'This review has expired'), text: t('pii_redaction', 'Analyse the file again.'), link: null }
 	case 'failed': {
 		const [title, sentence] = failure(job.reason)
 		return { type: 'error', title, text: sentence, link: showFile }

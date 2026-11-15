@@ -417,7 +417,7 @@ Regeln:
 | Nicht verfügbar, Titel | Diese Prüfung ist nicht verfügbar | This review is not available | Cette vérification n'est pas disponible |
 | Nicht verfügbar, Satz | Sie ist beendet oder die Berechtigung fehlt. Die Datei neu analysieren. | It has ended or permission is missing. Analyse the file again. | Elle est terminée ou l'autorisation manque. Relancez l'analyse. |
 | Abgelaufen, Titel | Diese Prüfung ist abgelaufen | This review has expired | Cette vérification a expiré |
-| Abgelaufen, Satz | Prüfungen werden nach 14 Tagen gelöscht. Die Datei neu analysieren. | Reviews are deleted after 14 days. Analyse the file again. | Les vérifications sont supprimées après 14 jours. Relancez l'analyse. |
+| Abgelaufen, Satz | Die Datei neu analysieren. | Analyse the file again. | Relancez l'analyse. |
 | Backend nicht bereit, Titel | PII Redaction ist gerade nicht bereit | PII Redaction is not ready | PII Redaction n'est pas prêt |
 | Backend nicht bereit, Satz | Der Auftrag wartet und läuft danach weiter. | The job waits and continues afterwards. | La tâche attend et reprend ensuite. |
 | Stand nicht aktualisiert | Stand nicht aktualisiert. Neuer Versuch läuft. | Status not updated. Retrying. | État non mis à jour. Nouvelle tentative en cours. |

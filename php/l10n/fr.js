@@ -49,7 +49,7 @@ OC.L10N.register(
     "This review is not available": "Cette vérification n'est pas disponible",
     "It has ended or permission is missing. Analyse the file again.": "Elle est terminée ou l'autorisation manque. Relancez l'analyse.",
     "This review has expired": "Cette vérification a expiré",
-    "Reviews are deleted after 14 days. Analyse the file again.": "Les vérifications sont supprimées après 14 jours. Relancez l'analyse.",
+    "Analyse the file again.": "Relancez l'analyse.",
     "PII Redaction is not ready": "PII Redaction n'est pas prêt",
     "The job waits and continues afterwards.": "La tâche attend et reprend ensuite.",
     "Status not updated. Retrying.": "État non mis à jour. Nouvelle tentative en cours.",

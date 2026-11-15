@@ -49,7 +49,7 @@ OC.L10N.register(
     "This review is not available": "This review is not available",
     "It has ended or permission is missing. Analyse the file again.": "It has ended or permission is missing. Analyse the file again.",
     "This review has expired": "This review has expired",
-    "Reviews are deleted after 14 days. Analyse the file again.": "Reviews are deleted after 14 days. Analyse the file again.",
+    "Analyse the file again.": "Analyse the file again.",
     "PII Redaction is not ready": "PII Redaction is not ready",
     "The job waits and continues afterwards.": "The job waits and continues afterwards.",
     "Status not updated. Retrying.": "Status not updated. Retrying.",

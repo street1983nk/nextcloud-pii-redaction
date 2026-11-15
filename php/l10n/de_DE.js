@@ -49,7 +49,7 @@ OC.L10N.register(
     "This review is not available": "Diese Prüfung ist nicht verfügbar",
     "It has ended or permission is missing. Analyse the file again.": "Sie ist beendet oder die Berechtigung fehlt. Die Datei neu analysieren.",
     "This review has expired": "Diese Prüfung ist abgelaufen",
-    "Reviews are deleted after 14 days. Analyse the file again.": "Prüfungen werden nach 14 Tagen gelöscht. Die Datei neu analysieren.",
+    "Analyse the file again.": "Die Datei neu analysieren.",
     "PII Redaction is not ready": "PII Redaction ist gerade nicht bereit",
     "The job waits and continues afterwards.": "Der Auftrag wartet und läuft danach weiter.",
     "Status not updated. Retrying.": "Stand nicht aktualisiert. Neuer Versuch läuft.",
