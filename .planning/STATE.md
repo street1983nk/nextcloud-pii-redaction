@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-11-16T04:10:46.319Z"
-last_activity: 2026-11-16 -- Phase 2 planning complete
+stopped_at: 02-02 Task 1 Paket-Freigabe (checkpoint:human-verify, blocking)
+last_updated: "2026-11-16T21:42:14.020Z"
+last_activity: 2026-11-16 -- Welle 1 bis auf 02-02 ausgeführt
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 21
+  completed_plans: 27
   percent: 7
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-11-07)
 
 **Core value:** Eine Datei aus Nextcloud wird mit einem Klick lokal auf personenbezogene Daten geprüft; nach menschlicher Prüfung entsteht neben dem Original eine geschwärzte oder pseudonymisierte Kopie, in der nachweislich nichts Geschwärztes mehr steckt. Kein Inhalt verlässt den Server.
-**Current focus:** Phase 1: Zwei-App-Gerüst und Integrationsbeweis
+**Current focus:** Phase 2: Sicherer Dateieingang und Kindprozess-Sandbox
 
 ## Current Position
 
-Phase: 1 of 15 (Zwei-App-Gerüst und Integrationsbeweis)
-Plan: 16 of 21 in current phase (01-01 bis 01-15 und 01-21 abgeschlossen; phase-01 auf 5a977f6, 01-15 lokal ungepusht; nächster Schritt 01-16, dann 01-17)
-Status: Ready to execute
-Last activity: 2026-11-16 -- Phase 2 planning complete
+Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
+Plan: 6 of 25 in current phase (02-01, 02-03 bis 02-07 abgeschlossen, lokal ungepusht; Halt an 02-02 Task 1 Paket-Freigabe, blocking)
+Status: Waiting for owner (package legitimacy gate 02-02)
+Last activity: 2026-11-16 -- Welle 1 bis auf 02-02 ausgeführt
 
-Progress: [████████░░] 76%
+Progress: [██████░░░░] 59%
 
 ## Performance Metrics
 
@@ -95,6 +95,11 @@ Recent decisions affecting current work:
 - [Phase 01-13]: Status-Route meldet recheck, Prüfseite wechselt bei nachträglicher Download-Sperre in die Sperrkarte; cancelled(original_deleted) zeigt 200 ohne Namen trotz Recheck Missing
 - [Phase 01-14]: Gate-Regel 17 erlaubt die INotifier-Deklaration getName(), Aufrufe bleiben verboten; Ablage: NotPermittedException ergibt target_not_writable, sonstige Ausnahme check_error über PublishJob
 - [Phase 01-15]: ci/lib.sh ist der gemeinsame Skriptvertrag; deploy-harp auf sieben Beinen (MariaDB nur stable35/amd64); php-Build mit --configLoader runner gegen die tsconfig-Warnung
+- [Phase 02-01]: Phase-2-Texte am 16.11. wie entworfen freigegeben; de_DE unpersönlich, e2e-Rat nur an der Karte, Ziffern 300
+- [Phase 02-04]: Raten wie Findling streng über 100/1000; CFB-Verzeichnis über die FAT-Kette (4 MiB); verborgene Daten vor dem ersten Mitglied und Overlap = unsafe_content
+- [Phase 02-05]: ack confirm antwortet bis 02-15 mit 400, expliziter purged-Arm statt default
+- [Phase 02-06]: tests/ wieder im Build-Kontext nur für die Teststufe; runtime kopiert nie tests, Push nur target runtime
+- [Phase 02-07]: zip_lying_size und XML/PDF-Strukturfälle bestehen Stufe A/B; 02-09 muss sie ablehnen (Querprobe)
 
 ### Pending Todos
 
@@ -117,6 +122,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-16T02:09:19.804Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-CONTEXT.md
+Last session: 2026-11-16T21:42:13.999Z
+Stopped at: 02-02 Task 1 Paket-Freigabe (blocking)
+Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-02-PLAN.md

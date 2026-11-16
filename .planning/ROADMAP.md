@@ -92,13 +92,13 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 02-01-PLAN.md: Textentwurf DE/de_DE/EN/FR und Owner-Freigabe vor dem Bau (Welle 1)
+- [x] 02-01-PLAN.md: Textentwurf DE/de_DE/EN/FR und Owner-Freigabe vor dem Bau (Welle 1)
 - [ ] 02-02-PLAN.md: Abhängigkeiten pikepdf, lxml, Erkennungsstapel exakt gepinnt, Paket-Freigabe, pytest-Marker (Welle 1)
-- [ ] 02-03-PLAN.md: Sandbox-Bausteine: Profile, seccomp- und Landlock-Hülle per ctypes (Welle 1)
-- [ ] 02-04-PLAN.md: Grenzwert-Tabelle, Magic-Bytes, ZIP-Vorprüfung nach Findling-Muster (Welle 1)
-- [ ] 02-05-PLAN.md: Lockstep-Wörter Reason/Status/AckResult/Stage und Protokoll-Aktionen (Welle 1)
-- [ ] 02-06-PLAN.md: Dockerfile frpc 0711, Offline-ENV, libseccomp2, Teststufe nie gepusht (Welle 1)
-- [ ] 02-07-PLAN.md: Korpus-Erzeuger mit Selbsttest und Positivkontrollen, Marker-Hook container/linux, Messwert-Helfer (Welle 1)
+- [x] 02-03-PLAN.md: Sandbox-Bausteine: Profile, seccomp- und Landlock-Hülle per ctypes (Welle 1)
+- [x] 02-04-PLAN.md: Grenzwert-Tabelle, Magic-Bytes, ZIP-Vorprüfung nach Findling-Muster (Welle 1)
+- [x] 02-05-PLAN.md: Lockstep-Wörter Reason/Status/AckResult/Stage und Protokoll-Aktionen (Welle 1)
+- [x] 02-06-PLAN.md: Dockerfile frpc 0711, Offline-ENV, libseccomp2, Teststufe nie gepusht (Welle 1)
+- [x] 02-07-PLAN.md: Korpus-Erzeuger mit Selbsttest und Positivkontrollen, Marker-Hook container/linux, Messwert-Helfer (Welle 1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -354,7 +354,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Zwei-App-Gerüst und Integrationsbeweis | 21/21 | Complete | 2026-11-15 |
-| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 0/TBD | Not started | - |
+| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 6/25 | In Progress|  |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
 | 5. Unabhängiger Leck-Prüfer | 0/TBD | Not started | - |
