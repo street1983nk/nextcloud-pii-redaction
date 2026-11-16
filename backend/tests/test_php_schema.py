@@ -199,3 +199,40 @@ def test_the_rules_fire_on_mutated_samples() -> None:
         .replace("case Purge = 'purge';", "case Purge = 'purge';\n\tcase Extra = 'extra';")
     )
     assert enum_values(extra) != CLOSED_LISTS["Task"]
+
+
+# -- job event actions (plan 02-05) ------------------------------------------------------
+
+JOB_EVENT_MAPPER = REPO_ROOT / "php" / "lib" / "Db" / "JobEventMapper.php"
+ACTION_CONSTANT = re.compile(r"const (ACTION_\w+) = '([^']*)';")
+ACTION_WORD = re.compile(r"[a-z_]{1,32}")
+
+
+def action_problems(source: str) -> list[str]:
+    """Every ACTION_ constant is a word of at most 32 characters from [a-z_] (the action column)."""
+    return [
+        f"{name} = {value!r}" for name, value in ACTION_CONSTANT.findall(source) if not ACTION_WORD.fullmatch(value)
+    ]
+
+
+def test_every_job_event_action_is_a_short_word() -> None:
+    source = JOB_EVENT_MAPPER.read_text(encoding="utf-8")
+    actions = dict(ACTION_CONSTANT.findall(source))
+    assert actions == {
+        "ACTION_PLACEHOLDER_REQUESTED": "placeholder_requested",
+        "ACTION_SIGNATURE_NOTICE": "signature_notice",
+        "ACTION_SIGNATURE_CONFIRMED": "signature_confirmed",
+        "ACTION_MACROS_REMOVED": "macros_removed",
+        "ACTION_EXTERNAL_LINKS_REMOVED": "external_links_removed",
+        "ACTION_OWNER_PROTECTION_DROPPED": "owner_protection_dropped",
+    }
+    assert action_problems(source) == []
+    for name in actions:
+        assert f"self::{name}," in source  # listed in ACTIONS, so isAllowedAction takes it
+
+
+def test_the_action_rule_fires_on_a_long_or_odd_word() -> None:
+    long_word = "a" * 33
+    assert action_problems(f"const ACTION_X = '{long_word}';") == [f"ACTION_X = '{long_word}'"]
+    assert action_problems("const ACTION_Y = 'Has Space';") == ["ACTION_Y = 'Has Space'"]
+    assert action_problems("const ACTION_Z = '" + "a" * 32 + "';") == []

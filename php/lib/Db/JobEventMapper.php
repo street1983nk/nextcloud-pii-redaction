@@ -17,8 +17,31 @@ use OCP\IDBConnection;
 final class JobEventMapper extends QBMapper {
 	public const TABLE_NAME = 'pii_job_events';
 
-	/** The one action that is neither a state nor a notification subject. */
+	/** The placeholder PDF was asked for (phase 1). */
 	public const ACTION_PLACEHOLDER_REQUESTED = 'placeholder_requested';
+	/** A signed PDF was found and the user was told the signature is lost (D-02-04). */
+	public const ACTION_SIGNATURE_NOTICE = 'signature_notice';
+	/** The user confirmed the loss of the signature (D-02-04). */
+	public const ACTION_SIGNATURE_CONFIRMED = 'signature_confirmed';
+	/** Macros were removed from the copy LibreOffice reads (D-02-12). */
+	public const ACTION_MACROS_REMOVED = 'macros_removed';
+	/** External links were removed from that copy (D-02-12). */
+	public const ACTION_EXTERNAL_LINKS_REMOVED = 'external_links_removed';
+	/** The owner password of a PDF was dropped for the copy (D-02-10). */
+	public const ACTION_OWNER_PROTECTION_DROPPED = 'owner_protection_dropped';
+
+	/**
+	 * The actions that are neither a state nor a notification subject. Only
+	 * words, never a name or a message.
+	 */
+	private const ACTIONS = [
+		self::ACTION_PLACEHOLDER_REQUESTED,
+		self::ACTION_SIGNATURE_NOTICE,
+		self::ACTION_SIGNATURE_CONFIRMED,
+		self::ACTION_MACROS_REMOVED,
+		self::ACTION_EXTERNAL_LINKS_REMOVED,
+		self::ACTION_OWNER_PROTECTION_DROPPED,
+	];
 
 	public function __construct(
 		IDBConnection $db,
@@ -44,7 +67,7 @@ final class JobEventMapper extends QBMapper {
 	}
 
 	public static function isAllowedAction(string $action): bool {
-		return $action === self::ACTION_PLACEHOLDER_REQUESTED
+		return in_array($action, self::ACTIONS, true)
 			|| Status::tryFrom($action) !== null
 			|| Subject::tryFrom($action) !== null;
 	}

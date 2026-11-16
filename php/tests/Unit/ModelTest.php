@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\PiiRedaction\Tests\Unit;
 
+use OCA\PiiRedaction\Db\JobEventMapper;
 use OCA\PiiRedaction\Model\Lang;
 use OCA\PiiRedaction\Model\Mode;
 use OCA\PiiRedaction\Model\Reason;
@@ -48,6 +49,15 @@ final class ModelTest extends TestCase {
 		self::assertSame(['redact', 'pseudonymize'], self::values(Mode::cases()));
 		self::assertSame(['review_ready', 'job_failed', 'job_stale', 'copy_created'], self::values(Subject::cases()));
 		self::assertSame(['de', 'en', 'fr'], self::values(Lang::cases()));
+	}
+
+	public function testTheJobEventActionsAreClosed(): void {
+		foreach (['placeholder_requested', 'signature_notice', 'signature_confirmed', 'macros_removed', 'external_links_removed', 'owner_protection_dropped', 'confirm', 'review_ready'] as $action) {
+			self::assertTrue(JobEventMapper::isAllowedAction($action), $action);
+		}
+		foreach (['signature_noticed', '', 'Signature_notice', 'macros removed'] as $action) {
+			self::assertFalse(JobEventMapper::isAllowedAction($action), $action);
+		}
 	}
 
 	public function testAnUnknownWordIsNoValue(): void {
