@@ -1,6 +1,8 @@
 # The build context is backend/. Nothing that must not reach it: a local .venv
 # copied into the image would shadow the one built from the lock file, and the
-# tests and caches have no business in the runtime image.
+# caches have no business in any image. tests/ is in the context for the test
+# stage only (FROM runtime AS test, never pushed); the runtime stage copies
+# src, appinfo, l10n and docker/ by name and never tests/ (test_dockerfile.py).
 .venv/
 .pytest_cache/
 .ruff_cache/
@@ -14,4 +16,3 @@ __pycache__/
 .env
 .env.*
 dist/
-tests/

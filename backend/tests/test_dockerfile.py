@@ -6,6 +6,7 @@ multi-stage, every base pinned by digest, a non-root user, a health check, no
 ADD of a remote URL, apt lists removed, the app id in the entrypoint.
 """
 
+import hashlib
 import re
 
 from pii_redaction_backend import APP_ID
@@ -22,9 +23,12 @@ def from_lines(source: str) -> list[str]:
 def resolved_bases(source: str) -> list[str]:
     """Every FROM and COPY --from image, with ARG defaults substituted."""
     arguments = dict(re.findall(r"^ARG (\w+)=(\S+)$", source, re.MULTILINE))
-    stages = set(re.findall(r"^FROM \S+ AS (\w+)", source, re.MULTILINE))
+    # A FROM or COPY --from that names an earlier stage is no image of its own.
+    stages = set(re.findall(r"^FROM \S+ AS ([\w-]+)", source, re.MULTILINE))
     images = [
-        re.sub(r"\$\{(\w+)\}", lambda m: arguments.get(m.group(1), m.group(0)), ref) for ref in from_lines(source)
+        re.sub(r"\$\{(\w+)\}", lambda m: arguments.get(m.group(1), m.group(0)), ref)
+        for ref in from_lines(source)
+        if ref not in stages
     ]
     images += [ref for ref in re.findall(r"COPY --from=(\S+)", source) if ref not in stages]
     return images
@@ -34,11 +38,119 @@ def unpinned(source: str) -> list[str]:
     return [image for image in resolved_bases(source) if not DIGEST.search(image)]
 
 
-def test_the_build_is_multi_stage_with_a_runtime_stage_last() -> None:
-    stages = re.findall(r"^FROM \S+ AS (\w+)", DOCKERFILE, re.MULTILINE)
+TEST_STAGES = ("build-test", "test")
 
-    assert len(stages) >= 2
-    assert stages[-1] == "runtime"
+
+def stage_block(source: str, name: str) -> str:
+    """The text of one stage, from its FROM line to the next FROM."""
+    return source.split(f" AS {name}\n", 1)[1].split("\nFROM ", 1)[0]
+
+
+def stage_findings(source: str) -> list[str]:
+    """runtime is the last shipped stage: after it only the test stages, test last and FROM runtime."""
+    stages = re.findall(r"^FROM (\S+) AS ([\w-]+)", source, re.MULTILINE)
+    names = [name for _, name in stages]
+    if "runtime" not in names:
+        return ["no runtime stage"]
+    findings = [
+        f"stage {name} after runtime" for name in names[names.index("runtime") + 1 :] if name not in TEST_STAGES
+    ]
+    if stages[-1] != ("runtime", "test"):
+        findings.append("the last stage is not FROM runtime AS test")
+    if re.search(r"^COPY\b[^\n]*\btests\b", stage_block(source, "runtime"), re.MULTILINE):
+        findings.append("the runtime stage copies tests")
+    return findings
+
+
+def test_runtime_is_the_last_shipped_stage() -> None:
+    assert len(re.findall(r"^FROM ", DOCKERFILE, re.MULTILINE)) >= 4
+    assert stage_findings(DOCKERFILE) == []
+
+
+def test_the_stage_rule_fires() -> None:
+    debug = DOCKERFILE + "\nFROM runtime AS debug\nRUN true\n"
+    assert stage_findings(debug) == ["stage debug after runtime", "the last stage is not FROM runtime AS test"]
+    leaked = DOCKERFILE.replace("COPY l10n /app/l10n", "COPY l10n /app/l10n\nCOPY tests /app/tests")
+    assert stage_findings(leaked) == ["the runtime stage copies tests"]
+
+
+def frpc_mode_findings(source: str) -> list[str]:
+    modes = re.findall(r"install -m (\d{4}) \S*frpc\S* /usr/local/bin/frpc", source)
+    return [] if modes == ["0711"] else [f"frpc installed with {modes}"]
+
+
+def test_frpc_is_installed_execute_only() -> None:
+    assert frpc_mode_findings(DOCKERFILE) == []
+    assert "install -m 0755" not in DOCKERFILE
+
+
+def test_the_frpc_mode_rule_fires() -> None:
+    assert frpc_mode_findings(DOCKERFILE.replace("install -m 0711", "install -m 0755")) == [
+        "frpc installed with ['0755']"
+    ]
+
+
+OFFLINE_ENV = {
+    "TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS": '""',
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "HF_HUB_DISABLE_TELEMETRY": "1",
+}
+
+
+def offline_findings(source: str) -> list[str]:
+    """The four offline variables in the ENV of the runtime stage."""
+    found = dict(re.findall(r"^\s+(\w+)=(\S+?)(?: \\)?$", stage_block(source, "runtime"), re.MULTILINE))
+    return [f"{name}={value} missing" for name, value in OFFLINE_ENV.items() if found.get(name) != value]
+
+
+def test_offline_environment_is_set() -> None:
+    assert offline_findings(DOCKERFILE) == []
+
+
+def test_the_offline_rule_fires() -> None:
+    assert offline_findings(DOCKERFILE.replace("    HF_HUB_OFFLINE=1 \\\n", "")) == ["HF_HUB_OFFLINE=1 missing"]
+
+
+def test_libseccomp_is_installed() -> None:
+    installs = re.findall(r"apt-get install[^\n]*", stage_block(DOCKERFILE, "runtime"))
+    assert any(re.search(r"\blibseccomp2\b", line) for line in installs)
+
+
+# start.sh is the HaRP contract (frpc config, TLS, socket); a change is a reviewed one.
+START_SH_SHA256 = "8cf550aade2e49e1572e93304747e3e0768c8d932738132253726e97cf4a3e53"
+
+
+def test_start_sh_is_unchanged() -> None:
+    digest = hashlib.sha256((BACKEND_ROOT / "docker" / "start.sh").read_bytes()).hexdigest()
+    assert digest == START_SH_SHA256
+
+
+WORKFLOWS = BACKEND_ROOT.parent / ".github" / "workflows"
+
+
+def push_target_findings(workflow: str) -> list[str]:
+    """Every build-push-action that pushes names target: runtime."""
+    findings = []
+    for number, block in enumerate(workflow.split("uses: docker/build-push-action")[1:], start=1):
+        step = re.split(r"\n\s*- (?:name|uses):", block, maxsplit=1)[0]
+        pushes = re.search(r"push(?:=|:\s*)true", step)
+        if pushes and not re.search(r"^\s+target: runtime\s*$", step, re.MULTILINE):
+            findings.append(f"build-push-action {number} pushes without target: runtime")
+    return findings
+
+
+def test_the_pushed_target_is_runtime() -> None:
+    texts = {path.name: path.read_text(encoding="utf-8") for path in sorted(WORKFLOWS.glob("*.yml"))}
+    assert "docker.yml" in texts
+    assert "uses: docker/build-push-action" in texts["docker.yml"]
+    assert {name: push_target_findings(text) for name, text in texts.items() if push_target_findings(text)} == {}
+
+
+def test_the_push_target_rule_fires() -> None:
+    docker = (WORKFLOWS / "docker.yml").read_text(encoding="utf-8")
+    probe = docker.replace("          target: runtime\n", "")
+    assert push_target_findings(probe) == ["build-push-action 1 pushes without target: runtime"]
 
 
 def test_every_base_image_is_pinned_by_digest() -> None:

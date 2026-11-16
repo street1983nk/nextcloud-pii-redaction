@@ -34,6 +34,10 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+# frpc is installed 0711, execute only (D-02-14): the kernel marks a process
+# whose program it cannot read as not dumpable, so /proc/<frpc>/environ with
+# APP_SECRET and HP_SHARED_KEY is closed to every other process of uid 10001.
+# The effect is measured in CI (plan 02-21); without it this goes back.
 RUN set -eux; \
     FRP_VERSION=0.71.1; \
     FRP_AMD64_SHA256=1d9875210972a5d1a62b2dc4c48df45ab0af05d3ca1b5e494a014428259df803; \
@@ -47,17 +51,19 @@ RUN set -eux; \
         "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz"; \
     echo "${FRP_SHA256}  /tmp/frp.tar.gz" | sha256sum -c -; \
     tar -C /tmp -xzf /tmp/frp.tar.gz "frp_${FRP_VERSION}_linux_${FRP_ARCH}/frpc"; \
-    install -m 0755 "/tmp/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frpc" /usr/local/bin/frpc; \
+    install -m 0711 "/tmp/frp_${FRP_VERSION}_linux_${FRP_ARCH}/frpc" /usr/local/bin/frpc; \
     /usr/local/bin/frpc --version
 
 FROM ${BASE_IMAGE} AS runtime
 LABEL org.opencontainers.image.source="https://github.com/street1983nk/nextcloud-pii-redaction" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
       org.opencontainers.image.title="PII Redaction Backend"
-# Unpinned for the reason given in the frpc stage.
+# Unpinned for the reason given in the frpc stage. libseccomp2 is named although
+# apt already depends on it: the child sandbox loads it (sandbox/seccomp.py),
+# and a slimmer base must not drop it silently.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl libseccomp2 \
     && rm -rf /var/lib/apt/lists/*
 # LibreOffice headless for DOCX and ODT to PDF (owner decision 07.11.2026: in
 # the image from phase 1 on), the -nogui variant without X11 and GTK, no Java
@@ -88,10 +94,31 @@ COPY appinfo /app/appinfo
 COPY l10n /app/l10n
 # The build context is backend/, so the licence text at the repository root
 # stays out (as in Findling); the image names it in the licenses label above.
+# The libraries stay offline (RES-02, RESEARCH Pitfalls 6 and 7): tldextract
+# gets no list URL to fetch the Public Suffix List from, Hugging Face hub and
+# transformers never ask the network and send no telemetry. The worker sets
+# the same in its process (plan 02-10); this layer holds even for a library
+# imported before that.
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TLDEXTRACT_PUBLIC_SUFFIX_LIST_URLS="" \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_DISABLE_TELEMETRY=1
 WORKDIR /app
 USER 10001:10001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 CMD ["/healthcheck.sh"]
 ENTRYPOINT ["/entrypoint.sh", "/app/.venv/bin/python", "-m", "pii_redaction_backend.main"]
+
+# -- test stages, never pushed (docker.yml builds target runtime) ---------------
+# The container suite (pytest -m container, sandbox.yml) runs in the real
+# runtime image with the dev group on top. Nothing below reaches the registry;
+# user, entrypoint and health check are inherited from runtime.
+FROM build AS build-test
+RUN uv sync --frozen --no-editable
+
+FROM runtime AS test
+COPY --from=build-test --chown=10001:10001 /app/.venv /app/.venv
+COPY --chown=10001:10001 pyproject.toml /app/pyproject.toml
+COPY --chown=10001:10001 tests /app/tests
