@@ -82,7 +82,8 @@ def test_the_denylist_refuses_four_socket_domains_and_ten_calls() -> None:
     refuse = errno_action(errno.EACCES)
     socket_rules = [rule for rule in fake.rules if rule[1] == NUMBERS["socket"]]
     assert socket_rules == [
-        (refuse, NUMBERS["socket"], 1, [(0, SCMP_CMP_EQ, domain)]) for domain in (AF_INET, AF_INET6, AF_PACKET, AF_NETLINK)
+        (refuse, NUMBERS["socket"], 1, [(0, SCMP_CMP_EQ, domain)])
+        for domain in (AF_INET, AF_INET6, AF_PACKET, AF_NETLINK)
     ]
     plain = [rule for rule in fake.rules if rule[1] != NUMBERS["socket"]]
     assert plain == [(refuse, NUMBERS[name], 0, []) for name in DENIED_SYSCALLS]
@@ -113,7 +114,7 @@ def test_a_rule_that_fails_after_a_good_probe_raises_and_releases(fail_rule: int
 
 def test_a_load_that_fails_raises() -> None:
     fake = FakeSeccomp(load=-errno.EACCES)
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(OSError, match="Permission denied") as caught:
         install_network_denylist(fake)
     assert caught.value.errno == errno.EACCES
     assert fake.calls[-1] == f"release:{CONTEXT:#x}"

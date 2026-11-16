@@ -86,7 +86,7 @@ def test_a_kernel_without_landlock_answers_zero(missing: int) -> None:
 
 
 def test_another_probe_error_raises() -> None:
-    with pytest.raises(OSError) as caught:
+    with pytest.raises(OSError, match="not permitted") as caught:
         abi_version(lambda *_: -errno.EPERM)
     assert caught.value.errno == errno.EPERM
 
@@ -236,4 +236,10 @@ def test_the_real_ruleset_confines_reads_and_writes(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["outside-before-ok", "etc-ok", "inside-write-ok", "outside-denied", "outside-write-denied"]
+    assert result.stdout.split() == [
+        "outside-before-ok",
+        "etc-ok",
+        "inside-write-ok",
+        "outside-denied",
+        "outside-write-denied",
+    ]
