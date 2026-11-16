@@ -78,6 +78,8 @@ jobs:
         with:
           context: backend
           file: backend/Dockerfile
+          # The test stage of the Dockerfile is never pushed.
+          target: runtime
           platforms: ${{ matrix.platform }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.arch }}
