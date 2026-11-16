@@ -2,9 +2,10 @@
 
 ## Supported versions
 
-Only the latest release of `pii_redaction` in the
+Only the latest release of the two apps `pii_redaction` and
+`pii_redaction_backend` in the
 [Nextcloud App Store](https://apps.nextcloud.com/apps/pii_redaction) is
-supported; please update before reporting.
+supported; both carry the same version. Please update before reporting.
 
 ## Reporting a vulnerability
 
