@@ -92,4 +92,15 @@ Bestätigung und Hinweis stehen im Protokoll (JOB-05); dort keine Nutzertexte, n
 
 ## Freigabe
 
-Freigabe: offen
+Freigabe: erteilt am 2026-11-16
+
+Der Owner hat alle Texte wie entworfen freigegeben. Antworten auf die sechs Rückfragen:
+
+1. `de_DE` bleibt unpersönlich im Infinitiv wie in Phase 1, keine Sie-Form; Spalte de_DE bleibt gleich DE.
+2. Der Abhilfe-Rat zu `e2e_encrypted` bleibt auf der Dateikarte; der Start-Toast bleibt ohne Rat.
+3. Die Seitengrenze steht in Ziffern: "300".
+4. "neu analysieren" bleibt (statt "erneut starten").
+5. "Hilfsprozesse" bleibt als Wort für die Kindprozesse im Admin-Hinweis.
+6. "Das Original bleibt signiert." bleibt im Kartentext der Signatur-Bestätigung.
+
+Hinweis für Plan 02-18: Eine abgebrochene Analyse mit Grund `signature_declined` (Status `cancelled`) darf nicht den allgemeinen Abbruch-Text "Die Datei wurde gelöscht" zeigen, sondern die Texte aus Gruppe 1 (`signature_declined` T/A).
