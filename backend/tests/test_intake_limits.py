@@ -36,19 +36,22 @@ def test_the_limits_match_the_research_table() -> None:
 
 
 def test_the_verdicts_are_a_closed_list() -> None:
-    assert frozenset(
-        {
-            "ok",
-            "encrypted_pdf",
-            "encrypted_document",
-            "wrong_type",
-            "damaged",
-            "too_large",
-            "too_many_pages",
-            "unsafe_content",
-            "unsupported_format",
-        }
-    ) == VERDICTS
+    assert (
+        frozenset(
+            {
+                "ok",
+                "encrypted_pdf",
+                "encrypted_document",
+                "wrong_type",
+                "damaged",
+                "too_large",
+                "too_many_pages",
+                "unsafe_content",
+                "unsupported_format",
+            }
+        )
+        == VERDICTS
+    )
 
 
 def test_a_rejection_carries_its_word_and_nothing_else() -> None:
