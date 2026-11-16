@@ -49,7 +49,7 @@ final class QueueController extends OCSController {
 	public const MAX_OUTPUT_BYTES = 33554432;
 
 	/** The results of an ack (01-SKELETON.md, AckResult). */
-	private const RESULTS = ['review', 'verified', 'purged', 'failed'];
+	private const RESULTS = ['review', 'verified', 'purged', 'failed', 'confirm'];
 
 	public function __construct(
 		IRequest $request,
@@ -173,7 +173,10 @@ final class QueueController extends OCSController {
 			'review' => $this->ackReview($job, $pagesTotal, $etagSeen, $image),
 			'verified' => $this->ackVerified($job, $output),
 			'failed' => $this->ackFailed($job, $reason),
-			default => $this->ackPurged($job),
+			'purged' => $this->ackPurged($job),
+			// The signature confirmation is handled from plan 02-15 on; until then
+			// a confirm must never fall through to another result.
+			default => self::badRequest(),
 		};
 	}
 

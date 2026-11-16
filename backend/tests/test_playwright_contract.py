@@ -287,7 +287,7 @@ def test_self_tag_check_finds_a_missing_tag_and_a_wrong_invert() -> None:
 
 
 def test_self_closed_list_check_finds_an_extra_value() -> None:
-    helpers = read("helpers.ts").replace("\t'expired',\n] as const;", "\t'expired',\n\t'invented',\n] as const;")
+    helpers = read("helpers.ts").replace("\t'confirm',\n] as const;", "\t'confirm',\n\t'invented',\n] as const;")
     assert closed_list_problems(helpers) == ["STATUSES in helpers.ts differs from php/lib/Model/Status.php"]
 
 

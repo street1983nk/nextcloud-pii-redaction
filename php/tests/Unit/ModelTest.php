@@ -30,20 +30,20 @@ final class ModelTest extends TestCase {
 
 	public function testStatusIsTheClosedList(): void {
 		self::assertSame(
-			['queued', 'analyzing', 'review', 'submitted', 'approved', 'applying', 'verified', 'published', 'failed', 'stale', 'cancelled', 'expired'],
+			['queued', 'analyzing', 'review', 'submitted', 'approved', 'applying', 'verified', 'published', 'failed', 'stale', 'cancelled', 'expired', 'confirm'],
 			self::values(Status::cases()),
 		);
 	}
 
 	public function testReasonIsTheClosedList(): void {
 		self::assertSame(
-			['encrypted_pdf', 'unsupported_format', 'too_many_pages', 'out_of_memory', 'repeatedly_stuck', 'leak_detected', 'check_error', 'original_changed', 'original_deleted', 'target_not_writable', 'backend_state_lost', 'download_blocked', 'not_readable', 'render_failed', 'backend_unavailable'],
+			['encrypted_pdf', 'unsupported_format', 'too_many_pages', 'out_of_memory', 'repeatedly_stuck', 'leak_detected', 'check_error', 'original_changed', 'original_deleted', 'target_not_writable', 'backend_state_lost', 'download_blocked', 'not_readable', 'render_failed', 'backend_unavailable', 'e2e_encrypted', 'encrypted_document', 'wrong_type', 'damaged', 'too_large', 'unsafe_content', 'signature_declined'],
 			self::values(Reason::cases()),
 		);
 	}
 
 	public function testTheSmallListsAreClosed(): void {
-		self::assertSame(['waiting', 'fetching', 'converting', 'rendering', 'done'], self::values(Stage::cases()));
+		self::assertSame(['waiting', 'fetching', 'checking', 'converting', 'rendering', 'done'], self::values(Stage::cases()));
 		self::assertSame(['analyze', 'apply', 'purge'], self::values(Task::cases()));
 		self::assertSame(['redact', 'pseudonymize'], self::values(Mode::cases()));
 		self::assertSame(['review_ready', 'job_failed', 'job_stale', 'copy_created'], self::values(Subject::cases()));
@@ -65,7 +65,10 @@ final class ModelTest extends TestCase {
 		$open = array_values(array_filter(Status::cases(), static fn (Status $s): bool => $s->isOpen()));
 
 		self::assertSame(['published', 'failed', 'stale', 'cancelled', 'expired'], self::values($terminal));
-		self::assertSame(['queued', 'analyzing', 'review', 'approved', 'applying', 'verified'], self::values($open));
+		self::assertSame(['queued', 'analyzing', 'review', 'approved', 'applying', 'verified', 'confirm'], self::values($open));
+		self::assertTrue(Status::Confirm->isOpen());
+		self::assertFalse(Status::Confirm->isTerminal());
+		self::assertContains('confirm', Status::openValues());
 		self::assertSame(self::values($open), Status::openValues());
 	}
 

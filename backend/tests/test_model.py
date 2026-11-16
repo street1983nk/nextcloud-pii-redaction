@@ -6,7 +6,7 @@ from pii_redaction_backend.model import AckResult, Reason, Stage, Task
 
 
 def test_stage_is_the_skeleton_list() -> None:
-    assert [item.value for item in Stage] == ["waiting", "fetching", "converting", "rendering", "done"]
+    assert [item.value for item in Stage] == ["waiting", "fetching", "checking", "converting", "rendering", "done"]
 
 
 def test_task_is_the_skeleton_list() -> None:
@@ -14,7 +14,7 @@ def test_task_is_the_skeleton_list() -> None:
 
 
 def test_ack_result_is_the_skeleton_list() -> None:
-    assert [item.value for item in AckResult] == ["review", "verified", "purged", "failed"]
+    assert [item.value for item in AckResult] == ["review", "verified", "purged", "failed", "confirm"]
 
 
 def test_reason_is_the_skeleton_list() -> None:
@@ -34,7 +34,21 @@ def test_reason_is_the_skeleton_list() -> None:
         "not_readable",
         "render_failed",
         "backend_unavailable",
+        "e2e_encrypted",
+        "encrypted_document",
+        "wrong_type",
+        "damaged",
+        "too_large",
+        "unsafe_content",
+        "signature_declined",
     ]
+
+
+def test_every_precheck_verdict_is_a_reason() -> None:
+    from pii_redaction_backend.intake.verdict import OK, VERDICTS
+
+    reasons = {item.value for item in Reason}
+    assert sorted(VERDICTS - {OK} - reasons) == []
 
 
 @pytest.mark.parametrize("enum", [Stage, Task, AckResult, Reason])

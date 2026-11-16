@@ -24,6 +24,8 @@ enum Status: string {
 	case Stale = 'stale';
 	case Cancelled = 'cancelled';
 	case Expired = 'expired';
+	// A signed PDF waits for the user to confirm the lost signature (D-02-04).
+	case Confirm = 'confirm';
 
 	/**
 	 * A job in one of these states is finished; JobService then hands it to
@@ -38,11 +40,12 @@ enum Status: string {
 
 	/**
 	 * A job in one of these states still holds the file: a second start on the
-	 * same file and etag returns it instead of creating a new one.
+	 * same file and etag returns it instead of creating a new one. Confirm is
+	 * open: it waits for the user (D-02-04), and nothing polls it.
 	 */
 	public function isOpen(): bool {
 		return match ($this) {
-			self::Queued, self::Analyzing, self::Review, self::Approved, self::Applying, self::Verified => true,
+			self::Queued, self::Analyzing, self::Confirm, self::Review, self::Approved, self::Applying, self::Verified => true,
 			default => false,
 		};
 	}

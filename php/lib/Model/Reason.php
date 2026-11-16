@@ -25,4 +25,12 @@ enum Reason: string {
 	case NotReadable = 'not_readable';
 	case RenderFailed = 'render_failed';
 	case BackendUnavailable = 'backend_unavailable';
+	// Phase 2 (JOB-05): refusals of the pre-check and of the user.
+	case E2eEncrypted = 'e2e_encrypted';
+	case EncryptedDocument = 'encrypted_document';
+	case WrongType = 'wrong_type';
+	case Damaged = 'damaged';
+	case TooLarge = 'too_large';
+	case UnsafeContent = 'unsafe_content';
+	case SignatureDeclined = 'signature_declined';
 }

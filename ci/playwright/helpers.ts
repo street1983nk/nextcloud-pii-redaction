@@ -48,10 +48,12 @@ export const STATUSES = [
 	'stale',
 	'cancelled',
 	'expired',
+	'confirm',
 ] as const;
 export const STAGES = [
 	'waiting',
 	'fetching',
+	'checking',
 	'converting',
 	'rendering',
 	'done',
@@ -72,6 +74,13 @@ export const REASONS = [
 	'not_readable',
 	'render_failed',
 	'backend_unavailable',
+	'e2e_encrypted',
+	'encrypted_document',
+	'wrong_type',
+	'damaged',
+	'too_large',
+	'unsafe_content',
+	'signature_declined',
 ] as const;
 export type JobStatus = (typeof STATUSES)[number];
 export type JobStage = (typeof STAGES)[number];

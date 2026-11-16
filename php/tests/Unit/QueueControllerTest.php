@@ -278,6 +278,15 @@ final class QueueControllerTest extends TestCase {
 		self::assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
 	}
 
+	public function testAConfirmIsNotYetHandledAndNeverPurges(): void {
+		$claim = $this->claimedAnalyze();
+		$response = $this->controller()->ack($claim['jobId'], $claim['token'], 'confirm', null, null, null, null, null);
+		self::assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
+		$job = $this->job($claim['jobId']);
+		self::assertSame(Status::Analyzing, $job->getStatusEnum());
+		self::assertSame(Task::Analyze, $job->getTaskEnum());
+	}
+
 	public function testAckWithAForeignTokenIs409(): void {
 		$claim = $this->claimedAnalyze();
 		$response = $this->ackReview(['jobId' => $claim['jobId'], 'token' => str_repeat('f', 32)]);

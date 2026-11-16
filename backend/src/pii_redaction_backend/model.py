@@ -13,6 +13,8 @@ class Stage(StrEnum):
 
     WAITING = "waiting"
     FETCHING = "fetching"
+    # The pre-check of the source in a jailed child (phase 2, SAFE-02).
+    CHECKING = "checking"
     CONVERTING = "converting"
     RENDERING = "rendering"
     DONE = "done"
@@ -36,6 +38,14 @@ class Reason(StrEnum):
     NOT_READABLE = "not_readable"
     RENDER_FAILED = "render_failed"
     BACKEND_UNAVAILABLE = "backend_unavailable"
+    # Phase 2 (JOB-05): refusals of the pre-check and of the user.
+    E2E_ENCRYPTED = "e2e_encrypted"
+    ENCRYPTED_DOCUMENT = "encrypted_document"
+    WRONG_TYPE = "wrong_type"
+    DAMAGED = "damaged"
+    TOO_LARGE = "too_large"
+    UNSAFE_CONTENT = "unsafe_content"
+    SIGNATURE_DECLINED = "signature_declined"
 
 
 class Task(StrEnum):
@@ -53,3 +63,5 @@ class AckResult(StrEnum):
     VERIFIED = "verified"
     PURGED = "purged"
     FAILED = "failed"
+    # A signed PDF: the job waits for the user to confirm that the signature is lost (D-02-04).
+    CONFIRM = "confirm"
