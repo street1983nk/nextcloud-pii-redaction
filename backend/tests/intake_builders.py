@@ -1,6 +1,7 @@
 """Builders for pre-check test files: ZIP packages and compound files, made in tmp_path, never committed."""
 
 import struct
+import warnings
 import zipfile
 from pathlib import Path
 
@@ -11,7 +12,8 @@ DOCUMENT_XML = b'<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body/></w:d
 
 def write_zip(path: Path, members: list[tuple[str, bytes]], *, compression: int = zipfile.ZIP_DEFLATED) -> Path:
     """A ZIP with these members in this order (duplicate names allowed, zipfile only warns)."""
-    with zipfile.ZipFile(path, "w", compression=compression) as archive:
+    with warnings.catch_warnings(), zipfile.ZipFile(path, "w", compression=compression) as archive:
+        warnings.simplefilter("ignore", UserWarning)  # "Duplicate name" is what some tests want
         for name, data in members:
             info = zipfile.ZipInfo(name)
             info.compress_type = compression
@@ -19,8 +21,9 @@ def write_zip(path: Path, members: list[tuple[str, bytes]], *, compression: int 
     return path
 
 
-def docx(path: Path, extra: list[tuple[str, bytes]] | None = None) -> Path:
-    return write_zip(path, [("[Content_Types].xml", CONTENT_TYPES), ("word/document.xml", DOCUMENT_XML), *(extra or [])])
+def docx(path: Path, extra: list[tuple[str, bytes]] | None = None, *, compression: int = zipfile.ZIP_DEFLATED) -> Path:
+    parts = [("[Content_Types].xml", CONTENT_TYPES), ("word/document.xml", DOCUMENT_XML), *(extra or [])]
+    return write_zip(path, parts, compression=compression)
 
 
 def odt(path: Path, manifest: bytes = b"<manifest:manifest/>") -> Path:
