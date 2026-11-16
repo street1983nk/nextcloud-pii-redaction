@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.intake_builders import compound_file, docx, odt, write_zip
 from pii_redaction_backend.intake import magic
 from pii_redaction_backend.intake.magic import detect
 from pii_redaction_backend.intake.verdict import Rejected
+from tests.intake_builders import compound_file, docx, odt, write_zip
 
 PDF = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 

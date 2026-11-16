@@ -12,6 +12,10 @@ import tempfile
 from pathlib import Path
 from typing import Final
 
+# The largest source file the container reads through the gateway (256 MiB);
+# it lives with every other pre-check limit in intake/limits.py (D-02-07).
+from .intake.limits import MAX_SOURCE_BYTES as MAX_SOURCE_BYTES
+
 KNOWN_LOG_LEVELS: Final = frozenset({"debug", "info", "warning", "error"})
 # The prefix stays PII_REDACTION_ (not PII_REDACTION_BACKEND_): one short prefix
 # for every admin variable of the backend, unchanged since the skeleton.
@@ -22,10 +26,6 @@ DEFAULT_LOG_LEVEL: Final = "info"
 # Our own directory inside the system temp directory when AppAPI set no volume
 # (tests, a bare local run), so a cleanup never reaches beyond what this app made.
 FALLBACK_STORAGE_DIRNAME: Final = "pii_redaction_backend"
-
-# The largest source file the container reads through the gateway (256 MiB,
-# 01-SKELETON.md). Provisional; phase 2 hardens the limits.
-MAX_SOURCE_BYTES: Final = 268435456
 
 # How long uvicorn waits for running requests after SIGTERM before it closes
 # them. Docker sends SIGKILL after 10 seconds by default, so this stays below.
