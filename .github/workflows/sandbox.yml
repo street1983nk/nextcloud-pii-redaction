@@ -146,7 +146,7 @@ jobs:
             docker exec -e PII_IN_CONTAINER=1 -e PII_MODELS=/models sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container -k bridge /app/tests/test_lo_network.py
           else
             echo "::notice::bridge test absent, smoke only"
-            docker exec -e PII_IN_CONTAINER=1 sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests/test_container_smoke.py
+            docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests/test_container_smoke.py
           fi
           sleep 2
           sudo kill -INT "${capture}"

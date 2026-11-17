@@ -24,14 +24,27 @@ VERSION = "0.1.0"
 
 
 @pytest.fixture(autouse=True)
-def appapi_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """What AppAPI hands every container, with values that are clearly not real."""
+def appapi_environment(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """What AppAPI hands every container, with values that are clearly not real.
+
+    A container test (marker container) talks to the server that runs as PID 1
+    in the same container and must see the environment that server got:
+    HP_SHARED_KEY (so it uses the HaRP socket /tmp/exapp.sock), APP_PORT and
+    APP_SECRET as sandbox.yml set them. It keeps that environment untouched.
+    """
+    if keeps_real_environment(frozenset(mark.name for mark in request.node.iter_markers())):
+        return
     monkeypatch.setenv("APP_ID", APP_ID)
     monkeypatch.setenv("APP_SECRET", SECRET)
     monkeypatch.setenv("APP_VERSION", VERSION)
     monkeypatch.setenv("APP_PORT", "23000")
     monkeypatch.setenv("NEXTCLOUD_URL", "http://nextcloud.invalid")
     monkeypatch.delenv("HP_SHARED_KEY", raising=False)
+
+
+def keeps_real_environment(markers: frozenset[str]) -> bool:
+    """A test with these markers runs against the real container environment."""
+    return "container" in markers
 
 
 def signed_headers(user: str = "admin", secret: str = SECRET, app_id: str = APP_ID) -> dict[str, str]:

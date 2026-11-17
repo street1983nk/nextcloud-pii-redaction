@@ -1,11 +1,18 @@
 """The skip rule for the container and linux markers, and the measurement helper (plan 02-07)."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
-from tests.conftest import pytest_collection_modifyitems, record_measurement, skip_reason
+from tests.conftest import (
+    SECRET,
+    keeps_real_environment,
+    pytest_collection_modifyitems,
+    record_measurement,
+    skip_reason,
+)
 
 
 @pytest.mark.parametrize(
@@ -61,3 +68,21 @@ def test_record_measurement_merges_keys_atomically(tmp_path: Path) -> None:
     data = json.loads((tmp_path / "measurements.json").read_text(encoding="utf-8"))
     assert data == {"frpc_environ_readable": False, "rss_kb": 2345}
     assert sorted(path.name for path in tmp_path.iterdir()) == ["measurements.json"]
+
+
+# -- the AppAPI test environment (plan 02-16) ---------------------------------------------
+
+
+def test_only_container_tests_keep_the_real_environment() -> None:
+    assert keeps_real_environment(frozenset({"container"}))
+    assert keeps_real_environment(frozenset({"container", "linux"}))
+    # Every other test gets the test values, HP_SHARED_KEY removed.
+    assert not keeps_real_environment(frozenset())
+    assert not keeps_real_environment(frozenset({"linux"}))
+
+
+def test_positive_control_an_ordinary_test_sees_the_test_values() -> None:
+
+    assert os.environ["APP_SECRET"] == SECRET
+    assert os.environ["APP_PORT"] == "23000"
+    assert "HP_SHARED_KEY" not in os.environ

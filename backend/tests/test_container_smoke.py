@@ -26,6 +26,15 @@ def _client() -> httpx.Client:
     return httpx.Client(base_url=f"http://127.0.0.1:{os.environ['APP_PORT']}", timeout=10)
 
 
+def test_the_tests_see_the_environment_of_the_server() -> None:
+    # conftest.appapi_environment leaves container tests alone: the secret the
+    # signed headers use is the canary the server got, and behind HaRP the
+    # client takes the unix socket, not a test port.
+    assert os.environ["APP_SECRET"] == os.environ["PII_CANARY_SECRET"]
+    assert os.environ.get("HP_SHARED_KEY")
+    assert os.environ["APP_PORT"] != "23000"
+
+
 def test_the_heartbeat_answers() -> None:
     with _client() as client:
         response = client.get("/heartbeat")
