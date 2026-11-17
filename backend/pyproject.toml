@@ -79,6 +79,12 @@ constraint-dependencies = ["starlette>=1.0.1"]
 # nc-py-api 0.30.3 caps filelock at <4 while the ReadWriteLock advisories are
 # fixed only in 4.2.1; the classic FileLock API it uses is unchanged in 4.x.
 override-dependencies = ["filelock>=4.2.1"]
+# Owner rule 17.11.2026 (plan 02-02, lock gate): nothing in the lock is younger
+# than two weeks, direct and transitive alike. The cut-off is a fixed date, so
+# the lock stays reproducible; moving it forward is a deliberate, reviewed step.
+# It also holds on the PyTorch CPU index, which reports upload-time per wheel
+# (torch 2.15.0: 28.10.2026), so no exclude-newer-package exception is needed.
+exclude-newer = "2026-11-03T00:00:00Z"
 
 # torch comes from the PyTorch CPU index and from nowhere else: explicit = true
 # keeps every other package on PyPI, and PyPI's torch would pull CUDA.

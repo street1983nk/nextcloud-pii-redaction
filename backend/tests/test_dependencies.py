@@ -9,6 +9,8 @@
   file names that index for every torch entry: PyPI's torch pulls CUDA.
 - The container and linux markers are registered, and python.yml leaves the
   container tests out (they run in the test stage of the image).
+- The lock holds the owner's two-week rule: a fixed exclude-newer cut-off in
+  [tool.uv], recorded in uv.lock, and no locked file uploaded after it.
 
 Every rule is a *_findings function with a self test on a falsified probe, the
 pattern of tests/test_dockerfile.py.
@@ -166,6 +168,53 @@ def test_the_marker_rules_fire() -> None:
     assert container_filter_findings(PYTHON_YML.replace(' -m "not container"', "")) == [
         "pytest step keeps the container tests"
     ]
+
+
+def exclude_newer_findings(pyproject: dict, lock: str) -> list[str]:
+    """Owner rule 17.11.2026: a fixed exclude-newer cut-off, recorded in the lock, held by every file.
+
+    No per-package exception (exclude-newer-package), so torch from the CPU index
+    falls under the same cut-off; that index reports upload-time for its wheels.
+    """
+    uv = pyproject.get("tool", {}).get("uv", {})
+    cutoff = uv.get("exclude-newer")
+    if not isinstance(cutoff, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", cutoff):
+        return [f"exclude-newer is not a fixed UTC timestamp: {cutoff!r}"]
+    findings = []
+    if "exclude-newer-package" in uv:
+        findings.append("exclude-newer-package exempts packages from the cut-off")
+    if f'exclude-newer = "{cutoff}"' not in lock.split("[[package]]", 1)[0]:
+        findings.append("uv.lock was not resolved with this exclude-newer")
+    # Same format on both sides, so string order is time order up to the seconds.
+    findings += [
+        f"file uploaded {stamp}, after the cut-off"
+        for stamp in re.findall(r'upload-time = "([^"]+)"', lock)
+        if stamp[:19] >= cutoff[:19]
+    ]
+    return findings
+
+
+def test_the_lock_holds_the_two_week_rule() -> None:
+    assert exclude_newer_findings(PYPROJECT, LOCK) == []
+
+
+def test_the_exclude_newer_rule_fires() -> None:
+    cutoff = PYPROJECT["tool"]["uv"]["exclude-newer"]
+    no_cutoff = tomllib.loads(PYPROJECT_TEXT.replace(f'exclude-newer = "{cutoff}"', ""))
+    assert exclude_newer_findings(no_cutoff, LOCK) == ["exclude-newer is not a fixed UTC timestamp: None"]
+    relative = tomllib.loads(PYPROJECT_TEXT.replace(f'exclude-newer = "{cutoff}"', 'exclude-newer = "2 weeks"'))
+    assert exclude_newer_findings(relative, LOCK) == ["exclude-newer is not a fixed UTC timestamp: '2 weeks'"]
+    young = LOCK.replace('upload-time = "2026-10-28T13:19:05Z"', 'upload-time = "2026-11-16T10:12:19.491Z"', 1)
+    assert young != LOCK
+    assert exclude_newer_findings(PYPROJECT, young) == ["file uploaded 2026-11-16T10:12:19.491Z, after the cut-off"]
+    stale = LOCK.replace(f'exclude-newer = "{cutoff}"', "", 1)
+    assert exclude_newer_findings(PYPROJECT, stale) == ["uv.lock was not resolved with this exclude-newer"]
+    exempt = tomllib.loads(
+        PYPROJECT_TEXT.replace(
+            f'exclude-newer = "{cutoff}"', f'exclude-newer = "{cutoff}"\nexclude-newer-package = {{ torch = false }}'
+        )
+    )
+    assert exclude_newer_findings(exempt, LOCK) == ["exclude-newer-package exempts packages from the cut-off"]
 
 
 SECURITY_YML = (REPO_ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
