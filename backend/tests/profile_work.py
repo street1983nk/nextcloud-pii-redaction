@@ -9,7 +9,7 @@ deny_connect (jail_layers.py deny-connect) and compares.
     python -I profile_work.py module <child> <args...>   a product child (render, placeholder) as __main__
     python -I profile_work.py precheck <pdf> <docx>       the intake checks of the pre-check
     python -I profile_work.py sanitize <docx> <out>       the sanitizer on a DOCX
-    python -I profile_work.py detect <models root>        Presidio with de_core_news_lg and GLiNER2, offline
+    python -I profile_work.py detect <models root> <work> Presidio with de_core_news_lg and GLiNER2, offline
 
 Exactly one line goes to stdout:
 
@@ -24,8 +24,10 @@ exists yet (plan 02-05, 02-19); this runs the intake functions they will run.
 The OCR profile runs Tesseract directly and needs no helper here.
 """
 
+import os
 import runpy
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Final
@@ -93,8 +95,27 @@ def _gliner_folder(models: Path) -> Path:
     return folders[0]
 
 
-def detect(models: Path) -> None:
+def use_work_folder_as_temp(work: Path) -> None:
+    """tempfile and torch's compile cache go to the work folder of the run, the only folder the jail lets it write.
+
+    Sandbox run of df2d2e5: detect failed with FileNotFoundError in the
+    product jail and with deny_connect alike. Importing presidio_analyzer
+    pulls in transformers, which imports torch._dynamo; its module
+    torch/_dynamo/package.py calls cache_dir() at import time, which takes
+    TORCHINDUCTOR_CACHE_DIR or else tempfile.gettempdir() and creates the
+    folder. The child has HOME=/tmp and no TMPDIR, the jail grants no write
+    right on /tmp, /var/tmp or the working folder, so gettempdir() finds no
+    usable folder and raises FileNotFoundError. Found locally with the stack
+    of the gettempdir() call; the models were there (/models in sandbox.yml).
+    """
+    os.environ["TMPDIR"] = str(work)
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(work / "torchinductor")
+    tempfile.tempdir = str(work)
+
+
+def detect(models: Path, work: Path) -> None:
     """Load both detectors from local folders, offline as the detection child will be, and find a name."""
+    use_work_folder_as_temp(work)
     from pii_redaction_backend import offline
 
     offline.configure()
@@ -122,8 +143,8 @@ def work(argv: list[str]) -> None:
         precheck(Path(argv[1]), Path(argv[2]))
     elif len(argv) == 3 and argv[0] == "sanitize":
         sanitize(Path(argv[1]), Path(argv[2]))
-    elif len(argv) == 2 and argv[0] == "detect":
-        detect(Path(argv[1]))
+    elif len(argv) == 3 and argv[0] == "detect":
+        detect(Path(argv[1]), Path(argv[2]))
     else:
         raise WorkFailed("usage")
 

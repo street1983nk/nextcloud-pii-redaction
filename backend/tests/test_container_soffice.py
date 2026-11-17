@@ -823,7 +823,7 @@ def profile_works(pdf: Path, docx: Path, png: Path, models: Path, tesseract: str
         Work("sanitize", "sanitize", ("sanitize", str(docx), f"{OUT}/clean.docx"), (str(docx),)),
     ]
     if (models / "gliner2").is_dir():
-        works.append(Work("detect", "detect", ("detect", str(models)), (str(models),), timeout_s=900.0))
+        works.append(Work("detect", "detect", ("detect", str(models), OUT), (str(models),), timeout_s=900.0))
     else:
         works.append(absent_line("detect", "detect", "no-models"))
     if tesseract is None:

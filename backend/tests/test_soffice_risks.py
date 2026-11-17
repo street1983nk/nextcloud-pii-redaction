@@ -5,8 +5,10 @@ only in sandbox.yml; what they count, print and run is decided by these
 helpers, which run everywhere. Test only.
 """
 
+import errno
 import os
 import sys
+import tempfile
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -281,7 +283,7 @@ def test_with_models_and_tesseract_detect_and_ocr_are_work(tmp_path: Path) -> No
     ocr = next(work for work in works if isinstance(work, diag.Work) and work.profile == "ocr")
     assert ocr.argv(tmp_path / "out") == ["/usr/bin/tesseract", str(tmp_path / "a.png"), f"{tmp_path / 'out'}/text"]
     detect = next(work for work in works if isinstance(work, diag.Work) and work.profile == "detect")
-    assert detect.argv(tmp_path)[-2:] == ["detect", str(tmp_path)]
+    assert detect.argv(tmp_path / "out")[-3:] == ["detect", str(tmp_path), str(tmp_path / "out")]
     assert detect.read == (str(tmp_path),)
 
 
@@ -337,6 +339,31 @@ def test_the_driver_runs_a_product_child(tmp_path: Path, monkeypatch: pytest.Mon
     assert out.stat().st_size > 0
     with pytest.raises(profile_work.WorkFailed, match="exit2"):
         profile_work.run_module("placeholder", [str(out), "not-a-number"])
+
+
+def test_detect_puts_temp_and_the_torch_cache_into_its_work_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The df2d2e5 finding: without a writable temp folder torch's import ends in FileNotFoundError.
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setattr(tempfile, "_get_default_tempdir", _no_tempdir)
+    # Negative control: as in the jail, no temp folder is to be found.
+    with pytest.raises(FileNotFoundError):
+        tempfile.gettempdir()
+    profile_work.use_work_folder_as_temp(tmp_path)
+    assert tempfile.gettempdir() == str(tmp_path)
+    assert os.environ["TMPDIR"] == str(tmp_path)
+    assert Path(os.environ["TORCHINDUCTOR_CACHE_DIR"]).parent == tmp_path
+
+
+def _no_tempdir() -> str:
+    raise FileNotFoundError(errno.ENOENT, "no usable temporary directory")
+
+
+def test_negative_detect_needs_its_work_folder() -> None:
+    assert profile_work.main(["detect", "/models"]) == 1
 
 
 def test_the_detect_folder_must_be_unique(tmp_path: Path) -> None:
