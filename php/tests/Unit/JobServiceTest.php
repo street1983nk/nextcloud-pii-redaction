@@ -83,6 +83,19 @@ final class JobServiceTest extends TestCase {
 		self::assertSame(Reason::UnsupportedFormat, $this->service->start('alice', 42)['reason']);
 	}
 
+	public function testAFileInAnE2eFolderRefusesTheStartWithoutANotification(): void {
+		$this->parentEncrypted = true;
+		$result = $this->service->start('alice', 42);
+		self::assertNull($result['job']);
+		self::assertSame(Reason::E2eEncrypted, $result['reason']);
+		self::assertSame([], $this->sent);
+	}
+
+	public function testAServerSideEncryptedFileStillStarts(): void {
+		$this->fileEncrypted = true;
+		self::assertTrue($this->service->start('alice', 42)['created']);
+	}
+
 	public function testDocxAndOdtAreAccepted(): void {
 		$this->mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 		self::assertTrue($this->service->start('alice', 42)['created']);

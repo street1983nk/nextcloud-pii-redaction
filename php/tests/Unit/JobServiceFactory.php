@@ -49,6 +49,10 @@ trait JobServiceFactory {
 	private string $mime = 'application/pdf';
 	private bool $readable = true;
 	private bool $downloadAllowed = true;
+	/** The E2E flag of the folder of file 42 (JOB-05). */
+	private bool $parentEncrypted = false;
+	/** The encrypted flag of file 42 itself: server side encryption. */
+	private bool $fileEncrypted = false;
 	/** @var array<string, string> */
 	private array $languages = ['alice' => 'en'];
 	/** What fopen() of file 42 returns: a stream the test made, or false. */
@@ -155,6 +159,7 @@ trait JobServiceFactory {
 		$file->method('getEtag')->willReturnCallback(fn (): string => $this->etag);
 		$file->method('getMimetype')->willReturnCallback(fn (): string => $this->mime);
 		$file->method('getName')->willReturn('Bescheid.pdf');
+		$file->method('isEncrypted')->willReturnCallback(fn (): bool => $this->fileEncrypted);
 		$file->method('getId')->willReturn(42);
 		$file->method('getParent')->willReturnCallback(fn (): Folder => $this->parentFolder());
 		$file->method('fopen')->willReturnCallback(function (string $mode): mixed {
@@ -182,6 +187,11 @@ trait JobServiceFactory {
 	 */
 	private function parentFolder(): Folder {
 		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn('/alice/files/Akten');
+		$folder->method('isEncrypted')->willReturnCallback(fn (): bool => $this->parentEncrypted);
+		$home = $this->createMock(Folder::class);
+		$home->method('getPath')->willReturn('/alice/files');
+		$folder->method('getParent')->willReturn($home);
 		$folder->method('isCreatable')->willReturnCallback(fn (): bool => $this->folderWritable);
 		$folder->method('getNonExistingName')->willReturnCallback(function (string $name): string {
 			if (!in_array($name, $this->takenNames, true)) {

@@ -139,6 +139,84 @@ final class FileAccessTest extends TestCase {
 		self::assertSame([Recheck::DownloadBlocked, null], $this->access->recheckForStart('alice', 42));
 	}
 
+	/**
+	 * A folder at $path with the E2E flag, whose parent is $parent.
+	 */
+	private function folder(string $path, bool $encrypted, ?Folder $parent = null): Folder&MockObject {
+		$folder = $this->createMock(Folder::class);
+		$folder->method('getPath')->willReturn($path);
+		$folder->method('isEncrypted')->willReturn($encrypted);
+		if ($parent !== null) {
+			$folder->method('getParent')->willReturn($parent);
+		}
+		return $folder;
+	}
+
+	/**
+	 * /alice/files/A/B/doc.pdf with the flags given for A, B and the file.
+	 */
+	private function nested(bool $a, bool $b, bool $file = false): File&MockObject {
+		$home = $this->folder('/alice/files', false);
+		$home->expects(self::never())->method('getParent');
+		$folderA = $this->folder('/alice/files/A', $a, $home);
+		$folderB = $this->folder('/alice/files/A/B', $b, $folderA);
+		$doc = $this->createMock(File::class);
+		$doc->method('isEncrypted')->willReturn($file);
+		$doc->method('getParent')->willReturn($folderB);
+		return $doc;
+	}
+
+	public function testAFileBelowAnE2eFolderIsRefused(): void {
+		self::assertTrue($this->access->inE2eFolder($this->nested(a: false, b: true)));
+	}
+
+	public function testAnE2eFolderHigherUpAlsoCounts(): void {
+		self::assertTrue($this->access->inE2eFolder($this->nested(a: true, b: false)));
+	}
+
+	public function testAServerSideEncryptedFileIsNotRefused(): void {
+		// Pitfall 5: the flag on the file itself is server side encryption.
+		self::assertFalse($this->access->inE2eFolder($this->nested(a: false, b: false, file: true)));
+	}
+
+	public function testPositiveControlAPlainTreeIsNotRefused(): void {
+		self::assertFalse($this->access->inE2eFolder($this->nested(a: false, b: false)));
+	}
+
+	public function testTheWalkStopsAtTheUserFolderEvenIfItCarriesTheFlag(): void {
+		$home = $this->folder('/alice/files', true);
+		$home->expects(self::never())->method('getParent');
+		$doc = $this->createMock(File::class);
+		$doc->method('getParent')->willReturn($home);
+		self::assertFalse($this->access->inE2eFolder($doc));
+	}
+
+	public function testAFailingParentIsTreatedAsE2e(): void {
+		$logger = $this->createMock(LoggerInterface::class);
+		$logger->expects(self::once())->method('warning')->with(
+			self::stringStartsWith('PII Redaction: '),
+			['class' => \OCP\Files\NotFoundException::class],
+		);
+		$access = new FileAccess(
+			$this->rootFolder,
+			new ReaderContext($this->createMock(IUserSession::class), $this->createMock(IUserManager::class)),
+			$logger,
+		);
+		$doc = $this->createMock(File::class);
+		$doc->method('getParent')->willThrowException(new \OCP\Files\NotFoundException('gone'));
+		self::assertTrue($access->inE2eFolder($doc));
+	}
+
+	public function testAnEndlessParentChainIsTreatedAsE2e(): void {
+		$loop = $this->createMock(Folder::class);
+		$loop->method('getPath')->willReturn('/alice/files/x');
+		$loop->method('isEncrypted')->willReturn(false);
+		$loop->method('getParent')->willReturnSelf();
+		$doc = $this->createMock(File::class);
+		$doc->method('getParent')->willReturn($loop);
+		self::assertTrue($this->access->inE2eFolder($doc));
+	}
+
 	public function testANonPositiveIdIsNeverLookedUp(): void {
 		$this->userFolder->expects(self::never())->method('getFirstNodeById');
 		self::assertNull(FileAccess::readableFile($this->userFolder, 0));
