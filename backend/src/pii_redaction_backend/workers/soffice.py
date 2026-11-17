@@ -23,6 +23,7 @@ phase 2 (SAFE-03).
 
 import contextlib
 import os
+import re
 import shutil
 import stat
 import sys
@@ -36,6 +37,12 @@ DEFAULT_TIMEOUT_S: Final = 120.0
 SOFFICE: Final = "/usr/bin/soffice"
 # sal/osl/unx/pipe.cxx: OSL_PIPE_<user ident>_<pipe name>, pipe name SingleOfficeIPC_<md5>.
 IPC_SOCKET_GLOB: Final = "OSL_PIPE_*_SingleOfficeIPC_*"
+# The exact name (LibreOffice 25.2): the user ident is the uid in decimal
+# (sal/osl/unx/security.cxx, osl_psz_getUserIdent); the hash is the MD5 of the
+# UserInstallation URL, each of its 16 bytes in lower case hex without a
+# leading zero (desktop/source/app/officeipcthread.cxx, CreateMD5FromString),
+# so 16 to 32 hex digits. Nothing else in /tmp has this name.
+IPC_SOCKET_NAME: Final = re.compile(r"OSL_PIPE_(?P<uid>[0-9]+)_SingleOfficeIPC_[0-9a-f]{16,32}")
 # Each variable of the soffice environment and the folder inside the job profile it names.
 # Only TMPDIR: HOME and XDG made no difference in the sandbox run of 7e3c909
 # (exit 1 under Landlock with and without them), so they stay closed.
@@ -103,20 +110,30 @@ def _single_pdf(outdir: Path) -> Path:
     return pdfs[0]
 
 
+def is_own_ipc_socket(name: str, info: os.stat_result, uid: int) -> bool:
+    """A LibreOffice single-instance socket of this uid: exact name with this uid, a socket, owned by uid.
+
+    Anything else stays, the HaRP socket /tmp/exapp.sock (same uid, also a
+    socket) and a file that only borrows the name included.
+    """
+    match = IPC_SOCKET_NAME.fullmatch(name)
+    return match is not None and match["uid"] == str(uid) and stat.S_ISSOCK(info.st_mode) and info.st_uid == uid
+
+
 def _remove_ipc_sockets(root: Path) -> None:
     """Remove the single-instance sockets LibreOffice leaves in root.
 
-    soffice binds /tmp/OSL_PIPE_<user>_SingleOfficeIPC_<hash> (profiles.SOFFICE_SOCKETS)
+    soffice binds /tmp/OSL_PIPE_<uid>_SingleOfficeIPC_<hash> (profiles.SOFFICE_SOCKETS)
     but may not remove it again (Landlock grants no removal in /tmp). The
     server removes it, before a run (a socket left by an earlier child must not
-    stand in the way) and after it. Only sockets of this uid with this name.
+    stand in the way) and after it. Only what is_own_ipc_socket accepts.
     """
     if sys.platform == "win32":
         return
+    uid = os.getuid()
     for entry in root.glob(IPC_SOCKET_GLOB):
         with contextlib.suppress(OSError):
-            info = entry.lstat()
-            if stat.S_ISSOCK(info.st_mode) and info.st_uid == os.getuid():
+            if is_own_ipc_socket(entry.name, entry.lstat(), uid):
                 entry.unlink()
 
 
