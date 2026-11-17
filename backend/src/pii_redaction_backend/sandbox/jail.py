@@ -15,7 +15,8 @@ replaces itself with the command through os.execv:
 3. Landlock: read only the system paths of the profile plus the job paths,
    write only the job paths, and create a Unix socket only in the socket
    paths of the profile (LibreOffice: /tmp, nothing else);
-4. seccomp: no INET, INET6, PACKET or NETLINK socket, no ptrace and friends.
+4. seccomp: no INET, INET6, PACKET or NETLINK socket, no ptrace and friends;
+   for a profile with deny_connect (LibreOffice) also no connect() at all.
 
 Why not preexec_fn: the server runs asyncio plus worker threads, and CPython
 documents preexec_fn as unsafe in the presence of threads. A ctypes call into
@@ -64,7 +65,8 @@ class Ops:
     landlock_abi: Callable[[], int]
     landlock_restrict: Callable[[tuple[str, ...], tuple[str, ...], tuple[str, ...]], object]
     seccomp_available: Callable[[], bool]
-    seccomp_install: Callable[[], None]
+    # The argument is Profile.deny_connect: connect() refused for every family.
+    seccomp_install: Callable[[bool], None]
     execv: Callable[[str, list[str]], object]
 
 
@@ -149,7 +151,7 @@ def run(call: Call, ops: Ops) -> int:
                 call.profile.socket_paths,
             )
         if ops.seccomp_available():
-            ops.seccomp_install()
+            ops.seccomp_install(call.profile.deny_connect)
     except (OSError, ValueError):
         return EXIT_LAYER_FAILED
     try:
@@ -187,8 +189,8 @@ def _seccomp_available() -> bool:
     return seccomp.available()
 
 
-def _seccomp_install() -> None:
-    seccomp.install_network_denylist()
+def _seccomp_install(deny_connect: bool) -> None:
+    seccomp.install_network_denylist(deny_connect=deny_connect)
 
 
 def system_ops() -> Ops:

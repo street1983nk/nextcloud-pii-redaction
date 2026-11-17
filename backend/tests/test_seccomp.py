@@ -23,7 +23,7 @@ from pii_redaction_backend.sandbox.seccomp import (
 
 LINUX_ONLY = [pytest.mark.linux, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs Linux")]
 CONTEXT = 0xC0FFEE
-NUMBERS = {name: index + 100 for index, name in enumerate(("socket", *DENIED_SYSCALLS))}
+NUMBERS = {name: index + 100 for index, name in enumerate(("socket", "connect", *DENIED_SYSCALLS))}
 
 
 class FakeSeccomp:
@@ -88,6 +88,35 @@ def test_the_denylist_refuses_four_socket_domains_and_ten_calls() -> None:
     plain = [rule for rule in fake.rules if rule[1] != NUMBERS["socket"]]
     assert plain == [(refuse, NUMBERS[name], 0, []) for name in DENIED_SYSCALLS]
     assert fake.calls[-2:] == [f"load:{CONTEXT:#x}", f"release:{CONTEXT:#x}"]
+
+
+def test_without_deny_connect_connect_is_not_touched() -> None:
+    fake = FakeSeccomp()
+    install_network_denylist(fake)
+    assert all(rule[1] != NUMBERS["connect"] for rule in fake.rules)
+
+
+def test_deny_connect_refuses_connect_for_every_family() -> None:
+    fake = FakeSeccomp()
+    install_network_denylist(fake, deny_connect=True)
+    refuse = errno_action(errno.EACCES)
+    connect_rules = [rule for rule in fake.rules if rule[1] == NUMBERS["connect"]]
+    # No argument condition: every address family, AF_UNIX included.
+    assert connect_rules == [(refuse, NUMBERS["connect"], 0, [])]
+    # The rest of the denylist stays as it is, and the filter is loaded once.
+    others = [rule for rule in fake.rules if rule[1] != NUMBERS["connect"]]
+    plain = FakeSeccomp()
+    install_network_denylist(plain)
+    assert others == plain.rules
+    assert fake.calls[-2:] == [f"load:{CONTEXT:#x}", f"release:{CONTEXT:#x}"]
+
+
+def test_a_failing_connect_rule_raises_and_loads_nothing() -> None:
+    fake = FakeSeccomp(fail_rule=4 + len(DENIED_SYSCALLS) + 1)
+    with pytest.raises(OSError, match="Bad address"):
+        install_network_denylist(fake, deny_connect=True)
+    assert fake.rules[-1][1] == NUMBERS["connect"]
+    assert not any(call.startswith("load") for call in fake.calls)
 
 
 def test_unix_sockets_stay_open() -> None:
@@ -168,3 +197,47 @@ def test_the_real_filter_blocks_inet_and_keeps_unix(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["inet-before-ok", "denied-2", "denied-10", "unix-ok"]
+
+
+CONNECT_CHILD = """
+import errno, socket, sys
+from pii_redaction_backend.sandbox import seccomp
+
+path = sys.argv[1]
+server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+server.bind(path)
+server.listen(1)
+before = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+before.connect(path)
+before.close()
+print("unix-connect-before-ok")
+seccomp.install_network_denylist(deny_connect=True)
+probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    probe.connect(path)
+except PermissionError as error:
+    assert error.errno == errno.EACCES
+    print("unix-connect-denied")
+own = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+own.bind(path + "-own")
+own.listen(1)
+print("unix-bind-ok")
+"""
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs Linux")
+def test_the_real_filter_with_deny_connect_refuses_unix_connect_and_keeps_bind(tmp_path: Path) -> None:
+    if not available():
+        pytest.skip("libseccomp not available on this host")
+    script = tmp_path / "child.py"
+    script.write_text(CONNECT_CHILD, encoding="utf-8")
+    result = subprocess.run(  # noqa: S603 - fixed interpreter, script written by this test
+        [sys.executable, "-I", str(script), str(tmp_path / "s")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["unix-connect-before-ok", "unix-connect-denied", "unix-bind-ok"]

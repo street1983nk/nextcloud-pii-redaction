@@ -10,6 +10,14 @@ netlink domains and for ten calls a parser never needs but an attacker would
 (reading other processes, io_uring, BPF, kernel keys). AF_UNIX stays open,
 LibreOffice talks to itself through a Unix socket.
 
+A profile may also refuse connect() itself with EACCES, for every address
+family (deny_connect). LibreOffice gets this (owner decision 17.11., secure-phase
+finding SOCKET-CONNECT): without it soffice could reach any Unix socket it can
+see, the HaRP socket of the server included. soffice still converts, because it
+binds its own single-instance pipe and only tries connect() to find an earlier
+instance (sandbox run of 11fb9f9: no-landlock,seccomp,deny-connect converts on
+amd64 and arm64).
+
 available() is the probe: no Linux, no libseccomp or a context that cannot be
 created means "unavailable", reported as False, never raised. Once the probe
 said yes, every non-zero return of libseccomp raises OSError: a filter that
@@ -123,8 +131,12 @@ def _resolve(lib: Any, name: str) -> int:
     return number
 
 
-def install_network_denylist(lib: Any = None) -> None:
-    """Load the filter into this process; it holds for every later exec. Raises on any failure."""
+def install_network_denylist(lib: Any = None, *, deny_connect: bool = False) -> None:
+    """Load the filter into this process; it holds for every later exec. Raises on any failure.
+
+    deny_connect adds connect() -> EACCES without any argument condition, so
+    every address family (Unix, IPv4, IPv6, ...) is refused.
+    """
     if lib is None:
         lib = _load()
     if lib is None:
@@ -140,6 +152,8 @@ def install_network_denylist(lib: Any = None) -> None:
             _check(lib.seccomp_rule_add_exact_array(context, refuse, socket_nr, 1, condition))
         for name in DENIED_SYSCALLS:
             _check(lib.seccomp_rule_add_exact_array(context, refuse, _resolve(lib, name), 0, None))
+        if deny_connect:
+            _check(lib.seccomp_rule_add_exact_array(context, refuse, _resolve(lib, "connect"), 0, None))
         _check(lib.seccomp_load(context))
     finally:
         lib.seccomp_release(context)

@@ -106,6 +106,12 @@ def test_the_process_count_limit_is_never_set() -> None:
     assert "never set" in source
 
 
+def test_only_libreoffice_has_connect_refused() -> None:
+    # Owner decision 17.11.: connect() -> EACCES for soffice only; render, ocr,
+    # detect and the others are unchanged until a measurement shows they convert without it.
+    assert {name for name, profile in PROFILES.items() if profile.deny_connect} == {"soffice"}
+
+
 def test_only_libreoffice_may_create_a_socket_and_only_in_tmp() -> None:
     sockets = {name: profile.socket_paths for name, profile in PROFILES.items() if profile.socket_paths}
     assert sockets == {"soffice": (SOCKET_ROOT,)}

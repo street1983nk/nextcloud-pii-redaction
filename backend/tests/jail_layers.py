@@ -151,10 +151,14 @@ def restrict_variant(
     return abi
 
 
-def install_variant_filters(specs: tuple[str, ...]) -> None:
-    """The product seccomp filter and/or the deny-connect filter, as the specs say."""
+def install_variant_filters(specs: tuple[str, ...], deny_connect: bool = False) -> None:
+    """The product seccomp filter (as the profile has it) and/or the extra deny-connect filter, as the specs say.
+
+    deny_connect is what the jail hands on: Profile.deny_connect of the
+    profile (soffice: True since the owner decision of 17.11.).
+    """
     if "seccomp" in specs:
-        seccomp.install_network_denylist()
+        seccomp.install_network_denylist(deny_connect=deny_connect)
     if "deny-connect" in specs:
         lib = seccomp._load()
         if lib is None:

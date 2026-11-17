@@ -55,8 +55,8 @@ class Recorder:
     def seccomp_available(self) -> bool:
         return self.seccomp_ok
 
-    def seccomp_install(self) -> None:
-        self.calls.append(("seccomp", None))
+    def seccomp_install(self, deny_connect: bool) -> None:
+        self.calls.append(("seccomp", deny_connect))
         self._maybe_fail("seccomp")
 
     def execv(self, path: str, args: list[str]) -> object:
@@ -215,6 +215,31 @@ def test_only_libreoffice_gets_a_socket_path(name: str) -> None:
     jail.main([name, "--", "/bin/true"], recorder.ops())
     (_, _, sockets) = next(value for kind, value in recorder.calls if kind == "landlock")  # type: ignore[misc]
     assert sockets == ((SOCKET_ROOT,) if name == "soffice" else ())
+
+
+@pytest.mark.parametrize("name", sorted(PROFILES))
+def test_only_libreoffice_gets_connect_refused(name: str) -> None:
+    # Owner decision 17.11. (secure-phase SOCKET-CONNECT): soffice may reach no
+    # socket, the HaRP socket included; the other profiles are not changed.
+    recorder = Recorder()
+    jail.main([name, "--", "/bin/true"], recorder.ops())
+    assert ("seccomp", name == "soffice") in recorder.calls
+
+
+def test_negative_render_keeps_connect_and_soffice_does_not() -> None:
+    soffice, render = Recorder(), Recorder()
+    jail.main(["soffice", "--", "/usr/bin/soffice"], soffice.ops())
+    jail.main(["render", "--", "/bin/true"], render.ops())
+    assert ("seccomp", True) in soffice.calls
+    assert ("seccomp", True) not in render.calls
+
+
+def test_the_system_ops_hand_deny_connect_to_the_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[bool] = []
+    monkeypatch.setattr(jail.seccomp, "install_network_denylist", lambda *, deny_connect: seen.append(deny_connect))
+    jail.system_ops().seccomp_install(True)
+    jail.system_ops().seccomp_install(False)
+    assert seen == [True, False]
 
 
 def test_without_seccomp_the_child_still_starts() -> None:

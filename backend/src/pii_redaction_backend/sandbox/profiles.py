@@ -83,6 +83,8 @@ class Profile:
     core: int = 0
     # Folders below which the child may only create a Unix socket.
     socket_paths: tuple[str, ...] = ()
+    # seccomp refuses connect() with EACCES for every address family.
+    deny_connect: bool = False
 
 
 def _profile(
@@ -95,6 +97,7 @@ def _profile(
     read_paths: tuple[str, ...] = SYSTEM_READ,
     python_child: bool = True,
     socket_paths: tuple[str, ...] = (),
+    deny_connect: bool = False,
 ) -> Profile:
     return Profile(
         name=name,
@@ -107,6 +110,7 @@ def _profile(
         write_paths=(),
         python_child=python_child,
         socket_paths=socket_paths,
+        deny_connect=deny_connect,
     )
 
 
@@ -121,6 +125,10 @@ PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
         "sanitize": _profile("sanitize", wall_s=60, address_space=GIB, file_size=SANITIZE_FILE_SIZE),
         # LibreOffice: 120 s like phase 1; no address space limit until plan
         # 02-24 has measured it (D-02-13); it opens many files at start.
+        # connect() is refused for every family (owner 17.11., secure-phase
+        # SOCKET-CONNECT): it may bind its own pipe but reach no other socket,
+        # the HaRP socket of the server included. The other profiles keep
+        # connect() until a measurement shows they convert without it.
         "soffice": _profile(
             "soffice",
             wall_s=120,
@@ -130,6 +138,7 @@ PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
             read_paths=SOFFICE_READ,
             python_child=False,
             socket_paths=SOFFICE_SOCKETS,
+            deny_connect=True,
         ),
         # Tesseract on one page image.
         "ocr": _profile("ocr", wall_s=120, address_space=GIB, file_size=512 * MIB, python_child=False),

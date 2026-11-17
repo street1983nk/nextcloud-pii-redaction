@@ -298,12 +298,14 @@ async def test_diagnosis_soffice_landlock_one_change_at_a_time(
 
 
 async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:
-    """A measurement for secure-phase, not a gate: SOCKET-CONNECT <who>=<ok|refused|absent>.
+    """SOCKET-CONNECT <who>=<ok|refused|absent>; for soffice a gate since the owner decision of 17.11.
 
-    soffice: the product jail of the soffice profile (Landlock may create
-    sockets below /tmp). render: the product jail of a profile without any
-    socket rule; if it reaches the socket, too, Landlock does not govern
-    connect() on this kernel and the socket rule is not the way in.
+    soffice: the product jail of the soffice profile, whose seccomp filter
+    refuses connect() for every family: must answer "refused EACCES" (fix of
+    the secure-phase finding SOCKET-CONNECT). The others stay measurements.
+    render: the product jail of a profile without any socket rule and with
+    connect() open (unchanged); round 1 showed it reaches the socket, so
+    Landlock does not govern connect() of a Unix socket on this kernel.
     variant nosock: the soffice rules without the /tmp socket rule, i.e. a
     soffice whose own sockets would live in its job folder. variant
     seccomp,deny-connect: the product seccomp filter plus connect() refused.
@@ -337,6 +339,8 @@ async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: py
     assert answers["test-process"] == "ok", answers
     for who, answer in answers.items():
         assert answer == "ok" or answer.startswith("refused"), (who, answer)
+    # The fix: soffice reaches no socket, the HaRP socket of the server included.
+    assert answers["soffice"] == "refused EACCES", answers
 
 
 async def _probe(argv: list[str]) -> str:

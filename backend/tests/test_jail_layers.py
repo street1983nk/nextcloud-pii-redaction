@@ -188,7 +188,9 @@ def test_deny_connect_refuses_connect_with_eacces_for_every_family(monkeypatch: 
     lib = FakeSeccompLib()
     product: list[str] = []
     monkeypatch.setattr(seccomp, "_load", lambda: lib)
-    monkeypatch.setattr(seccomp, "install_network_denylist", lambda: product.append("product"))
+    monkeypatch.setattr(
+        seccomp, "install_network_denylist", lambda *, deny_connect: product.append(f"product {deny_connect}")
+    )
 
     jail_layers.install_variant_filters(("deny-connect",))
     assert lib.rules == [(seccomp.errno_action(errno.EACCES), 42, 0)]
@@ -196,7 +198,10 @@ def test_deny_connect_refuses_connect_with_eacces_for_every_family(monkeypatch: 
     assert product == []
 
     jail_layers.install_variant_filters(("seccomp", "deny-connect"))
-    assert product == ["product"]
+    assert product == ["product False"]
+    # "seccomp" is the product filter as the profile has it: soffice hands deny_connect on.
+    jail_layers.install_variant_filters(("seccomp",), True)
+    assert product == ["product False", "product True"]
 
 
 def test_variant_ops_switch_the_layers_the_specs_name() -> None:
@@ -216,10 +221,10 @@ def test_a_variant_runs_in_product_order() -> None:
         prctl=lambda _option, _value: calls.append("prctl"),
         landlock_abi=lambda: 6,
         landlock_restrict=lambda *_paths: calls.append("landlock"),
-        seccomp_install=lambda: calls.append("seccomp"),
+        seccomp_install=lambda deny: calls.append(f"seccomp {deny}"),
         execv=lambda path, _args: calls.append(f"exec {path}"),
     )
     call = jail.parse(["soffice", "--", "/usr/bin/soffice"])
     assert call is not None
     assert jail.run(call, ops) == jail.EXIT_LAYER_FAILED  # a fake execv returns
-    assert calls[-4:] == ["prctl", "landlock", "seccomp", "exec /usr/bin/soffice"]
+    assert calls[-4:] == ["prctl", "landlock", "seccomp True", "exec /usr/bin/soffice"]
