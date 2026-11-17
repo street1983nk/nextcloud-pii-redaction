@@ -6,26 +6,32 @@ here with the standard library, so the test needs no file outside the image.
 
 HaRP run 44015648619 showed the regression: with the jail of 02-08 soffice
 ended after 249 ms and every DOCX job failed with render_failed. Sandbox run
-44021006501 showed exit 1 without a signal, after fontconfig ("No writable
-cache directories") and dconf ("unable to create directory") warnings; the
-cause is not proven. The diagnosis below runs the same soffice call layer by
-layer, so that one CI run names the layer that breaks it. Sandbox run of
-7e3c909 showed: layers 1 and 2 convert, from layer 3 (Landlock) on exit 1
-after about 300 ms on amd64 and arm64, with and without HOME/XDG in the job
-profile alike; so HOME/XDG are closed again. Its result lines in the job log:
+44021006501 showed exit 1 without a signal. Sandbox run of 7e3c909 showed:
+layers 1 and 2 convert, from layer 3 (Landlock) on exit 1 after about 300 ms
+on amd64 and arm64, with and without HOME/XDG in the job profile alike (so
+HOME/XDG are closed again), with and without seccomp alike, and reading
+/proc and /dev/shm does not help. The diagnosis below narrows it down inside
+Landlock, one change per run. Its result lines in the job log:
 
-    SOFFICE-LAYER <layer>/<env> exit=<n> signal=<s> pdf=<ja|nein>
-    SOFFICE-TAIL  <layer>/<env> stderr: ... || stdout: ...
-    SOCKET-CONNECT soffice=<ok|refused ...|absent>
+    LANDLOCK-ABI abi=<n> kernel=<release>
+    LANDLOCK-AUDIT <ran|unavailable abi=<n> needs 7>
+    SOFFICE-LAYER <layer>/plain exit=<n> signal=<s> pdf=<ja|nein> ms=<n>
+    SOFFICE-LAYER variant=<spec> exit=<n> signal=<s> pdf=<ja|nein> ms=<n> path=<ja|nein|->
+    SOFFICE-TAIL  <name> stderr: ... || stdout: ...
+    SOCKET-CONNECT <who>=<ok|refused ...|absent>
 
 Layers: 1-env-only (no jail, emptied environment, own process group),
 2-limits (rlimits, no_new_privs), 3-landlock (plus Landlock), 4-seccomp (plus
-seccomp: the product). Env: plain (only TMPDIR in the job profile, the
-product). One hypothesis variant,
-test only: 4-seccomp+proc-shm also reads /proc and /dev/shm. The LibreOffice
-25.2 source does not prove that headless conversion needs them (oosplash only
-stat()s /proc/version, which Landlock does not govern; sal reads
-/proc/self/exe only before osl_setCommandArgs), so the product does not open them.
+seccomp: the product). Env: only TMPDIR in the job profile (the product).
+
+Variants (tests/jail_layers.py, VARIANT_SPECS): rlimits, no_new_privs and
+the Landlock rules of the product with exactly one change: one more
+readable path, one more writable path, one more right, or one handled class
+less. They are measurements in the test run, never rules of the product.
+path= tells whether the named path exists in the image (Landlock skips a
+missing one, so path=nein means the run equals the product). The read
+candidates below /usr and /etc are readable in the product already
+(profiles.SOFFICE_READ); they are controls and must equal the product run.
 """
 
 import asyncio
@@ -43,6 +49,7 @@ from pii_redaction_backend.sandbox.jail import jail_argv
 from pii_redaction_backend.sandbox.reaper import reap_group
 from pii_redaction_backend.workers import child, soffice
 from tests.conftest import record_measurement
+from tests.jail_layers import AUDIT_ABI
 
 pytestmark = [pytest.mark.container, pytest.mark.linux]
 
@@ -71,12 +78,58 @@ LAYER_TIMEOUT_S = 90.0
 HYPOTHESIS_READ = ("/proc", "/dev/shm")  # noqa: S108 - read only, test only, a hypothesis
 # The jailed layers first: an unjailed run may leave files in /tmp (it may
 # write there), and none of them must be there for a jailed run.
-VARIANTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("4-seccomp", "plain", ()),
-    ("4-seccomp+proc-shm", "plain", HYPOTHESIS_READ),
-    ("3-landlock", "plain", ()),
-    ("2-limits", "plain", ()),
-    ("1-env-only", "plain", ()),
+LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("4-seccomp", ()),
+    ("4-seccomp+proc-shm", HYPOTHESIS_READ),
+    ("3-landlock", ()),
+    ("2-limits", ()),
+    ("1-env-only", ()),
+)
+# The folder of the source file, filled in per run.
+SOURCE_DIR = "{source-dir}"
+# One change against the Landlock rules of the product per variant; the order
+# runs the bisection first, the variants that may write /tmp last.
+LANDLOCK_VARIANTS: tuple[str, ...] = (
+    # Positive control of the driver: no Landlock = layer 2, must convert.
+    "no-landlock",
+    # Bisection: Landlock on, but every file right on /, no TCP, no scope.
+    "fs-all,net-off,scope-off",
+    "fs-all",
+    "net-off",
+    "scope-off",
+    # One more right on the product paths.
+    "refer",
+    "ioctl",
+    "nosock",
+    # One more writable path.
+    "write=/dev/null",
+    "write=/dev",
+    "write=/dev/shm",
+    "write=/var/tmp",
+    # One more readable path, not in the product.
+    "read=/",
+    "read=/proc",
+    "read=/dev",
+    "read=/sys",
+    "read=/var",
+    "read=/var/cache/fontconfig",
+    "read=/run",
+    "read=/opt",
+    "read=/home",
+    "read=/tmp",
+    f"read={SOURCE_DIR}",
+    # Controls: readable in the product already (profiles.SOFFICE_READ).
+    "read=/usr/lib/libreoffice/program",
+    "read=/usr/lib",
+    "read=/usr/share/fonts",
+    "read=/usr/share/fontconfig",
+    "read=/etc/fonts",
+    "read=/etc/passwd",
+    # For the SOCKET-CONNECT proposal: does soffice convert when connect() fails?
+    "no-landlock,deny-connect",
+    "no-landlock,seccomp,deny-connect",
+    # Last: may create files below /tmp.
+    "write=/tmp",
 )
 
 
@@ -122,32 +175,31 @@ def _leftovers(job_id: str) -> list[str]:
 
 
 def _argv(layer: str, command: list[str], read: tuple[str, ...], write: tuple[str, ...]) -> list[str]:
-    """The start of one variant: the product jail, the partial jail of jail_layers.py, or no jail."""
+    """The start of one run: the product jail, a partial or variant jail of jail_layers.py, or no jail."""
     if layer == "1-env-only":
         return command
     product = jail_argv("soffice", command, read=read, write=write)
     if layer.startswith("4-seccomp"):
         return product
     # product[4:] is what jail.main takes: profile, paths, --, command.
+    if layer.startswith("variant:"):
+        return [sys.executable, "-I", str(DRIVER), "variant", layer.removeprefix("variant:"), *product[4:]]
     partial = layer.split("-", 1)[1]
     return [sys.executable, "-I", str(DRIVER), "layers", partial, *product[4:]]
 
 
-async def _run_variant(
-    number: int, layer: str, env_name: str, extra_read: tuple[str, ...], source: Path, tmp_path: Path
-) -> dict[str, object]:
+async def _run(number: int, layer: str, extra_read: tuple[str, ...], source: Path, tmp_path: Path) -> dict[str, object]:
     job_id = str(990100 + number)
     outdir = tmp_path / f"out-{job_id}"
     outdir.mkdir()
-    profile, full_env = soffice.prepare_profile(job_id)
-    extra = full_env
+    profile, env = soffice.prepare_profile(job_id)
     command = soffice.command(source, outdir, job_id)
     argv = _argv(layer, command, (str(source), *extra_read), (str(outdir), str(profile)))
     soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
     process = await asyncio.create_subprocess_exec(
         *argv,
         cwd=outdir,
-        env=child.child_env(extra, profile="soffice"),
+        env=child.child_env(env, profile="soffice"),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -175,20 +227,23 @@ async def _run_variant(
     }
 
 
+def _print_run(label: str, result: dict[str, object], suffix: str = "") -> None:
+    print(
+        f"\nSOFFICE-LAYER {label} exit={result['exit']} signal={result['signal']} "
+        f"pdf={'ja' if result['pdf'] else 'nein'} ms={result['ms']}{suffix}"
+    )
+    print(f"SOFFICE-TAIL {label} stderr: {result['stderr']} || stdout: {result['stdout']}")
+
+
 async def test_diagnosis_soffice_layer_by_layer(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _docx(tmp_path / "probe.docx")
     results: dict[str, dict[str, object]] = {}
-    for number, (layer, env_name, extra_read) in enumerate(VARIANTS):
-        name = f"{layer}/{env_name}"
-        result = await _run_variant(number, layer, env_name, extra_read, source, tmp_path)
-        results[name] = result
+    for number, (layer, extra_read) in enumerate(LAYERS):
+        name = f"{layer}/plain"
+        results[name] = await _run(number, layer, extra_read, source, tmp_path)
         # Outside the capture, so the lines stand in the job log of a passing run, too.
         with capsys.disabled():
-            print(
-                f"\nSOFFICE-LAYER {name} exit={result['exit']} signal={result['signal']} "
-                f"pdf={'ja' if result['pdf'] else 'nein'} ms={result['ms']}"
-            )
-            print(f"SOFFICE-TAIL {name} stderr: {result['stderr']} || stdout: {result['stdout']}")
+            _print_run(name, results[name])
     record_measurement("soffice_layers", results)
 
     # Positive control: without any jail soffice converts the same file with
@@ -196,20 +251,92 @@ async def test_diagnosis_soffice_layer_by_layer(tmp_path: Path, capsys: pytest.C
     assert results["1-env-only/plain"]["pdf"], results["1-env-only/plain"]
 
 
-async def test_measure_whether_a_soffice_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:
-    """A measurement for secure-phase, not a gate: SOCKET-CONNECT soffice=<ok|refused|absent>."""
+async def _driver(*args: str) -> str:
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-I",
+        str(DRIVER),
+        *args,
+        env=child.child_env(),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+    return out.decode("ascii", errors="replace").strip()
+
+
+def _path_state(spec: str) -> str:
+    """ja or nein for a spec that names a path, - for a flag spec."""
+    paths = [part.split("=", 1)[1] for part in spec.split(",") if "=" in part]
+    if not paths:
+        return "-"
+    return "ja" if all(Path(path).exists() for path in paths) else "nein"
+
+
+async def test_diagnosis_soffice_landlock_one_change_at_a_time(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = _docx(tmp_path / "probe.docx")
+    abi_line = await _driver("abi")
+    abi = int(abi_line.split()[0].removeprefix("abi=")) if abi_line.startswith("abi=") else 0
+    specs = [spec.replace(SOURCE_DIR, str(source.parent)) for spec in LANDLOCK_VARIANTS]
+    if abi >= AUDIT_ABI:
+        specs.insert(1, "audit")
+    with capsys.disabled():
+        print(f"\nLANDLOCK-ABI {abi_line or 'no-answer'}")
+        print("LANDLOCK-AUDIT " + ("ran" if abi >= AUDIT_ABI else f"unavailable abi={abi} needs {AUDIT_ABI}"))
+    results: dict[str, dict[str, object]] = {}
+    for number, spec in enumerate(specs, start=len(LAYERS)):
+        results[spec] = await _run(number, f"variant:{spec}", (), source, tmp_path)
+        with capsys.disabled():
+            _print_run(f"variant={spec}", results[spec], f" path={_path_state(spec)}")
+    record_measurement("soffice_landlock_variants", {"abi": abi_line, "runs": results})
+
+    # Positive control of the driver: without Landlock it is layer 2, which converts.
+    assert results["no-landlock"]["pdf"], results["no-landlock"]
+
+
+async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:
+    """A measurement for secure-phase, not a gate: SOCKET-CONNECT <who>=<ok|refused|absent>.
+
+    soffice: the product jail of the soffice profile (Landlock may create
+    sockets below /tmp). render: the product jail of a profile without any
+    socket rule; if it reaches the socket, too, Landlock does not govern
+    connect() on this kernel and the socket rule is not the way in.
+    variant nosock: the soffice rules without the /tmp socket rule, i.e. a
+    soffice whose own sockets would live in its job folder. variant
+    seccomp,deny-connect: the product seccomp filter plus connect() refused.
+    """
     path = os.environ.get("HP_EXAPP_SOCK", "/tmp/exapp.sock")  # noqa: S108 - the HaRP socket path
     probe = [sys.executable, "-I", str(DRIVER), "connect", path]
-    control = await _probe(probe)
-    jailed = await _probe(jail_argv("soffice", probe))
+    runs = {
+        "test-process": probe,
+        "soffice": jail_argv("soffice", probe),
+        "render": jail_argv("render", probe),
+        "variant=nosock": [sys.executable, "-I", str(DRIVER), "variant", "nosock", "soffice", "--", *probe],
+        "variant=seccomp,deny-connect": [
+            sys.executable,
+            "-I",
+            str(DRIVER),
+            "variant",
+            "seccomp,deny-connect",
+            "soffice",
+            "--",
+            *probe,
+        ],
+    }
+    answers = {who: await _probe(argv) for who, argv in runs.items()}
     with capsys.disabled():
-        print(f"\nSOCKET-CONNECT test-process={control}")
-        print(f"SOCKET-CONNECT soffice={jailed}")
-    record_measurement("socket_connect_soffice", jailed)
+        print()
+        for who, answer in answers.items():
+            print(f"SOCKET-CONNECT {who}={answer}")
+    record_measurement("socket_connect", answers)
     # Positive control: the socket is there and answers an unjailed process;
-    # and the jailed probe really ran (a jail failure would print nothing).
-    assert control == "ok", control
-    assert jailed == "ok" or jailed.startswith("refused"), jailed
+    # and every jailed probe really ran (a jail failure would print nothing).
+    assert answers["test-process"] == "ok", answers
+    for who, answer in answers.items():
+        assert answer == "ok" or answer.startswith("refused"), (who, answer)
 
 
 async def _probe(argv: list[str]) -> str:

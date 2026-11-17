@@ -115,6 +115,20 @@ jobs:
         run: |
           docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
 
+      # Read only, for the soffice diagnosis of plan 02-16: Landlock writes a
+      # denial to the kernel audit only from ABI 7 (Linux 6.15) on and only
+      # with audit switched on; the container test prints the ABI it sees
+      # (LANDLOCK-ABI). Here the runner kernel, its LSM list and its log lines
+      # that name Landlock, audit, AppArmor or LibreOffice.
+      - name: Kernel facts for the soffice diagnosis
+        if: always()
+        run: |
+          echo "kernel $(uname -r)"
+          if sudo test -r /sys/kernel/security/lsm; then
+            echo "lsm $(sudo cat /sys/kernel/security/lsm)"
+          fi
+          sudo dmesg | awk 'tolower($0) ~ /landlock|audit|apparmor|soffice|oosplash/' | tail -n 40
+
       - name: Start the bridge container
         run: |
           docker run -d --name sbx-bridge --dns 192.0.2.1 \
