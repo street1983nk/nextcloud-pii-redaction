@@ -192,7 +192,66 @@ final class ReviewController extends Controller {
 		return self::secured(new JSONResponse(['status' => Status::Approved->value], Http::STATUS_ACCEPTED));
 	}
 
+	/**
+	 * POST /apps/pii_redaction/review/{jobId}/confirm
+	 *
+	 * The initiator accepts that the signature of the PDF will be lost
+	 * (D-02-04); the job goes back into the queue. CSRF stays on.
+	 */
+	#[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
+	#[\OCP\AppFramework\Http\Attribute\FrontpageRoute(verb: 'POST', url: '/review/{jobId}/confirm', requirements: ['jobId' => '\d+'])]
+	public function confirmSignature(int $jobId): JSONResponse {
+		$uid = $this->uid();
+		$verdict = $uid === null ? null : $this->jobs->recheckMember($jobId, $uid);
+		return $this->decideSignature($jobId, $uid, $verdict, true);
+	}
+
+	/**
+	 * POST /apps/pii_redaction/review/{jobId}/decline
+	 *
+	 * The initiator keeps the signature; the job ends as cancelled with
+	 * signature_declined, without a notification. CSRF stays on.
+	 */
+	#[\OCP\AppFramework\Http\Attribute\NoAdminRequired]
+	#[\OCP\AppFramework\Http\Attribute\FrontpageRoute(verb: 'POST', url: '/review/{jobId}/decline', requirements: ['jobId' => '\d+'])]
+	public function declineSignature(int $jobId): JSONResponse {
+		$uid = $this->uid();
+		$verdict = $uid === null ? null : $this->jobs->recheckMember($jobId, $uid);
+		return $this->decideSignature($jobId, $uid, $verdict, false);
+	}
+
 	// -- helpers --------------------------------------------------------------
+
+	/**
+	 * Both answers to the signature question: only the initiator, only for a
+	 * readable file, only while the job waits in confirm. A foreign user and
+	 * a missing file get the same 404.
+	 */
+	private function decideSignature(int $jobId, ?string $uid, ?Recheck $verdict, bool $confirmed): JSONResponse {
+		if ($uid === null || $verdict === null || $verdict === Recheck::Missing) {
+			return self::secured(new JSONResponse([], Http::STATUS_NOT_FOUND));
+		}
+		if ($verdict === Recheck::Changed) {
+			return self::conflict(Reason::OriginalChanged);
+		}
+		if ($verdict === Recheck::DownloadBlocked) {
+			return self::conflict(Reason::DownloadBlocked);
+		}
+		$job = $this->jobs->forMember($jobId, $uid);
+		if ($job === null) {
+			return self::secured(new JSONResponse([], Http::STATUS_NOT_FOUND));
+		}
+		if ($job->getStatusEnum() !== Status::Confirm) {
+			return self::secured(new JSONResponse(['status' => $job->getStatus()], Http::STATUS_CONFLICT));
+		}
+
+		if ($confirmed) {
+			$this->jobs->confirmSignature($job, $uid);
+			return self::secured(new JSONResponse(['status' => Status::Queued->value], Http::STATUS_ACCEPTED));
+		}
+		$this->jobs->declineSignature($job, $uid);
+		return self::secured(new JSONResponse(['status' => Status::Cancelled->value], Http::STATUS_ACCEPTED));
+	}
 
 	private function uid(): ?string {
 		$uid = $this->userSession->getUser()?->getUID();
