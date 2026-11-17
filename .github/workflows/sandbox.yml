@@ -1,0 +1,190 @@
+name: Sandbox and network proof
+
+# The container proofs of phase 2 (SAFE-01, SAFE-04, RES-02): the test stage of
+# the real image, the server as PID 1 behind the production entrypoint with
+# canary secrets, --network none, and a second run on the bridge network under
+# a host capture that has to stay empty. Docker is not used on the development
+# machine, so this is the only place these proofs run.
+#
+# A workflow of its own because docker.yml builds on main and release tags only.
+# The test stage is built locally (push: false, load: true) and never reaches a
+# registry. Models come from ci/fetch_models.py with fixed hashes into the
+# runner cache and are mounted read only (D-02-09: models only in the CI cache).
+# Nothing here lets an empty or failing run pass: no swallowed exit code, no
+# step allowed to fail, no pass for "no tests collected" (tests/test_workflows.py).
+on:
+  push:
+    branches:
+      - main
+      - 'phase-*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-suite:
+    name: Container suite ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      CANARY_SECRET: canary-app-${{ github.run_id }}
+      CANARY_HP: canary-hp-${{ github.run_id }}
+      CANARY_KEY: canary-key-${{ github.run_id }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The run only reads the tree; no token stays in .git/config.
+          persist-credentials: false
+
+      - name: Set up buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the test stage locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          file: backend/Dockerfile
+          # Never pushed: the test stage carries the dev group and the tests.
+          target: test
+          push: false
+          load: true
+          tags: pii-sandbox:test
+
+      - name: Restore the models
+        id: models
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ci/out/models
+          key: models-${{ hashFiles('ci/fetch_models.py') }}
+
+      - name: Fetch the models with fixed hashes
+        if: steps.models.outputs.cache-hit != 'true'
+        run: python3 ci/fetch_models.py ci/out/models
+
+      # HaRP mounts the FRP client certificate at /certs/frp; here the three
+      # files are canaries with the rights HaRP gives them (uid 10001, 0600).
+      - name: Prepare the canary certificate folder
+        run: |
+          certs="${RUNNER_TEMP}/certs/frp"
+          sudo install -d -o 10001 -g 10001 -m 0700 "${certs}"
+          for name in client.key client.crt ca.crt; do
+            printf '%s\n' "${CANARY_KEY}" | sudo tee "${certs}/${name}" > /dev/null
+            sudo chown 10001:10001 "${certs}/${name}"
+            sudo chmod 0600 "${certs}/${name}"
+          done
+          echo "CERTS=${certs}" >> "${GITHUB_ENV}"
+
+      - name: Start the server as PID 1 without a network
+        run: |
+          docker run -d --name sbx --network none \
+            -e APP_ID=pii_redaction_backend -e APP_SECRET="${CANARY_SECRET}" -e APP_PORT=10035 \
+            -e APP_HOST=0.0.0.0 -e APP_VERSION=0.0.0 -e NEXTCLOUD_URL=http://127.0.0.1:8080 \
+            -e APP_PERSISTENT_STORAGE=/nc_app_pii_redaction_backend_data \
+            -e HP_SHARED_KEY="${CANARY_HP}" -e HP_FRP_ADDRESS=127.0.0.1 -e HP_FRP_PORT=8782 \
+            -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
+            pii-sandbox:test
+          answer=""
+          for _ in $(seq 60); do
+            answer=$(docker exec sbx curl -sf --unix-socket /tmp/exapp.sock http://localhost/heartbeat || echo "")
+            [ -n "${answer}" ] && break
+            sleep 1
+          done
+          echo "heartbeat '${answer}'"
+          test "${answer}" = '{"status":"ok"}'
+          # The server itself is PID 1 (start.sh ends in exec); no init in between.
+          docker exec sbx cat /proc/1/cmdline | tr '\0' ' ' | grep -q 'pii_redaction_backend.main'
+
+      - name: Run the container tests
+        run: |
+          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
+
+      - name: Start the bridge container
+        run: |
+          docker run -d --name sbx-bridge --dns 192.0.2.1 \
+            -e APP_ID=pii_redaction_backend -e APP_SECRET="${CANARY_SECRET}" -e APP_PORT=10035 \
+            -e APP_HOST=0.0.0.0 -e APP_VERSION=0.0.0 -e NEXTCLOUD_URL=http://127.0.0.1:8080 \
+            -e APP_PERSISTENT_STORAGE=/nc_app_pii_redaction_backend_data \
+            -e HP_SHARED_KEY="${CANARY_HP}" -e HP_FRP_ADDRESS=127.0.0.1 -e HP_FRP_PORT=8782 \
+            -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
+            pii-sandbox:test
+          ip=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' sbx-bridge)
+          test -n "${ip}"
+          echo "BRIDGE_IP=${ip}" >> "${GITHUB_ENV}"
+          answer=""
+          for _ in $(seq 60); do
+            answer=$(docker exec sbx-bridge curl -sf --unix-socket /tmp/exapp.sock http://localhost/heartbeat || echo "")
+            [ -n "${answer}" ] && break
+            sleep 1
+          done
+          test "${answer}" = '{"status":"ok"}'
+
+      # Owner request "Netzwerkmitschnitt" (D-02-06): every packet of the
+      # container address on docker0 except ARP is a finding.
+      - name: Run the bridge test under a host capture
+        run: |
+          sudo tcpdump -i docker0 -nn -U -w "${RUNNER_TEMP}/capture.pcap" "host ${BRIDGE_IP} and not arp" &
+          capture=$!
+          sleep 2
+          if docker exec sbx-bridge test -f /app/tests/test_lo_network.py; then
+            docker exec -e PII_IN_CONTAINER=1 -e PII_MODELS=/models sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container -k bridge /app/tests/test_lo_network.py
+          else
+            echo "::notice::bridge test absent, smoke only"
+            docker exec -e PII_IN_CONTAINER=1 sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests/test_container_smoke.py
+          fi
+          sleep 2
+          sudo kill -INT "${capture}"
+          wait "${capture}" || echo "tcpdump ended with $?"
+          packets=$(sudo tcpdump -nn -r "${RUNNER_TEMP}/capture.pcap" | wc -l)
+          echo "packets of ${BRIDGE_IP} on docker0 besides ARP: ${packets}"
+          if [ "${packets}" -ne 0 ]; then
+            sudo tcpdump -nn -r "${RUNNER_TEMP}/capture.pcap" | head -n 50
+          fi
+          test "${packets}" -eq 0
+
+      - name: Collect the measurements
+        if: always()
+        run: |
+          mkdir -p "${RUNNER_TEMP}/measurements"
+          if docker exec sbx test -f /app/tests/out/measurements.json; then
+            docker cp sbx:/app/tests/out/measurements.json "${RUNNER_TEMP}/measurements/measurements.json"
+          else
+            echo "::notice::no measurements written"
+          fi
+
+      - name: Upload the measurements
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sandbox-measurements-${{ matrix.arch }}
+          path: ${{ runner.temp }}/measurements/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          for name in sbx sbx-bridge; do
+            if docker inspect "${name}" > /dev/null 2>&1; then
+              echo "::group::${name} state"
+              docker inspect --format '{{.State.Status}} exit {{.State.ExitCode}}' "${name}"
+              echo "::endgroup::"
+              docker rm -f "${name}" > /dev/null
+            fi
+          done
