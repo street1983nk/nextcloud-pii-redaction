@@ -21,6 +21,9 @@ the lasting checks:
 
     SOFFICE-LAYER product exit=<code|-> signal=<n|None> pdf=<ja|nein> ms=<ms> template=<ok|reason>
     SOFFICE-STARTS <product|control-fresh-unjailed> n=<soffice.bin starts, parent not soffice.bin> [exit= pdf=]
+    SOFFICE-START-DETAIL kind=<product|control-fresh-unjailed> pid= ppid= parent_comm= comm= exe_basename=
+        cmdline_head= first_seen_ms= counted_ms= pgrp= first_ppid= first_parent_comm= earlier_fork=<ja|nein>
+        ppids=<a>b..> names=<..> states=<..>   (one per counted start, a diagnosis of cfb428a's n=4)
     TMP-REST product before_cleanup=<name:type,...|-> after_cleanup=<name:type,...|->
     PIPE-NAME predicted=<ja|nein> seen=<n>
     TEMPLATE-FACTS dirs=<n> files=<n> bytes=<n> owner=<uid:gid,...> writable=<n> other=<n> mentions_path=<ja|nein>
@@ -34,6 +37,8 @@ the lasting checks:
     PROFILE-DENY-CONNECT profile=<p> work=<w> ok=<ja|nein|-> product_ok=<ja|nein|-> result=<word>
         events=<...> tail=<...>
     PROFILE-PRODUCT profile=<p> work=<w> result=<word> tail=<...>   (only when the product run failed)
+    PROFILE-TRACE profile=detect work=detect build=<product|deny> marks=<MARK lines> dumps=<n> last_dump=<stacks>
+        (on a timeout tail= holds state, threads, cpu_s, wchan, top_threads, stderr= and trace= of the child)
 
 Risks of the template (owner 17.11., "allen Risiken nachgehen"): R1 does the
 copy start without a restart (SOFFICE-STARTS product n=1, a gate; the fresh
@@ -66,6 +71,7 @@ import hashlib
 import os
 import re
 import shutil
+import signal
 import socket
 import stat
 import sys
@@ -86,6 +92,7 @@ from pii_redaction_backend.sandbox.profiles import PROFILES
 from pii_redaction_backend.sandbox.reaper import reap_group
 from pii_redaction_backend.workers import child, soffice
 from tests.conftest import record_measurement
+from tests.profile_work import TRACE_FILE
 
 pytestmark = [pytest.mark.container, pytest.mark.linux]
 
@@ -130,9 +137,16 @@ PROC = Path("/proc")
 SOFFICE_BIN = "soffice.bin"
 POLL_S = 0.002
 # /proc/<pid>/stat after the ")" of the name: field 3 (state) is index 0,
-# field 4 (ppid) index 1, field 22 (starttime) index 19.
+# field 4 (ppid) index 1, field 5 (pgrp) index 2, field 22 (starttime) index 19.
+STATE_INDEX = 0
 PPID_INDEX = 1
+PGRP_INDEX = 2
 STARTTIME_INDEX = 19
+# Sandbox run of cfb428a: the product counted n=4 (amd64 and arm64) with one
+# pipe and a PDF, the fresh control n=2. What the four are is not known; each
+# counted start gets a SOFFICE-START-DETAIL line (see StartCounter.detail_lines).
+CMDLINE_ARGS = 3
+CMDLINE_CHARS = 120
 
 # The installation LibreOffice compares the profile with (Debian layout).
 LO_ROOT = Path("/usr/lib/libreoffice")
@@ -180,10 +194,15 @@ class ProcEntry:
     ppid: int
     start: int
     owner: int
+    state: str = "?"
+    pgrp: int = 0
 
 
 def read_proc(proc: Path = PROC) -> dict[int, ProcEntry]:
-    """pid -> name, parent, start time and owner of every process /proc shows now; unreadable ones are left out."""
+    """pid -> name, parent, start time, owner, state and group of every process /proc shows now.
+
+    Unreadable ones are left out.
+    """
     found: dict[int, ProcEntry] = {}
     for entry in proc.iterdir():
         if not entry.name.isdigit():
@@ -197,44 +216,173 @@ def read_proc(proc: Path = PROC) -> dict[int, ProcEntry]:
         fields = tail.split()
         if not closing or len(fields) <= STARTTIME_INDEX:
             continue
-        ppid, start = fields[PPID_INDEX], fields[STARTTIME_INDEX]
+        ppid, start, pgrp = fields[PPID_INDEX], fields[STARTTIME_INDEX], fields[PGRP_INDEX]
         if not (ppid.isdigit() and start.isdigit()):
             continue
-        found[int(entry.name)] = ProcEntry(head.partition("(")[2], int(ppid), int(start), owner)
+        found[int(entry.name)] = ProcEntry(
+            head.partition("(")[2],
+            int(ppid),
+            int(start),
+            owner,
+            fields[STATE_INDEX],
+            int(pgrp) if pgrp.isdigit() else -1,
+        )
     return found
 
 
-def soffice_processes(proc: Path = PROC, uid: int | None = None) -> set[tuple[int, int]]:
-    """(pid, start time) of every soffice.bin start of uid (any uid when None) that /proc shows now.
+def soffice_entries(table: Mapping[int, ProcEntry], uid: int | None = None) -> dict[tuple[int, int], bool]:
+    """(pid, start time) -> is a start, for every soffice.bin of uid (any uid when None) in table.
 
     A soffice.bin whose parent is soffice.bin is a forked helper before its
     exec, not a start (see PROC). A parent /proc no longer shows is no
     soffice.bin as far as this scan knows, so that process counts.
     """
-    table = read_proc(proc)
-    found: set[tuple[int, int]] = set()
+    found: dict[tuple[int, int], bool] = {}
     for pid, entry in table.items():
         if entry.name != SOFFICE_BIN or (uid is not None and entry.owner != uid):
             continue
         parent = table.get(entry.ppid)
-        if parent is not None and parent.name == SOFFICE_BIN:
-            continue
-        found.add((pid, entry.start))
+        found[(pid, entry.start)] = parent is None or parent.name != SOFFICE_BIN
     return found
 
 
+def soffice_processes(proc: Path = PROC, uid: int | None = None) -> set[tuple[int, int]]:
+    """(pid, start time) of every soffice.bin start of uid (any uid when None) that /proc shows now."""
+    return {key for key, start in soffice_entries(read_proc(proc), uid).items() if start}
+
+
+def _token(text: str) -> str:
+    """One blank-free word for a key=value line; - when empty."""
+    return re.sub(r"\s+", "_", text.strip()) or "-"
+
+
+def exe_basename(proc: Path, pid: int) -> str:
+    """The file name of /proc/<pid>/exe, or - when it cannot be read (gone, a zombie, another uid)."""
+    try:
+        return _token(Path(os.readlink(proc / str(pid) / "exe")).name)
+    except OSError:
+        return "-"
+
+
+def cmdline_head(proc: Path, pid: int) -> str:
+    """The first CMDLINE_ARGS arguments of /proc/<pid>/cmdline, comma joined and cut; - when empty or unreadable."""
+    try:
+        raw = (proc / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return "-"
+    args = [arg.decode("utf-8", errors="replace") for arg in raw.split(b"\0") if arg][:CMDLINE_ARGS]
+    return _token(",".join(args))[:CMDLINE_CHARS]
+
+
+def _chain(values: list[str]) -> str:
+    return ">".join(values) or "-"
+
+
+@dataclass(slots=True)
+class StartTrack:
+    """What the counter saw of one soffice.bin (pid, start time) over the block, counted or not."""
+
+    first_ms: int
+    first_ppid: int
+    first_parent: str
+    first_fork: bool
+    exe: str
+    cmdline: str
+    pgrp: int
+    ppids: list[str]
+    names: list[str]
+    states: list[str]
+    counted_ms: int | None = None
+    counted_ppid: int = 0
+    counted_parent: str = "-"
+
+    def note(self, entry: ProcEntry) -> None:
+        """Append ppid, name and state when they differ from the last value seen."""
+        for values, value in ((self.ppids, str(entry.ppid)), (self.names, entry.name), (self.states, entry.state)):
+            if not values or values[-1] != value:
+                values.append(value)
+
+
+def detail_line(kind: str, pid: int, track: StartTrack) -> str:
+    """The SOFFICE-START-DETAIL line of one counted start.
+
+    ppid and parent_comm are those at the scan that counted it; earlier_fork
+    says whether an earlier scan saw the same process as a child of
+    soffice.bin (then the parent went away before this scan, and the process
+    was handed to another parent). ppids, names and states list each change
+    seen until the block ended.
+    """
+    return (
+        f"SOFFICE-START-DETAIL kind={kind} pid={pid} ppid={track.counted_ppid} "
+        f"parent_comm={_token(track.counted_parent)} comm={_token(track.names[0])} exe_basename={track.exe} "
+        f"cmdline_head={track.cmdline} first_seen_ms={track.first_ms} counted_ms={track.counted_ms} "
+        f"pgrp={track.pgrp} first_ppid={track.first_ppid} first_parent_comm={_token(track.first_parent)} "
+        f"earlier_fork={'ja' if track.first_fork else 'nein'} ppids={_chain(track.ppids)} "
+        f"names={_token(_chain(track.names))} states={_chain(track.states)}"
+    )
+
+
 class StartCounter:
-    """Counts the soffice.bin processes that appear while the block runs (a thread reads /proc)."""
+    """Counts the soffice.bin processes that appear while the block runs (a thread reads /proc).
+
+    Besides the count it keeps a StartTrack of every soffice.bin it saw, so
+    detail_lines can say what each counted start was (sandbox run of cfb428a:
+    n=4 for one conversion).
+    """
 
     def __init__(self, proc: Path = PROC, uid: int | None = None, poll_s: float = POLL_S) -> None:
         self._proc, self._uid, self._poll_s = proc, uid, poll_s
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._watch, daemon=True)
         self.seen: set[tuple[int, int]] = set()
+        self.tracks: dict[tuple[int, int], StartTrack] = {}
         self._before: set[tuple[int, int]] = set()
+        self._started = time.monotonic()
+
+    def _ms(self) -> int:
+        return int((time.monotonic() - self._started) * 1000)
+
+    def _parent_name(self, table: Mapping[int, ProcEntry], ppid: int) -> str:
+        parent = table.get(ppid)
+        return "gone" if parent is None else parent.name
 
     def _scan(self) -> None:
-        self.seen |= soffice_processes(self._proc, self._uid) - self._before
+        table = read_proc(self._proc)
+        for key, start in soffice_entries(table, self._uid).items():
+            if key in self._before:
+                continue
+            pid, entry = key[0], table[key[0]]
+            track = self.tracks.get(key)
+            if track is None:
+                track = StartTrack(
+                    first_ms=self._ms(),
+                    first_ppid=entry.ppid,
+                    first_parent=self._parent_name(table, entry.ppid),
+                    first_fork=not start,
+                    exe=exe_basename(self._proc, pid),
+                    cmdline=cmdline_head(self._proc, pid),
+                    pgrp=entry.pgrp,
+                    ppids=[],
+                    names=[],
+                    states=[],
+                )
+                self.tracks[key] = track
+            track.note(entry)
+            if start and key not in self.seen:
+                self.seen.add(key)
+                track.counted_ms = self._ms()
+                track.counted_ppid = entry.ppid
+                track.counted_parent = self._parent_name(table, entry.ppid)
+        # What became of a tracked process that no longer carries the name (an exec): its new name.
+        for (pid, begun), track in self.tracks.items():
+            entry = table.get(pid)
+            if entry is not None and entry.start == begun and entry.name != SOFFICE_BIN:
+                track.note(entry)
+
+    def detail_lines(self, kind: str) -> list[str]:
+        """One SOFFICE-START-DETAIL line per counted start, in the order they were first seen."""
+        counted = sorted((track.first_ms, key[0], key) for key, track in self.tracks.items() if key in self.seen)
+        return [detail_line(kind, pid, self.tracks[key]) for _, pid, key in counted]
 
     def _watch(self) -> None:
         while not self._stop.is_set():
@@ -242,6 +390,7 @@ class StartCounter:
             self._stop.wait(self._poll_s)
 
     def __enter__(self) -> "StartCounter":
+        self._started = time.monotonic()
         self._before = soffice_processes(self._proc, self._uid)
         self._thread.start()
         return self
@@ -335,9 +484,12 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
     lines = [
         layer_line(result),
         starts_line("product", counter.n),
+        *counter.detail_lines("product"),
         rest_line(before_cleanup, after_cleanup),
         f"PIPE-NAME predicted={'ja' if f'{expected_pipe}:sock' in pipes else 'nein'} seen={len(pipes)}",
     ]
+    # A string message: pytest cuts the repr of a list in the middle, a string it keeps whole.
+    report = "\n".join(lines)
     # Outside the capture, so the lines stand in the job log of a passing run, too.
     with capsys.disabled():
         print()
@@ -355,9 +507,9 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
         assert document.page_count == 1
         assert MARKER in document[0].get_text()
     # R1: the copy of the template starts once, no restart.
-    assert counter.n == 1, lines
+    assert counter.n == 1, report
     # The server cleaned up: nothing new in /tmp, the profile with its copy is gone, no socket is left.
-    assert after_cleanup == [], lines
+    assert after_cleanup == [], report
     assert _leftovers(JOB_ID) == []
 
 
@@ -394,11 +546,16 @@ async def test_control_a_fresh_profile_restarts_unjailed(tmp_path: Path, capsys:
         shutil.rmtree(profile, ignore_errors=True)
         soffice._remove_ipc_sockets(TMP)
     pdf = any(outdir.glob("*.pdf"))
-    line = starts_line("control-fresh-unjailed", counter.n, f"exit={code} pdf={'ja' if pdf else 'nein'}")
+    lines = [
+        starts_line("control-fresh-unjailed", counter.n, f"exit={code} pdf={'ja' if pdf else 'nein'}"),
+        *counter.detail_lines("control-fresh-unjailed"),
+    ]
     with capsys.disabled():
-        print(f"\n{line}")
+        print()
+        for line in lines:
+            print(line)
     record_measurement("soffice_starts_control", {"n": counter.n, "exit": code, "pdf": pdf})
-    assert counter.n >= 2, line
+    assert counter.n >= 2, "\n".join(lines)
 
 
 def _leftovers(job_id: str) -> list[str]:
@@ -741,10 +898,20 @@ class Work:
     read: tuple[str, ...]
     timeout_s: float = 120.0
     python: bool = True
+    traced: bool = False
 
     def argv(self, out: Path) -> list[str]:
         args = [arg.replace(OUT, str(out)) for arg in self.args]
         return work_argv(*args) if self.python else args
+
+    def trace(self, out: Path) -> Path | None:
+        """The trace file profile_work.py writes into the folder of the run, for a traced work."""
+        return out / TRACE_FILE if self.traced else None
+
+
+def trace_line(work: Work, build: str, run: Mapping[str, object]) -> str:
+    """The PROFILE-TRACE line: the MARK lines and the last stacks of one traced run."""
+    return f"PROFILE-TRACE profile={work.profile} work={work.name} build={build} {run.get('trace') or '-'}"
 
 
 def work_argv(*args: str) -> list[str]:
@@ -784,8 +951,142 @@ def really_ran(run: Mapping[str, object]) -> bool:
     return str(run["result"]).startswith("result=") and run["exit"] not in failed_jail
 
 
-async def _run_work(argv: list[str], profile: str, timeout_s: float) -> dict[str, object]:
-    """exit, the result line of profile_work.py (or no-answer), the cleaned stderr tail, ok."""
+# -- why a run hangs: what the test sees of the child when its time is up --------------------
+
+# Sandbox run of cfb428a: detect ran into 900 s on arm64 twice (product and
+# deny-connect), with no line on stdout and nothing on stderr, while amd64
+# needed seconds. The test now reads /proc of the child and the trace file of
+# profile_work.py (MARK lines, faulthandler stacks) before it kills the group.
+# 300 s: amd64 needs about 20 s per detect run (both runs and everything else
+# in 44 s), so 300 s is 15 times that; arm64 failed at 900 s anyway, and with a
+# stack every DETECT_DUMP_EVERY_S the dumps show whether it moves. Both runs
+# together then take at most 10 instead of 30 minutes.
+DETECT_TIMEOUT_S = 300.0
+DETECT_DUMP_EVERY_S = 60.0
+DUMP_SETTLE_S = 2.0
+HARNESS_MARK = "HARNESS dump on timeout"
+TRACE_FRAMES = 12
+TRACE_CHARS = 4000
+TOP_THREADS = 8
+CLOCK_TICKS = 100  # sysconf(_SC_CLK_TCK) on Linux; only for the seconds in the line
+# /proc/<pid>/stat after the ")": field 14 (utime) index 11, field 15 (stime) index 12.
+UTIME_INDEX = 11
+STIME_INDEX = 12
+STATUS_KEYS = ("State", "Threads", "VmRSS", "VmHWM")
+_FRAME = re.compile(r'^\s*File "(?P<path>[^"]*)", line (?P<line>\d+) in (?P<func>.*)$')
+_NOT_PRINTABLE = re.compile(r"[^\x20-\x7e]")
+COMMUNICATE_AFTER_KILL_S = 10.0
+
+
+def _cpu_s(stat_text: str) -> float:
+    fields = stat_text.rpartition(")")[2].split()
+    try:
+        return (int(fields[UTIME_INDEX]) + int(fields[STIME_INDEX])) / CLOCK_TICKS
+    except (IndexError, ValueError):
+        return -1.0
+
+
+def proc_snapshot(pid: int, proc: Path = PROC) -> str:
+    """State, threads, memory, CPU seconds and wchan of pid, and its busiest threads; - per field it cannot read.
+
+    CPU seconds that grow from dump to dump mean work (slow), a flat value and
+    a wchan like futex_wait mean a wait (a lock, a pool that never answers).
+    """
+    base = proc / str(pid)
+    parts: list[str] = []
+    try:
+        status = (base / "status").read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return "proc=gone"
+    for line in status.splitlines():
+        key, _, value = line.partition(":")
+        if key in STATUS_KEYS:
+            parts.append(f"{key.lower()}={_token(value)}")
+    cpu = wchan = "-"
+    with contextlib.suppress(OSError):
+        cpu = f"{_cpu_s((base / 'stat').read_text(encoding='ascii')):.1f}"
+    with contextlib.suppress(OSError):
+        wchan = _token((base / "wchan").read_text(encoding="ascii"))
+    parts += [f"cpu_s={cpu}", f"wchan={wchan}"]
+    threads: list[tuple[float, str]] = []
+    with contextlib.suppress(OSError):
+        for task in (base / "task").iterdir():
+            with contextlib.suppress(OSError):
+                text = (task / "stat").read_text(encoding="ascii", errors="replace")
+                name = text.partition("(")[2].rpartition(")")[0]
+                state = text.rpartition(")")[2].split()[:1] or ["?"]
+                wchan = "-"
+                with contextlib.suppress(OSError):
+                    wchan = (task / "wchan").read_text(encoding="ascii") or "-"
+                threads.append((_cpu_s(text), f"{_token(name)}:{state[0]}:{_cpu_s(text):.1f}s:{_token(wchan)}"))
+    threads.sort(reverse=True)
+    parts.append(f"top_threads={','.join(entry for _, entry in threads[:TOP_THREADS]) or '-'}")
+    return " ".join(parts)
+
+
+def _short_path(path: str) -> str:
+    """The part of a source path after site-packages (or its last two parts): enough to name the module."""
+    head, marker, rest = path.partition("site-packages/")
+    if marker:
+        return rest
+    return "/".join(Path(head).parts[-2:])
+
+
+def condense_trace(text: str) -> str:
+    """The MARK lines and the last stack dump of a trace file, as one line.
+
+    The last dump starts after the last HARNESS_MARK or "Timeout (" header;
+    each thread keeps its TRACE_FRAMES most recent frames as module:line func.
+    """
+    lines = text.splitlines()
+    marks = [line.removeprefix("MARK ").strip() for line in lines if line.startswith("MARK ")]
+    starts = [index for index, line in enumerate(lines) if line.startswith((HARNESS_MARK, "Timeout ("))]
+    dump = lines[starts[-1] + 1 :] if starts else []
+    threads: list[str] = []
+    frames: list[str] = []
+    for line in dump:
+        if line.startswith(("Thread ", "Current thread ")):
+            if frames or threads:
+                threads.append(" < ".join(frames[:TRACE_FRAMES]))
+            frames = [line.split(" (")[0].replace("Current thread", "current")]
+            continue
+        match = _FRAME.match(line)
+        if match is not None:
+            frames.append(f"{_short_path(match['path'])}:{match['line']} {match['func'].strip()}")
+    if frames:
+        threads.append(" < ".join(frames[:TRACE_FRAMES]))
+    text_out = f"marks={' ; '.join(marks) or '-'} dumps={len(starts)} last_dump={' || '.join(threads) or '-'}"
+    return _NOT_PRINTABLE.sub("?", text_out)[:TRACE_CHARS]
+
+
+def read_trace(path: Path | None) -> str:
+    """condense_trace of the file, or - when there is none."""
+    if path is None:
+        return "-"
+    try:
+        return condense_trace(path.read_text(encoding="ascii", errors="replace"))
+    except OSError:
+        return "-"
+
+
+def _ask_for_a_dump(pid: int, trace: Path | None) -> None:
+    """Mark the trace file and send SIGUSR1: profile_work.py's faulthandler writes the stacks once more."""
+    if trace is not None:
+        with contextlib.suppress(OSError), trace.open("a", encoding="ascii") as handle:
+            handle.write(f"{HARNESS_MARK}\n")
+    sigusr1 = getattr(signal, "SIGUSR1", None)
+    if sigusr1 is not None:
+        with contextlib.suppress(OSError):
+            os.kill(pid, sigusr1)
+
+
+async def _run_work(argv: list[str], profile: str, timeout_s: float, trace: Path | None = None) -> dict[str, object]:
+    """exit, the result line of profile_work.py (or no-answer), the cleaned stderr tail, ok.
+
+    On a timeout the tail is what /proc shows of the child and the condensed
+    trace file (MARK lines, the last stacks), read before the group is killed.
+    "trace" holds the condensed trace of every run that has one.
+    """
     process = await asyncio.create_subprocess_exec(
         *argv,
         env=child.child_env(profile=profile),
@@ -794,12 +1095,27 @@ async def _run_work(argv: list[str], profile: str, timeout_s: float) -> dict[str
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
     )
+    communicate = asyncio.ensure_future(process.communicate())
     try:
-        out, err = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+        out, err = await asyncio.wait_for(asyncio.shield(communicate), timeout=timeout_s)
     except TimeoutError:
+        snapshot = proc_snapshot(process.pid)
+        _ask_for_a_dump(process.pid, trace)
+        await asyncio.sleep(DUMP_SETTLE_S)
         child._kill_group(process.pid)
-        await process.wait()
-        return {"exit": None, "result": "result=fail:timeout events=-", "tail": "", "ok": False}
+        err = b""
+        with contextlib.suppress(TimeoutError):
+            _, err = await asyncio.wait_for(communicate, timeout=COMMUNICATE_AFTER_KILL_S)
+        stderr = child.diagnostic_tail(err, child.TAIL_LINES) or "-"
+        condensed = read_trace(trace)
+        tail = f"{snapshot} stderr={stderr} trace={condensed}"
+        return {
+            "exit": None,
+            "result": "result=fail:timeout events=-",
+            "tail": tail,
+            "ok": False,
+            "trace": condensed,
+        }
     finally:
         reap_group(process.pid)
     lines = [line for line in out.decode("ascii", errors="replace").splitlines() if line.startswith("result=")]
@@ -809,6 +1125,7 @@ async def _run_work(argv: list[str], profile: str, timeout_s: float) -> dict[str
         "result": result,
         "tail": child.diagnostic_tail(err, child.TAIL_LINES),
         "ok": result.startswith("result=ok "),
+        "trace": read_trace(trace),
     }
 
 
@@ -847,7 +1164,16 @@ def profile_works(pdf: Path, docx: Path, png: Path, models: Path, tesseract: str
         Work("sanitize", "sanitize", ("sanitize", str(docx), f"{OUT}/clean.docx"), (str(docx),)),
     ]
     if (models / "gliner2").is_dir():
-        works.append(Work("detect", "detect", ("detect", str(models), OUT), (str(models),), timeout_s=900.0))
+        works.append(
+            Work(
+                "detect",
+                "detect",
+                ("detect", str(models), OUT, str(DETECT_DUMP_EVERY_S)),
+                (str(models),),
+                timeout_s=DETECT_TIMEOUT_S,
+                traced=True,
+            )
+        )
     else:
         works.append(absent_line("detect", "detect", "no-models"))
     if tesseract is None:
@@ -900,7 +1226,9 @@ async def test_each_profile_does_its_work_with_connect_denied(
                 continue
             make = jail_argv if build == "product" else deny_connect_argv
             command = make(work.profile, work.argv(out), read=work.read, write=(str(out),))
-            runs[build] = await _run_work(command, work.profile, work.timeout_s)
+            runs[build] = await _run_work(command, work.profile, work.timeout_s, work.trace(out))
+        if work.traced:
+            lines += [trace_line(work, build, run) for build, run in runs.items()]
         if "deny" not in runs:
             lines.append(product_work_line(work, runs["product"]))
             if not runs["product"]["ok"]:
@@ -920,9 +1248,10 @@ async def test_each_profile_does_its_work_with_connect_denied(
         for line in lines:
             print(line)
     record_measurement("profile_deny_connect", measured)
-    assert not_run == [], lines
+    report = "\n".join(lines)
+    assert not_run == [], report
     # The profiles that refuse connect() in the product still do their work.
-    assert failed == [], lines
+    assert failed == [], report
 
 
 async def _probe(argv: list[str]) -> str:

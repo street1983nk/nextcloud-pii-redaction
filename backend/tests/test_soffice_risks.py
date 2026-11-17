@@ -6,7 +6,9 @@ helpers, which run everywhere. Test only.
 """
 
 import errno
+import faulthandler
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -112,6 +114,71 @@ def test_the_same_pid_with_a_new_start_time_is_a_new_start(tmp_path: Path) -> No
             "301 (soffice.bin) " + " ".join(["S", *[str(n) for n in range(18)], "2", "0"]) + "\n", encoding="ascii"
         )
     assert counter.n == 2
+
+
+def _move(proc: Path, pid: int, name: str, start: int, ppid: int) -> None:
+    (proc / str(pid) / "stat").write_text(stat_line(pid, name, start, ppid), encoding="ascii")
+
+
+def test_a_fork_handed_to_another_parent_is_counted_and_its_detail_says_so(tmp_path: Path) -> None:
+    """The counter as it stands counts a fork whose soffice.bin parent is gone; the detail line names that."""
+    proc = tmp_path / "proc"
+    fake_process(proc, 11, "oosplash", 901)
+    with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
+        fake_process(proc, 12, "soffice.bin", 902, ppid=11)
+        time.sleep(0.05)
+        fake_process(proc, 13, "soffice.bin", 903, ppid=12)  # a fork of the start
+        time.sleep(0.05)
+        # The start ends; the kernel hands its fork to the subreaper (pid 1 here).
+        _move(proc, 13, "soffice.bin", 903, ppid=1)
+        for path in (proc / "12").iterdir():
+            path.unlink()
+        (proc / "12").rmdir()
+        time.sleep(0.05)
+    assert counter.seen == {(12, 902), (13, 903)}
+    lines = counter.detail_lines("product")
+    assert len(lines) == 2
+    start, fork = lines
+    assert start.startswith("SOFFICE-START-DETAIL kind=product pid=12 ppid=11 parent_comm=oosplash comm=soffice.bin")
+    assert "earlier_fork=nein" in start
+    assert "ppids=11 " in start
+    assert fork.startswith("SOFFICE-START-DETAIL kind=product pid=13 ppid=1 parent_comm=gone comm=soffice.bin")
+    assert "first_ppid=12 first_parent_comm=soffice.bin earlier_fork=ja ppids=12>1 " in fork
+    # Fake /proc has no exe or cmdline: the fields say so instead of failing.
+    assert "exe_basename=- cmdline_head=-" in fork
+
+
+def test_the_detail_line_follows_an_exec_and_a_zombie(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
+        fake_process(proc, 21, "soffice.bin", 500, ppid=1)
+        time.sleep(0.05)
+        (proc / "21" / "stat").write_text(
+            "21 (soffice.bin) " + " ".join(["Z", "1", *[str(n) for n in range(17)], "500", "0"]) + "\n",
+            encoding="ascii",
+        )
+        time.sleep(0.05)
+    (line,) = counter.detail_lines("control-fresh-unjailed")
+    assert "states=S>Z" in line
+    # An exec renames the process: the names chain shows what it became.
+    proc2 = tmp_path / "proc2"
+    proc2.mkdir()
+    with diag.StartCounter(proc=proc2, poll_s=0.001) as counter:
+        fake_process(proc2, 31, "soffice.bin", 600, ppid=1)
+        time.sleep(0.05)
+        _move(proc2, 31, "sh", 600, ppid=1)
+        time.sleep(0.05)
+    (line,) = counter.detail_lines("product")
+    assert "names=soffice.bin>sh" in line
+
+
+def test_cmdline_head_and_exe_from_a_fake_proc(tmp_path: Path) -> None:
+    fake_process(tmp_path, 41, "soffice.bin", 1)
+    (tmp_path / "41" / "cmdline").write_bytes(b"/usr/lib/libreoffice/program/soffice.bin\0--headless\0--a b\0x\0")
+    assert diag.cmdline_head(tmp_path, 41) == "/usr/lib/libreoffice/program/soffice.bin,--headless,--a_b"
+    assert diag.cmdline_head(tmp_path, 42) == "-"
+    assert diag.exe_basename(tmp_path, 41) == "-"
 
 
 def test_the_starts_line() -> None:
@@ -310,8 +377,117 @@ def test_with_models_and_tesseract_detect_and_ocr_are_work(tmp_path: Path) -> No
     ocr = next(work for work in works if isinstance(work, diag.Work) and work.profile == "ocr")
     assert ocr.argv(tmp_path / "out") == ["/usr/bin/tesseract", str(tmp_path / "a.png"), f"{tmp_path / 'out'}/text"]
     detect = next(work for work in works if isinstance(work, diag.Work) and work.profile == "detect")
-    assert detect.argv(tmp_path / "out")[-3:] == ["detect", str(tmp_path), str(tmp_path / "out")]
+    assert detect.argv(tmp_path / "out")[-4:] == [
+        "detect",
+        str(tmp_path),
+        str(tmp_path / "out"),
+        str(diag.DETECT_DUMP_EVERY_S),
+    ]
     assert detect.read == (str(tmp_path),)
+    assert detect.timeout_s == diag.DETECT_TIMEOUT_S
+    assert detect.trace(tmp_path / "out") == tmp_path / "out" / profile_work.TRACE_FILE
+    # Dumps come several times before the limit, so a hang shows whether it moves.
+    assert diag.DETECT_TIMEOUT_S >= 4 * diag.DETECT_DUMP_EVERY_S
+    assert ocr.trace(tmp_path / "out") is None
+
+
+# -- why a run hangs: the trace of profile_work.py and what the test reads of it ----------------
+
+FAULTHANDLER_SAMPLE = """MARK t=0.0s step=start torch=nein rss=-
+MARK t=4.2s step=offline_configured torch=nein rss=-
+Timeout (0:01:00)!
+Thread 0x0000ffff8a1bf120 (most recent call first):
+  File "/usr/lib/python3.13/threading.py", line 359 in wait
+  File "/usr/local/lib/python3.13/site-packages/torch/_utils.py", line 12 in worker
+
+Current thread 0x0000ffff9b2c0040 (most recent call first):
+  File "/usr/local/lib/python3.13/site-packages/torch/__init__.py", line 405 in _load_global_deps
+  File "<frozen importlib._bootstrap>", line 488 in _call_with_frames_removed
+  File "/app/tests/profile_work.py", line 160 in _detect
+HARNESS dump on timeout
+Current thread 0x0000ffff9b2c0040 (most recent call first):
+  File "/usr/local/lib/python3.13/site-packages/torch/__init__.py", line 405 in _load_global_deps
+"""
+
+
+def test_condense_trace_keeps_the_marks_and_the_last_dump() -> None:
+    text = diag.condense_trace(FAULTHANDLER_SAMPLE)
+    assert text.startswith(
+        "marks=t=0.0s step=start torch=nein rss=- ; t=4.2s step=offline_configured torch=nein rss=- dumps=2 "
+    )
+    # Only the dump after the harness mark, with the module path after site-packages.
+    assert text.endswith("last_dump=current 0x0000ffff9b2c0040 < torch/__init__.py:405 _load_global_deps")
+    # Without the harness mark the timeout dump is the last one: both threads, short paths.
+    first = diag.condense_trace(FAULTHANDLER_SAMPLE.split("HARNESS")[0])
+    assert "dumps=1" in first
+    assert "Thread 0x0000ffff8a1bf120 < python3.13/threading.py:359 wait < torch/_utils.py:12 worker" in first
+    assert "tests/profile_work.py:160 _detect" in first
+    assert diag.condense_trace("") == "marks=- dumps=0 last_dump=-"
+    assert diag.read_trace(None) == "-"
+
+
+def test_proc_snapshot_reads_state_cpu_and_threads(tmp_path: Path) -> None:
+    base = tmp_path / "77"
+    (base / "task" / "77").mkdir(parents=True)
+    (base / "task" / "78").mkdir()
+    (base / "status").write_text(
+        "Name:\tpython\nState:\tS (sleeping)\nThreads:\t2\nVmRSS:\t  1234 kB\n", encoding="ascii"
+    )
+    # utime 250 and stime 50 ticks: 3.0 s.
+    stat = "77 (python) S 1 " + " ".join(["0"] * 9) + " 250 50 0 0\n"
+    (base / "stat").write_text(stat, encoding="ascii")
+    (base / "wchan").write_text("futex_wait_queue", encoding="ascii")
+    (base / "task" / "77" / "stat").write_text(stat, encoding="ascii")
+    (base / "task" / "78" / "stat").write_text(
+        "78 (torch worker) R 1 " + " ".join(["0"] * 9) + " 900 0\n", encoding="ascii"
+    )
+    snapshot = diag.proc_snapshot(77, tmp_path)
+    assert snapshot.startswith("state=S_(sleeping) threads=2 vmrss=1234_kB cpu_s=3.0 wchan=futex_wait_queue ")
+    assert snapshot.endswith("top_threads=torch_worker:R:9.0s:-,python:S:3.0s:-")
+    assert diag.proc_snapshot(99, tmp_path) == "proc=gone"
+
+
+def test_the_trace_marks_steps_and_dumps_stacks(tmp_path: Path) -> None:
+    was_enabled = faulthandler.is_enabled()
+    trace = profile_work.Trace(tmp_path, 0.05)
+    try:
+        trace.mark("start")
+        time.sleep(0.3)
+        trace.mark("done")
+    finally:
+        trace.close()
+        if was_enabled and sys.__stderr__ is not None:
+            faulthandler.enable(file=sys.__stderr__)
+    text = (tmp_path / profile_work.TRACE_FILE).read_text(encoding="ascii")
+    condensed = diag.condense_trace(text)
+    assert "step=start torch=" in condensed
+    assert "step=done" in condensed
+    # faulthandler really wrote stacks on its timer: the test's own frame is in them.
+    assert "Timeout (" in text
+    assert "test_the_trace_marks_steps_and_dumps_stacks" in text
+
+
+def test_negative_detect_refuses_a_bad_dump_interval() -> None:
+    assert profile_work.main(["detect", "/models", "/work", "zero"]) == 1
+    assert profile_work.main(["detect", "/models", "/work", "-1"]) == 1
+
+
+@pytest.mark.linux
+async def test_a_timed_out_run_shows_proc_and_trace_in_its_tail(tmp_path: Path) -> None:
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    trace = tmp_path / profile_work.TRACE_FILE
+    trace.write_text("MARK t=0.0s step=start torch=nein rss=-\n", encoding="ascii")
+    run = await diag._run_work([sleep, "30"], "detect", 0.5, trace)
+    assert run["result"] == "result=fail:timeout events=-"
+    assert run["ok"] is False
+    tail = str(run["tail"])
+    assert tail.startswith("state=")
+    assert "cpu_s=" in tail
+    assert "top_threads=sleep:" in tail
+    assert "trace=marks=t=0.0s step=start" in tail
+    # The harness marked the file before it asked for a dump (sleep has no handler and dies of SIGUSR1).
+    assert diag.HARNESS_MARK in trace.read_text(encoding="ascii")
 
 
 def test_the_work_line_and_what_counts_as_run() -> None:
