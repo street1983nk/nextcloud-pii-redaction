@@ -43,6 +43,8 @@ use Psr\Log\LoggerInterface;
 final class QueueController extends OCSController {
 	/** The ceiling of a page count the container may report. */
 	public const MAX_PAGES = 100000;
+	/** The ceiling of the external links the sanitizer may report removed. */
+	public const MAX_LINKS_REMOVED = 10000;
 	/** The ceiling of a side of the page image in pixels. */
 	public const MAX_IMAGE_SIDE = 20000;
 	/** Mirror of PublishService::MAX_OUTPUT_BYTES (32 MiB, 01-SKELETON.md). */
@@ -85,7 +87,7 @@ final class QueueController extends OCSController {
 		}
 
 		$job = $claim['job'];
-		return new DataResponse([
+		$answer = [
 			'jobId' => $job->getId(),
 			'task' => $job->getTask(),
 			'token' => $claim['token'],
@@ -93,7 +95,16 @@ final class QueueController extends OCSController {
 			'userId' => $job->getInitiatorUid(),
 			'etag' => $job->getFileEtag(),
 			'leaseSeconds' => $claim['lease'],
-		]);
+		];
+		if ($job->getTaskEnum() === Task::Analyze) {
+			// The pre-check compares the bytes with the format Nextcloud
+			// reports (wrong_type) and skips the signature question once
+			// the initiator confirmed it (JOB-05, D-02-04).
+			$facts = $this->service->claimFacts($job);
+			$answer['expected'] = $facts['expected'];
+			$answer['confirmed'] = $facts['confirmed'];
+		}
+		return new DataResponse($answer);
 	}
 
 	/**
@@ -140,6 +151,10 @@ final class QueueController extends OCSController {
 	 * holds the job: once a lease runs out, the next claim replaces it, so an
 	 * old token can no longer finish the job of somebody else.
 	 *
+	 * The three sanitizer flags of a review ack are untyped on purpose: the
+	 * framework would cast "yes" to a bool and "7" to an int, and only a
+	 * real JSON bool or int in range is taken (plan 02-15).
+	 *
 	 * @param array<mixed>|null $image
 	 * @param array<mixed>|null $output
 	 */
@@ -155,6 +170,9 @@ final class QueueController extends OCSController {
 		?string $etagSeen = null,
 		?array $image = null,
 		?array $output = null,
+		mixed $macrosRemoved = null,
+		mixed $externalLinksRemoved = null,
+		mixed $ownerProtectionDropped = null,
 	): DataResponse {
 		$foreign = $this->rejectForeignCaller();
 		if ($foreign !== null) {
@@ -170,26 +188,31 @@ final class QueueController extends OCSController {
 		}
 
 		return match ($result) {
-			'review' => $this->ackReview($job, $pagesTotal, $etagSeen, $image),
+			'review' => $this->ackReview($job, $pagesTotal, $etagSeen, $image, [$macrosRemoved, $externalLinksRemoved, $ownerProtectionDropped]),
 			'verified' => $this->ackVerified($job, $output),
 			'failed' => $this->ackFailed($job, $reason),
 			'purged' => $this->ackPurged($job),
-			// The signature confirmation is handled from plan 02-15 on; until then
-			// a confirm must never fall through to another result.
+			'confirm' => $this->ackConfirm($job),
 			default => self::badRequest(),
 		};
 	}
 
-	// -- the four results -----------------------------------------------------
+	// -- the five results -----------------------------------------------------
 
 	/**
 	 * @param array<mixed>|null $image
+	 * @param array{0: mixed, 1: mixed, 2: mixed} $flags macrosRemoved, externalLinksRemoved, ownerProtectionDropped
 	 */
-	private function ackReview(Job $job, ?int $pagesTotal, ?string $etagSeen, ?array $image): DataResponse {
+	private function ackReview(Job $job, ?int $pagesTotal, ?string $etagSeen, ?array $image, array $flags): DataResponse {
 		$width = self::side($image['width'] ?? null);
 		$height = self::side($image['height'] ?? null);
+		[$macros, $links, $owner] = $flags;
 		if ($pagesTotal === null || $pagesTotal < 1 || $pagesTotal > self::MAX_PAGES
 			|| $width === null || $height === null || $etagSeen === null || $etagSeen === '') {
+			return self::badRequest();
+		}
+		if (!self::optionalBool($macros) || !self::optionalBool($owner)
+			|| ($links !== null && (!is_int($links) || $links < 0 || $links > self::MAX_LINKS_REMOVED))) {
 			return self::badRequest();
 		}
 		if ($job->getStatusEnum() !== Status::Analyzing || $job->getTaskEnum() !== Task::Analyze) {
@@ -214,7 +237,21 @@ final class QueueController extends OCSController {
 			return $this->notTaken($job, $why);
 		}
 
+		$this->service->recordAckFlags($job, $macros === true, is_int($links) ? $links : 0, $owner === true);
 		$this->service->toReview($job, $pagesTotal, $width, $height);
+		return new DataResponse(['ok' => true]);
+	}
+
+	/**
+	 * The pre-check found a signed PDF the initiator has not confirmed yet
+	 * (D-02-04): the job waits for the decision, outside the queue.
+	 */
+	private function ackConfirm(Job $job): DataResponse {
+		if ($job->getStatusEnum() !== Status::Analyzing || $job->getTaskEnum() !== Task::Analyze) {
+			return $this->conflict($job->getId());
+		}
+
+		$this->service->toConfirm($job);
 		return new DataResponse(['ok' => true]);
 	}
 
@@ -288,6 +325,11 @@ final class QueueController extends OCSController {
 			return false;
 		}
 		return $done === null || $total === null || $done <= $total;
+	}
+
+	/** Absent, or a real JSON bool. */
+	private static function optionalBool(mixed $value): bool {
+		return $value === null || is_bool($value);
 	}
 
 	/** A side of the page image as a whole number in range, or null. */

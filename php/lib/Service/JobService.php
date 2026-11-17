@@ -42,6 +42,13 @@ final class JobService {
 		'application/vnd.oasis.opendocument.text',
 	];
 
+	/** The word the container expects for each allowed mime type (plan 02-15). */
+	private const FORMATS = [
+		'application/pdf' => 'pdf',
+		'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+		'application/vnd.oasis.opendocument.text' => 'odt',
+	];
+
 	public function __construct(
 		private JobMapper $jobs,
 		private JobEventMapper $events,
@@ -191,6 +198,37 @@ final class JobService {
 	public function recheckMember(int $jobId, string $uid): ?Recheck {
 		$job = $this->forMember($jobId, $uid);
 		return $job === null ? null : $this->recheckJob($job, $uid);
+	}
+
+	/**
+	 * The format word of an allowed mime type, or null for any other.
+	 */
+	public static function formatOf(string $mime): ?string {
+		return in_array($mime, self::ALLOWED_MIMES, true) ? self::FORMATS[$mime] : null;
+	}
+
+	/**
+	 * What the claim of an analyze task tells the container: the format the
+	 * file should have (from the mime type Nextcloud reports now, null when
+	 * the file is gone or of another type) and whether the initiator already
+	 * confirmed the loss of a signature (the event signature_confirmed).
+	 *
+	 * @return array{expected: ?string, confirmed: bool}
+	 */
+	public function claimFacts(Job $job): array {
+		$file = $this->files->resolve($job->getInitiatorUid(), $job->getFileId());
+		$expected = null;
+		if ($file !== null) {
+			try {
+				$expected = self::formatOf($file->getMimetype());
+			} catch (\Throwable $e) {
+				$this->logger->warning('PII Redaction: mime type not readable at claim', ['jobId' => $job->getId(), 'class' => $e::class]);
+			}
+		}
+		return [
+			'expected' => $expected,
+			'confirmed' => $this->events->hasAction($job->getId(), JobEventMapper::ACTION_SIGNATURE_CONFIRMED),
+		];
 	}
 
 	// -- transitions ---------------------------------------------------------------
