@@ -54,6 +54,15 @@ SYSTEM_READ: Final[tuple[str, ...]] = (
 # LibreOffice reads its own installation and the fonts on top.
 SOFFICE_READ: Final[tuple[str, ...]] = (*SYSTEM_READ, "/usr/share/fonts", "/usr/lib/libreoffice")
 
+# LibreOffice binds its single-instance pipe as a Unix socket at
+# /tmp/OSL_PIPE_<user>_SingleOfficeIPC_<hash> (sal/osl/unx/pipe.cxx: /tmp
+# whenever access(2) calls it writable, and Landlock does not answer access(2)).
+# Without it soffice ends with a bootstrap error before it opens the document
+# (desktop/source/app/app.cxx, IPC_STATUS_PIPE_ERROR). The rule grants only the
+# creation of a socket below /tmp: no file, no folder, no removal, no read.
+# Its temporary files go to TMPDIR inside the job profile (workers/soffice.py).
+SOFFICE_SOCKETS: Final[tuple[str, ...]] = ("/tmp",)  # noqa: S108 - socket creation only, see above
+
 
 @dataclass(frozen=True, slots=True)
 class Profile:
@@ -72,6 +81,8 @@ class Profile:
     python_child: bool
     # Always 0: no core file with document content.
     core: int = 0
+    # Folders below which the child may only create a Unix socket.
+    socket_paths: tuple[str, ...] = ()
 
 
 def _profile(
@@ -83,6 +94,7 @@ def _profile(
     open_files: int = 256,
     read_paths: tuple[str, ...] = SYSTEM_READ,
     python_child: bool = True,
+    socket_paths: tuple[str, ...] = (),
 ) -> Profile:
     return Profile(
         name=name,
@@ -94,6 +106,7 @@ def _profile(
         read_paths=read_paths,
         write_paths=(),
         python_child=python_child,
+        socket_paths=socket_paths,
     )
 
 
@@ -116,6 +129,7 @@ PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
             open_files=1024,
             read_paths=SOFFICE_READ,
             python_child=False,
+            socket_paths=SOFFICE_SOCKETS,
         ),
         # Tesseract on one page image.
         "ocr": _profile("ocr", wall_s=120, address_space=GIB, file_size=512 * MIB, python_child=False),

@@ -8,6 +8,7 @@ from pii_redaction_backend.config import MAX_SOURCE_BYTES
 from pii_redaction_backend.sandbox import profiles
 from pii_redaction_backend.sandbox.profiles import GIB, MIB, PROFILES, profile_for
 
+SOCKET_ROOT = "/tmp"  # noqa: S108 - the path under test, nothing is written there
 FORBIDDEN_PREFIXES = ("/nc_app_pii_redaction_backend_data", "/certs", "/frpc.toml", "/proc")
 
 
@@ -66,6 +67,7 @@ def test_no_profile_reaches_a_secret(name: str) -> None:
     profile = PROFILES[name]
     assert forbidden_paths(profile.read_paths) == []
     assert forbidden_paths(profile.write_paths) == []
+    assert forbidden_paths(profile.socket_paths) == []
 
 
 def test_the_secret_rule_fires_on_a_tampered_probe() -> None:
@@ -102,3 +104,10 @@ def test_the_process_count_limit_is_never_set() -> None:
     code = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
     assert not any("RLIMIT_NPROC" in line for line in code)
     assert "never set" in source
+
+
+def test_only_libreoffice_may_create_a_socket_and_only_in_tmp() -> None:
+    sockets = {name: profile.socket_paths for name, profile in PROFILES.items() if profile.socket_paths}
+    assert sockets == {"soffice": (SOCKET_ROOT,)}
+    # No profile writes /tmp itself: the socket rule is the only right there.
+    assert all(SOCKET_ROOT not in profile.write_paths for profile in PROFILES.values())

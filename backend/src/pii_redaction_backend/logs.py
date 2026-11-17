@@ -53,6 +53,11 @@ ALLOWED_EXTRA: Final[frozenset[str]] = frozenset(
         "landlock",
         "landlock_abi",
         "jail",
+        # A failed child (plan 02-08): its exit code, the signal that killed it,
+        # the stderr tail cleaned by workers/child.diagnostic_tail.
+        "exit_code",
+        "signal",
+        "stderr_tail",
     }
 )
 

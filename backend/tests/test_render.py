@@ -7,6 +7,7 @@ list here and for real in CI (plan 15).
 """
 
 import json
+import sys
 from pathlib import Path
 
 import pymupdf
@@ -77,3 +78,56 @@ def test_the_soffice_command_is_exactly_the_documented_one(tmp_path: Path) -> No
 def test_a_job_id_that_is_not_digits_is_refused(tmp_path: Path, job_id: str) -> None:
     with pytest.raises(ValueError, match="digits"):
         soffice.command(tmp_path / "in.odt", tmp_path, job_id)
+
+
+# -- the soffice call (plan 02-08) ------------------------------------------------------
+
+
+async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, object] = {}
+
+    async def fake_run_child(args: list[str], **kwargs: object) -> None:
+        seen.update(kwargs)
+        seen["profile_existed"] = (tmp_path / "lo-5" / "tmp").is_dir()
+        (tmp_path / "out" / "in.pdf").write_bytes(b"%PDF-1.7\n")
+
+    monkeypatch.setattr(soffice, "PROFILE_ROOT", str(tmp_path))
+    monkeypatch.setattr(soffice, "run_child", fake_run_child)
+
+    pdf = await soffice.convert(tmp_path / "in.docx", tmp_path / "out", "5")
+
+    assert pdf == tmp_path / "out" / "in.pdf"
+    assert seen["profile"] == "soffice"
+    assert seen["extra_env"] == {"TMPDIR": str(tmp_path / "lo-5" / "tmp")}
+    assert seen["write"] == (str(tmp_path / "out"), str(tmp_path / "lo-5"))
+    assert seen["diagnose"] is True
+    assert seen["profile_existed"] is True
+    # The profile with its temporary folder is gone after the run.
+    assert not (tmp_path / "lo-5").exists()
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Unix sockets and uids need Linux")
+def test_only_the_libreoffice_sockets_of_this_uid_are_removed(tmp_path: Path) -> None:
+    assert sys.platform != "win32"
+    import socket
+
+    pipe = tmp_path / "OSL_PIPE_10001_SingleOfficeIPC_0123abcd"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(pipe))
+    server.close()
+    # Same name pattern, but a regular file: not ours to remove.
+    lookalike = tmp_path / "OSL_PIPE_10001_SingleOfficeIPC_ffff"
+    lookalike.write_bytes(b"")
+    other = tmp_path / "exapp.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(other))
+    server.close()
+
+    soffice._remove_ipc_sockets(tmp_path)
+
+    assert not pipe.exists()
+    assert lookalike.exists()
+    assert other.exists()

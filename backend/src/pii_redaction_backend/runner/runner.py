@@ -315,7 +315,18 @@ class Runner:
             await self._fail(job, failure.reason)
             return
         except (child.ChildTimeout, child.ChildFailed, soffice.ConversionFailed, ValueError, OSError) as exc:
-            LOGGER.info("render step failed", extra={"job_id": job.job_id, "exc_type": type(exc).__name__})
+            # Exit code, signal and the cleaned stderr tail (child.diagnostic_tail) of a
+            # failed child; the other exceptions carry none of them.
+            LOGGER.info(
+                "render step failed",
+                extra={
+                    "job_id": job.job_id,
+                    "exc_type": type(exc).__name__,
+                    "exit_code": getattr(exc, "exit_code", None),
+                    "signal": getattr(exc, "signal", None),
+                    "stderr_tail": getattr(exc, "stderr_tail", None) or None,
+                },
+            )
             await self._fail(job, Reason.RENDER_FAILED)
             return
 
@@ -342,7 +353,15 @@ class Runner:
             await asyncio.to_thread(_remove, folder)
             return
         except (child.ChildTimeout, child.ChildFailed, OSError) as exc:
-            LOGGER.info("placeholder step failed", extra={"job_id": job.job_id, "exc_type": type(exc).__name__})
+            LOGGER.info(
+                "placeholder step failed",
+                extra={
+                    "job_id": job.job_id,
+                    "exc_type": type(exc).__name__,
+                    "exit_code": getattr(exc, "exit_code", None),
+                    "signal": getattr(exc, "signal", None),
+                },
+            )
             await self._fail(job, Reason.RENDER_FAILED)
             return
         await self._db(lambda db: repo.upsert_job(db, job.job_id, task=job.task, stage=Stage.DONE, now=self._now()))

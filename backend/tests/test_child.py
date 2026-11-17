@@ -164,3 +164,75 @@ def _alive(pid: int) -> bool:
     # A zombie still answers kill 0; its state in /proc says it is gone.
     stat = Path(f"/proc/{pid}/stat")
     return not (stat.is_file() and stat.read_text(encoding="utf-8").split()[2] == "Z")
+
+
+# -- the diagnosis of a failed child (plan 02-08) ----------------------------------------
+
+
+def test_the_tail_drops_paths_quotes_urls_and_foreign_bytes() -> None:
+    raw = (
+        "Error: source file could not be loaded\n"
+        "Warning: failed to open /nc_app_pii_redaction_backend_data/work/7/Bescheid Meier.docx here\n"
+        "javaldx: 'Frau Erika Mustermann' not found and \"Aktenzeichen 12\" either\n"
+        "file:///tmp/lo-7/user/registrymodifications.xcu broken\n"
+        "Gr\u00fc\u00dfe aus ~/home\n"
+    ).encode()
+    tail = child.diagnostic_tail(raw)
+    assert "Error: source file could not be loaded" in tail
+    for leak in ("nc_app", "Bescheid", "Meier", "Erika", "Mustermann", "Aktenzeichen", "lo-7", "registry", "home"):
+        assert leak not in tail, leak
+    assert "<path>" in tail
+    assert "<q>" in tail
+    assert tail.isascii()
+
+
+def test_positive_control_plain_diagnostic_words_stay() -> None:
+    assert child.diagnostic_tail(b"Fatal exception: Signal 6\n\n") == "Fatal exception: Signal 6"
+
+
+def test_the_tail_keeps_the_last_lines_and_cuts_long_ones() -> None:
+    raw = "".join(f"line {n} " + "x" * 400 + "\n" for n in range(20)).encode()
+    lines = child.diagnostic_tail(raw).split(" | ")
+    assert len(lines) == child.TAIL_LINES
+    assert lines[0].startswith("line 15 ")
+    assert all(len(line) <= child.TAIL_LINE_CHARS for line in lines)
+
+
+def test_a_signal_is_reported_apart_from_the_exit_code() -> None:
+    killed = child.ChildFailed(-9)
+    assert (killed.exit_code, killed.signal, killed.stderr_tail) == (-9, 9, "")
+    failed = child.ChildFailed(77, "Fatal exception")
+    assert (failed.exit_code, failed.signal, failed.stderr_tail) == (77, None, "Fatal exception")
+    assert "Fatal" not in str(failed)
+
+
+def test_tmpdir_is_the_only_new_extra_variable() -> None:
+    assert child.child_env({"TMPDIR": "/work/lo-1/tmp"})["TMPDIR"] == "/work/lo-1/tmp"
+    with pytest.raises(ValueError, match="not allowed"):
+        child.child_env({"HOME": "/"})
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
+async def test_a_diagnosed_child_hands_back_its_cleaned_stderr(tmp_path: Path) -> None:
+    script = (
+        "import sys; sys.stderr.write(\"Error: cannot open '/data/Bescheid Meier.docx'\n\"); "
+        "sys.stderr.write('Fatal error at /secret/path\n'); sys.exit(77)"
+    )
+
+    with pytest.raises(child.ChildFailed) as failure:
+        await child.run_child([sys.executable, "-I", "-c", script], **_jailed(tmp_path), timeout_s=20, diagnose=True)
+
+    assert failure.value.exit_code == 77
+    assert failure.value.stderr_tail == "Error: cannot open <q> | Fatal error at <path>"
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
+async def test_without_diagnose_nothing_of_stderr_comes_back(tmp_path: Path) -> None:
+    script = "import sys; sys.stderr.write('Fatal error\n'); sys.exit(77)"
+
+    with pytest.raises(child.ChildFailed) as failure:
+        await child.run_child([sys.executable, "-I", "-c", script], **_jailed(tmp_path), timeout_s=20)
+
+    assert failure.value.stderr_tail == ""

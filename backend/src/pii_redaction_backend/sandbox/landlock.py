@@ -71,6 +71,9 @@ WRITE_ACCESS: Final = (
     | ACCESS_FS_MAKE_SYM
     | ACCESS_FS_TRUNCATE
 )
+# A socket path: create a Unix socket in the folder and nothing else; no file,
+# no folder, no removal, no read of what lies there (plan 02-08, LibreOffice IPC).
+SOCKET_ACCESS: Final = ACCESS_FS_MAKE_SOCK
 # The only rights the kernel accepts on a rule for a file (not a directory).
 FILE_ACCESS: Final = (
     ACCESS_FS_EXECUTE | ACCESS_FS_WRITE_FILE | ACCESS_FS_READ_FILE | ACCESS_FS_TRUNCATE | ACCESS_FS_IOCTL_DEV
@@ -183,8 +186,17 @@ def _add_paths(syscall: Syscall, ruleset: int, paths: Iterable[str], access: int
             os.close(fd)
 
 
-def restrict(read_paths: Iterable[str], write_paths: Iterable[str], syscall: Syscall | None = None) -> int:
-    """Confine this process and every later exec to the given paths; returns the ABI used."""
+def restrict(
+    read_paths: Iterable[str],
+    write_paths: Iterable[str],
+    syscall: Syscall | None = None,
+    *,
+    socket_paths: Iterable[str] = (),
+) -> int:
+    """Confine this process and every later exec to the given paths; returns the ABI used.
+
+    A socket path grants only the creation of a Unix socket below it.
+    """
     if syscall is None:
         syscall = _libc_syscall()
     if syscall is None:
@@ -200,6 +212,7 @@ def restrict(read_paths: Iterable[str], write_paths: Iterable[str], syscall: Sys
     try:
         _add_paths(syscall, ruleset, read_paths, READ_ACCESS & handled.fs)
         _add_paths(syscall, ruleset, write_paths, WRITE_ACCESS & handled.fs)
+        _add_paths(syscall, ruleset, socket_paths, SOCKET_ACCESS & handled.fs)
         result = syscall(SYS_RESTRICT_SELF, ruleset, 0)
         if result < 0:
             raise _fail(result, "landlock_restrict_self")

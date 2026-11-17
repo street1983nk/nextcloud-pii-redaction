@@ -13,6 +13,7 @@ from pii_redaction_backend.sandbox.profiles import PROFILES
 from tests.conftest import BACKEND_ROOT
 
 LINUX_ONLY = [pytest.mark.linux, pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs Linux")]
+SOCKET_ROOT = "/tmp"  # noqa: S108 - the path under test, nothing is written there
 JAIL_SOURCE = BACKEND_ROOT / "src" / "pii_redaction_backend" / "sandbox" / "jail.py"
 
 
@@ -46,8 +47,8 @@ class Recorder:
     def landlock_abi(self) -> int:
         return self.abi
 
-    def landlock_restrict(self, read: tuple[str, ...], write: tuple[str, ...]) -> object:
-        self.calls.append(("landlock", (read, write)))
+    def landlock_restrict(self, read: tuple[str, ...], write: tuple[str, ...], sockets: tuple[str, ...]) -> object:
+        self.calls.append(("landlock", (read, write, sockets)))
         self._maybe_fail("landlock")
         return self.abi
 
@@ -202,9 +203,18 @@ def test_the_job_paths_are_added_to_the_profile_paths() -> None:
     recorder = Recorder()
     work = "/nc_app_pii_redaction_backend_data/work/3"
     jail.main(["soffice", "--read", "/in/src.docx", "--write", work, "--", "/usr/bin/soffice"], recorder.ops())
-    (read, write) = next(value for kind, value in recorder.calls if kind == "landlock")  # type: ignore[misc]
+    (read, write, sockets) = next(value for kind, value in recorder.calls if kind == "landlock")  # type: ignore[misc]
     assert read == (*PROFILES["soffice"].read_paths, "/in/src.docx")
     assert write == (*PROFILES["soffice"].write_paths, work)
+    assert sockets == (SOCKET_ROOT,)
+
+
+@pytest.mark.parametrize("name", sorted(PROFILES))
+def test_only_libreoffice_gets_a_socket_path(name: str) -> None:
+    recorder = Recorder()
+    jail.main([name, "--", "/bin/true"], recorder.ops())
+    (_, _, sockets) = next(value for kind, value in recorder.calls if kind == "landlock")  # type: ignore[misc]
+    assert sockets == ((SOCKET_ROOT,) if name == "soffice" else ())
 
 
 def test_without_seccomp_the_child_still_starts() -> None:

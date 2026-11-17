@@ -13,7 +13,8 @@ replaces itself with the command through os.execv:
    parser leaves no memory image with document content behind;
 2. PR_SET_NO_NEW_PRIVS, so no set-uid program can gain rights later;
 3. Landlock: read only the system paths of the profile plus the job paths,
-   write only the job paths;
+   write only the job paths, and create a Unix socket only in the socket
+   paths of the profile (LibreOffice: /tmp, nothing else);
 4. seccomp: no INET, INET6, PACKET or NETLINK socket, no ptrace and friends.
 
 Why not preexec_fn: the server runs asyncio plus worker threads, and CPython
@@ -61,7 +62,7 @@ class Ops:
     setrlimit: Callable[[str, tuple[int, int]], None]
     prctl: Callable[[int, int], None]
     landlock_abi: Callable[[], int]
-    landlock_restrict: Callable[[tuple[str, ...], tuple[str, ...]], object]
+    landlock_restrict: Callable[[tuple[str, ...], tuple[str, ...], tuple[str, ...]], object]
     seccomp_available: Callable[[], bool]
     seccomp_install: Callable[[], None]
     execv: Callable[[str, list[str]], object]
@@ -145,6 +146,7 @@ def run(call: Call, ops: Ops) -> int:
             ops.landlock_restrict(
                 (*call.profile.read_paths, *call.read),
                 (*call.profile.write_paths, *call.write),
+                call.profile.socket_paths,
             )
         if ops.seccomp_available():
             ops.seccomp_install()
@@ -177,8 +179,8 @@ def _landlock_abi() -> int:
     return landlock.abi_version()
 
 
-def _landlock_restrict(read: tuple[str, ...], write: tuple[str, ...]) -> object:
-    return landlock.restrict(read, write)
+def _landlock_restrict(read: tuple[str, ...], write: tuple[str, ...], sockets: tuple[str, ...]) -> object:
+    return landlock.restrict(read, write, socket_paths=sockets)
 
 
 def _seccomp_available() -> bool:

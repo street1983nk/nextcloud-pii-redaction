@@ -243,3 +243,84 @@ def test_the_real_ruleset_confines_reads_and_writes(tmp_path: Path) -> None:
         "outside-denied",
         "outside-write-denied",
     ]
+
+
+# -- socket paths (plan 02-08, LibreOffice's single-instance pipe in /tmp) -----------------
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not ON_LINUX, reason="O_PATH needs Linux")
+def test_a_socket_path_carries_only_the_socket_right(tmp_path: Path, fd_file: Path) -> None:
+    kernel = FakeKernel(fd_file, abi=6)
+    restrict((), (), kernel, socket_paths=(str(tmp_path),))
+    assert [rights for rights, _ in kernel.rules] == [landlock.ACCESS_FS_MAKE_SOCK]
+
+
+SOCKET_CHILD = """
+import ctypes, os, socket, sys
+from pii_redaction_backend.sandbox import landlock
+
+sockets, work = sys.argv[1], sys.argv[2]
+
+
+def attempt(name, action):
+    try:
+        action()
+        print(name + "-ok")
+    except PermissionError:
+        print(name + "-denied")
+
+
+def bind(path):
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.close()
+
+
+# Positive control: before the ruleset every action works.
+attempt("before-socket", lambda: bind(os.path.join(sockets, "before.sock")))
+attempt("before-file", lambda: open(os.path.join(sockets, "before.txt"), "w").close())
+libc = ctypes.CDLL(None, use_errno=True)
+assert libc.prctl(38, 1, 0, 0, 0) == 0
+landlock.restrict((sys.prefix, sys.base_prefix, "/usr", "/lib", "/etc"), (work,), socket_paths=(sockets,))
+attempt("socket", lambda: bind(os.path.join(sockets, "after.sock")))
+attempt("file", lambda: open(os.path.join(sockets, "after.txt"), "w").close())
+attempt("folder", lambda: os.mkdir(os.path.join(sockets, "folder")))
+attempt("remove", lambda: os.unlink(os.path.join(sockets, "before.txt")))
+attempt("read", lambda: open(os.path.join(sockets, "secret.txt")).read())
+attempt("work", lambda: open(os.path.join(work, "out.txt"), "w").close())
+"""
+
+
+@pytest.mark.linux
+@pytest.mark.skipif(not ON_LINUX, reason="needs Linux")
+def test_the_real_socket_rule_allows_a_socket_and_nothing_else(tmp_path: Path) -> None:
+    if abi_version() == 0:
+        pytest.skip("no Landlock in this kernel")
+    sockets = tmp_path / "s"
+    work = tmp_path / "w"
+    sockets.mkdir()
+    work.mkdir()
+    (sockets / "secret.txt").write_text("not for the child", encoding="utf-8")
+    script = tmp_path / "socket_child.py"
+    script.write_text(SOCKET_CHILD, encoding="utf-8")
+    result = subprocess.run(  # noqa: S603 - fixed interpreter, script written by this test
+        [sys.executable, "-I", str(script), str(sockets), str(work)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [
+        "before-socket-ok",
+        "before-file-ok",
+        "socket-ok",
+        "file-denied",
+        "folder-denied",
+        "remove-denied",
+        "read-denied",
+        "work-ok",
+    ]
+    assert (sockets / "before.txt").exists()
+    assert not (sockets / "after.txt").exists()

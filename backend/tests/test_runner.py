@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import sys
 import zipfile
 from pathlib import Path
@@ -366,6 +367,20 @@ async def test_a_child_timeout_fails_as_render_failed(fake: Fake) -> None:
     await fake.runner().run_once()
     assert fake.acks() == [("ack", "failed", {"reason": Reason.RENDER_FAILED})]
     assert runner.last_child() is not None
+
+
+async def test_a_failed_child_logs_exit_code_signal_and_its_cleaned_tail(
+    fake: Fake, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake.child_error = child.ChildFailed(77, "Fatal exception <path>")
+    fake.claims = [_claim()]
+    with caplog.at_level(logging.INFO, logger="pii_redaction_backend"):
+        await fake.runner().run_once()
+    (record,) = [record for record in caplog.records if record.getMessage() == "render step failed"]
+    assert record.__dict__["exit_code"] == 77
+    assert record.__dict__["signal"] is None
+    assert record.__dict__["stderr_tail"] == "Fatal exception <path>"
+    assert fake.acks() == [("ack", "failed", {"reason": Reason.RENDER_FAILED})]
 
 
 async def test_the_heartbeat_repeats_the_stage_while_a_child_runs(fake: Fake) -> None:
