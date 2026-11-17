@@ -128,7 +128,7 @@ final class JobService {
 	 * there, not theirs, or the file is no longer readable for them. The
 	 * three cases are one answer, so nothing can be told apart from outside.
 	 *
-	 * @return array{jobId: int, fileId: int, status: string, stage: ?string, reason: ?string, ahead: ?int, pagesDone: ?int, pagesTotal: ?int, backendReady: bool, outputFileId: ?int, outputName: ?string, fileName: ?string, createdAt: int, image: ?array{width: int, height: int}, recheck: string}|null
+	 * @return array{jobId: int, fileId: int, status: string, stage: ?string, reason: ?string, ahead: ?int, pagesDone: ?int, pagesTotal: ?int, backendReady: bool, outputFileId: ?int, outputName: ?string, fileName: ?string, createdAt: int, image: ?array{width: int, height: int}, recheck: string, macrosRemoved: bool, signatureConfirmed: bool}|null
 	 */
 	public function view(int $jobId, string $uid, ?Recheck $known = null): ?array {
 		$job = $this->forMember($jobId, $uid);
@@ -162,6 +162,9 @@ final class JobService {
 			'createdAt' => $job->getCreatedAt(),
 			'image' => $width !== null && $height !== null ? ['width' => $width, 'height' => $height] : null,
 			'recheck' => $verdict->value,
+			// D-02-12 and D-02-04: both live only as events of the job.
+			'macrosRemoved' => $this->events->hasAction($job->getId(), JobEventMapper::ACTION_MACROS_REMOVED),
+			'signatureConfirmed' => $this->events->hasAction($job->getId(), JobEventMapper::ACTION_SIGNATURE_CONFIRMED),
 		];
 	}
 
@@ -232,6 +235,64 @@ final class JobService {
 		// No notification for a cancelled job, and none of the old ones may
 		// point at a review page that no longer has anything to show.
 		$this->notifications->dismiss($job);
+	}
+
+	/**
+	 * The pre-check found a signed PDF (D-02-04): the job leaves the queue
+	 * until the initiator confirms that the signature will be lost. No
+	 * notification (D-02-02); the file card shows the question.
+	 */
+	public function toConfirm(Job $job): void {
+		$this->expect($job, Status::Analyzing);
+		$job->setStatus(Status::Confirm->value);
+		$job->setReason(null);
+		$job->setTask(null);
+		$job->setStage(null);
+		$this->finish($job, Status::Confirm, $job->getInitiatorUid(), null);
+		$this->events->record($job->getId(), $job->getInitiatorUid(), JobEventMapper::ACTION_SIGNATURE_NOTICE);
+	}
+
+	/**
+	 * The initiator accepted the loss of the signature: back into the queue
+	 * for the analysis. The confirmation is the event signature_confirmed;
+	 * the claim reads it from there (plan 02-15).
+	 */
+	public function confirmSignature(Job $job, string $uid): void {
+		$this->expect($job, Status::Confirm);
+		$this->expectInitiator($job, $uid);
+		$this->events->record($job->getId(), $uid, JobEventMapper::ACTION_SIGNATURE_CONFIRMED);
+		$job->setStatus(Status::Queued->value);
+		$job->setTask(Task::Analyze->value);
+		$job->setStage(Stage::Waiting->value);
+		$job->setAttempts(0);
+		$this->finish($job, Status::Queued, $uid, null);
+	}
+
+	/**
+	 * The initiator keeps the signature: the job ends as cancelled with
+	 * signature_declined, without a notification.
+	 */
+	public function declineSignature(Job $job, string $uid): void {
+		$this->expect($job, Status::Confirm);
+		$this->expectInitiator($job, $uid);
+		$this->toCancelled($job, Reason::SignatureDeclined);
+	}
+
+	/**
+	 * What the pre-check and the sanitizer reported with the ack (plan
+	 * 02-15): one event per flag that is set, and none otherwise.
+	 */
+	public function recordAckFlags(Job $job, bool $macrosRemoved, int $externalLinksRemoved, bool $ownerProtectionDropped): void {
+		$uid = $job->getInitiatorUid();
+		if ($macrosRemoved) {
+			$this->events->record($job->getId(), $uid, JobEventMapper::ACTION_MACROS_REMOVED);
+		}
+		if ($externalLinksRemoved > 0) {
+			$this->events->record($job->getId(), $uid, JobEventMapper::ACTION_EXTERNAL_LINKS_REMOVED);
+		}
+		if ($ownerProtectionDropped) {
+			$this->events->record($job->getId(), $uid, JobEventMapper::ACTION_OWNER_PROTECTION_DROPPED);
+		}
 	}
 
 	public function toApproved(Job $job, string $uid): void {
@@ -331,6 +392,12 @@ final class JobService {
 	private function expect(Job $job, Status $from): void {
 		if ($job->getStatusEnum() !== $from) {
 			throw new \LogicException('job state transition not allowed');
+		}
+	}
+
+	private function expectInitiator(Job $job, string $uid): void {
+		if ($uid === '' || $uid !== $job->getInitiatorUid()) {
+			throw new \LogicException('only the initiator decides on the signature');
 		}
 	}
 

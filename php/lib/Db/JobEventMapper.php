@@ -12,6 +12,14 @@ use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
+ * The protocol of every job.
+ *
+ * Events are the only source of the signature confirmation (JOB-05, D-02-04)
+ * and of the macro notice (D-02-12); they live as long as the job. A cleanup
+ * may delete events only together with their job (in a method whose name
+ * ends with ForJob); backend/tests/test_php_gates.py holds that
+ * (test_job_events_live_as_long_as_the_job).
+ *
  * @template-extends QBMapper<JobEvent>
  */
 final class JobEventMapper extends QBMapper {
@@ -70,6 +78,26 @@ final class JobEventMapper extends QBMapper {
 		return in_array($action, self::ACTIONS, true)
 			|| Status::tryFrom($action) !== null
 			|| Subject::tryFrom($action) !== null;
+	}
+
+	/**
+	 * Whether the job has at least one event with this action. The events
+	 * live as long as the job, so the answer does not change with later
+	 * transitions. Both values go in as named parameters.
+	 */
+	public function hasAction(int $jobId, string $action): bool {
+		if (!self::isAllowedAction($action)) {
+			throw new \InvalidArgumentException('job event action outside the closed lists');
+		}
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->func()->count('*', 'hits'))
+			->from(self::TABLE_NAME)
+			->where($qb->expr()->eq('job_id', $qb->createNamedParameter($jobId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('action', $qb->createNamedParameter($action)));
+		$result = $qb->executeQuery();
+		$hits = (int)$result->fetchOne();
+		$result->closeCursor();
+		return $hits > 0;
 	}
 
 	/**
