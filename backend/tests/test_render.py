@@ -7,7 +7,6 @@ list here and for real in CI (plan 15).
 """
 
 import json
-import sys
 from pathlib import Path
 
 import pymupdf
@@ -120,29 +119,8 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
     assert not (tmp_path / "lo-5").exists()
 
 
-@pytest.mark.linux
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Unix sockets and uids need Linux")
-def test_only_the_libreoffice_sockets_of_this_uid_are_removed(tmp_path: Path) -> None:
-    assert sys.platform != "win32"
-    import socket
-
-    pipe = tmp_path / "OSL_PIPE_10001_SingleOfficeIPC_0123abcd"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(pipe))
-    server.close()
-    # Same name pattern, but a regular file: not ours to remove.
-    lookalike = tmp_path / "OSL_PIPE_10001_SingleOfficeIPC_ffff"
-    lookalike.write_bytes(b"")
-    other = tmp_path / "exapp.sock"
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(str(other))
-    server.close()
-
-    soffice._remove_ipc_sockets(tmp_path)
-
-    assert not pipe.exists()
-    assert lookalike.exists()
-    assert other.exists()
+# The removal of the LibreOffice pipe sockets is covered in test_soffice_ipc.py
+# (name rule, and the real removal with the uid of the running process).
 
 
 def test_the_real_soffice_profile_folders_pass_the_child_allowlist() -> None:
