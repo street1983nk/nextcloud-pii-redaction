@@ -27,7 +27,16 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CAP_BYTES = 500 * 1024
 RELEASE_TAG = "'v[0-9]+.[0-9]+.[0-9]+'"
 SECRET_HOLDERS = frozenset({"release.yml", "store-submit.yml"})
-REQUIRED = ("python.yml", "php.yml", "docker.yml", "release.yml", "store-submit.yml", "deploy-harp.yml", "security.yml")
+REQUIRED = (
+    "python.yml",
+    "php.yml",
+    "docker.yml",
+    "release.yml",
+    "store-submit.yml",
+    "deploy-harp.yml",
+    "security.yml",
+    "sandbox.yml",
+)
 
 
 def workflow_files() -> list[Path]:
@@ -646,3 +655,81 @@ def test_self_the_loglevel_rules_fire() -> None:
         "ci/canary.sh has no positive control of the info lines of the app",
         "the PHP app touches the loglevel",
     ]
+
+
+# -- sandbox.yml: the container proofs of phase 2 (plan 02-12) -------------------------
+
+SANDBOX = WORKFLOWS / "sandbox.yml"
+SANDBOX_NEEDS = (
+    "target: test",
+    "push: false",
+    "load: true",
+    "--network none",
+    "docker exec",
+    "-m container",
+    "tcpdump -i docker0",
+    "--dns 192.0.2.1",
+    "uses: actions/cache@",
+    "permissions:\n  contents: read",
+)
+_TOLERANCE = (
+    "|| true",
+    "continue-on-error",
+    "-eq 5",
+    "exit 5",
+    "== 5",
+    "--suppress-no-test-exit-code",
+)
+
+
+def sandbox_problems(source: str) -> list[str]:
+    """What sandbox.yml misses or must never carry."""
+    found = [f"missing {needle!r}" for needle in SANDBOX_NEEDS if needle not in source]
+    if "push: true" in source:
+        found.append("pushes the test stage")
+    if "secrets." in source:
+        found.append("names a secret")
+    return found
+
+
+def tolerance_problems(source: str) -> list[str]:
+    """Every way an empty or failing container run could pass."""
+    found = [f"tolerates with {pattern!r}" for pattern in _TOLERANCE if pattern in source]
+    for line in source.splitlines():
+        if "docker exec" in line and "pytest" in line and "PII_IN_CONTAINER=1" not in line:
+            found.append(f"pytest without PII_IN_CONTAINER=1: {line.strip()[:60]}")
+    for needle in ("test -f /app/tests/test_lo_network.py", "test_container_smoke.py", "::notice::bridge test absent"):
+        if needle not in source:
+            found.append(f"bridge step misses {needle!r}")
+    return found
+
+
+def test_sandbox_workflow_rules() -> None:
+    assert sandbox_problems(SANDBOX.read_text(encoding="utf-8")) == []
+
+
+def test_sandbox_workflow_never_tolerates_empty_runs() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    assert tolerance_problems(source) == []
+    assert source.count("tcpdump -i docker0") == 1
+    assert source.count("test -f /app/tests/test_lo_network.py") == 1
+
+
+def test_self_the_sandbox_rules_fire() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    assert "missing '--network none'" in sandbox_problems(source.replace("--network none", "--network bridge"))
+    assert "pushes the test stage" in sandbox_problems(source.replace("push: false", "push: true"))
+    assert "names a secret" in sandbox_problems(source + "\n# ${{ secrets.TOKEN }}\n")
+
+
+def test_self_the_tolerance_rules_fire() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    run = "-m container /app/tests\n"
+    assert run in source
+    assert "tolerates with '|| true'" in tolerance_problems(source.replace(run, "-m container /app/tests || true\n"))
+    assert "tolerates with '-eq 5'" in tolerance_problems(source + '\n[ "$?" -eq 5 ]\n')
+    assert "tolerates with 'continue-on-error'" in tolerance_problems(source + "\n    continue-on-error: true\n")
+    bare = source.replace("docker exec -e PII_IN_CONTAINER=1 -e PII_MODELS", "docker exec -e PII_MODELS")
+    assert any("without PII_IN_CONTAINER" in problem for problem in tolerance_problems(bare))
+    notice = "bridge step misses '::notice::bridge test absent'"
+    assert notice in tolerance_problems(source.replace("::notice::bridge", "bridge"))
