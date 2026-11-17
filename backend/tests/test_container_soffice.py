@@ -20,10 +20,12 @@ time. The layer and variant diagnosis is evaluated and gone; what stays are
 the lasting checks:
 
     SOFFICE-LAYER product exit=<code|-> signal=<n|None> pdf=<ja|nein> ms=<ms> template=<ok|reason>
-    SOFFICE-STARTS <product|control-fresh-unjailed> n=<soffice.bin starts, parent not soffice.bin> [exit= pdf=]
-    SOFFICE-START-DETAIL kind=<product|control-fresh-unjailed> pid= ppid= parent_comm= comm= exe_basename=
+    SOFFICE-STARTS <product|control-fresh-unjailed> n=<soffice.bin starts: parent not soffice.bin, alive,
+        cmdline and exe of the program> [exit= pdf=]
+    SOFFICE-START-DETAIL kind=<product|control-fresh-unjailed> counted=<ja|nein reason=<why>> pid= ppid=
+        parent_comm= comm= exe_basename=
         cmdline_head= first_seen_ms= counted_ms= pgrp= first_ppid= first_parent_comm= earlier_fork=<ja|nein>
-        ppids=<a>b..> names=<..> states=<..>   (one per counted start, a diagnosis of cfb428a's n=4)
+        ppids=<a>b..> names=<..> states=<..>   (one per counted start and per refused candidate)
     TMP-REST product before_cleanup=<name:type,...|-> after_cleanup=<name:type,...|->
     PIPE-NAME predicted=<ja|nein> seen=<n>
     TEMPLATE-FACTS dirs=<n> files=<n> bytes=<n> owner=<uid:gid,...> writable=<n> other=<n> mentions_path=<ja|nein>
@@ -39,6 +41,11 @@ the lasting checks:
     PROFILE-PRODUCT profile=<p> work=<w> result=<word> tail=<...>   (only when the product run failed)
     PROFILE-TRACE profile=detect work=detect build=<product|deny> marks=<MARK lines> dumps=<n> last_dump=<stacks>
         (on a timeout tail= holds state, threads, cpu_s, wchan, top_threads, stderr= and trace= of the child)
+    ZOMBIES after_job=<zombies of the job group after convert()> pgrp=<groups> other_uid_zombies=<n>
+        subreaper=<ja|nein>   (a gate: after_job=0)
+    DETECT-VARIANT name=<unjailed|jailed-sys-cpu-read|jailed-threads-cpu|jailed-product> ok=<ja|nein>
+        ms_extract=<ms|-> threads=<torch threads> cpu_cap=<...> interop= cpu_count= affinity= present= possible=
+        online= cpuinfo= omp_num_threads= omp_thread_limit= result=<word> tail=<...>   (a measurement)
 
 Risks of the template (owner 17.11., "allen Risiken nachgehen"): R1 does the
 copy start without a restart (SOFFICE-STARTS product n=1, a gate; the fresh
@@ -89,7 +96,7 @@ import pytest
 from pii_redaction_backend.sandbox import jail as sandbox_jail
 from pii_redaction_backend.sandbox.jail import jail_argv
 from pii_redaction_backend.sandbox.profiles import PROFILES
-from pii_redaction_backend.sandbox.reaper import reap_group
+from pii_redaction_backend.sandbox.reaper import become_subreaper, reap_group
 from pii_redaction_backend.workers import child, soffice
 from tests.conftest import record_measurement
 from tests.profile_work import TRACE_FILE
@@ -143,10 +150,18 @@ PPID_INDEX = 1
 PGRP_INDEX = 2
 STARTTIME_INDEX = 19
 # Sandbox run of cfb428a: the product counted n=4 (amd64 and arm64) with one
-# pipe and a PDF, the fresh control n=2. What the four are is not known; each
-# counted start gets a SOFFICE-START-DETAIL line (see StartCounter.detail_lines).
+# pipe and a PDF, the fresh control n=2. Sandbox run of 335a80f named them: one
+# real soffice.bin (exe soffice.bin, cmdline the program path, parent
+# oosplash) and three zombies in the oosplash group whose parent was gone
+# (first_ppid=1, no exe, no cmdline, state Z or R>Z): forks of soffice.bin
+# that ended before an exec. So a start also needs a program identity
+# (identity_reason): alive, cmdline starting with the program path, exe
+# soffice.bin. Everything the parent rule lets through but the identity does
+# not gets a SOFFICE-START-DETAIL line with counted=nein and its reason.
 CMDLINE_ARGS = 3
 CMDLINE_CHARS = 120
+SOFFICE_BIN_PATH = "/usr/lib/libreoffice/program/soffice.bin"
+DEAD_STATES = frozenset({"Z", "X", "x"})
 
 # The installation LibreOffice compares the profile with (Debian layout).
 LO_ROOT = Path("/usr/lib/libreoffice")
@@ -274,6 +289,39 @@ def cmdline_head(proc: Path, pid: int) -> str:
     return _token(",".join(args))[:CMDLINE_CHARS]
 
 
+def cmdline_program(proc: Path, pid: int) -> str | None:
+    """The first argument of /proc/<pid>/cmdline; None when unreadable or empty (a zombie has none)."""
+    try:
+        raw = (proc / str(pid) / "cmdline").read_bytes()
+    except OSError:
+        return None
+    first = raw.split(b"\0", 1)[0]
+    return first.decode("utf-8", errors="replace") if first else None
+
+
+def identity_reason(proc: Path, pid: int, entry: ProcEntry) -> str | None:
+    """None for a soffice.bin with a program identity, else the reason it has none.
+
+    Reasons: zombie, no_cmdline, other_cmdline, no_exe, other_exe.
+
+    A zombie and a process in its exit have neither cmdline nor exe; a fork
+    before its exec has both, but the parent rule (soffice_entries) catches it.
+    """
+    if entry.state in DEAD_STATES:
+        return "zombie"
+    program = cmdline_program(proc, pid)
+    if program is None:
+        return "no_cmdline"
+    if program != SOFFICE_BIN_PATH:
+        return "other_cmdline"
+    exe = exe_basename(proc, pid)
+    if exe == "-":
+        return "no_exe"
+    if exe != SOFFICE_BIN:
+        return "other_exe"
+    return None
+
+
 def _chain(values: list[str]) -> str:
     return ">".join(values) or "-"
 
@@ -295,6 +343,15 @@ class StartTrack:
     counted_ms: int | None = None
     counted_ppid: int = 0
     counted_parent: str = "-"
+    # Why a candidate (parent not soffice.bin) was not counted, each change in order.
+    reasons: list[str] | None = None
+
+    def refuse(self, reason: str) -> None:
+        """Note why this candidate does not count at this scan (identity_reason)."""
+        if self.reasons is None:
+            self.reasons = []
+        if not self.reasons or self.reasons[-1] != reason:
+            self.reasons.append(reason)
 
     def note(self, entry: ProcEntry) -> None:
         """Append ppid, name and state when they differ from the last value seen."""
@@ -304,17 +361,21 @@ class StartTrack:
 
 
 def detail_line(kind: str, pid: int, track: StartTrack) -> str:
-    """The SOFFICE-START-DETAIL line of one counted start.
+    """The SOFFICE-START-DETAIL line of one candidate: counted=ja, or counted=nein with its reasons.
 
-    ppid and parent_comm are those at the scan that counted it; earlier_fork
-    says whether an earlier scan saw the same process as a child of
-    soffice.bin (then the parent went away before this scan, and the process
-    was handed to another parent). ppids, names and states list each change
-    seen until the block ended.
+    ppid and parent_comm are those at the scan that counted it (first_ppid
+    for one not counted); earlier_fork says whether an earlier scan saw the
+    same process as a child of soffice.bin (then the parent went away before
+    this scan, and the process was handed to another parent). ppids, names
+    and states list each change seen until the block ended.
     """
+    counted = track.counted_ms is not None
+    ppid = track.counted_ppid if counted else track.first_ppid
+    parent = track.counted_parent if counted else track.first_parent
+    verdict = "counted=ja" if counted else f"counted=nein reason={_chain(track.reasons or [])}"
     return (
-        f"SOFFICE-START-DETAIL kind={kind} pid={pid} ppid={track.counted_ppid} "
-        f"parent_comm={_token(track.counted_parent)} comm={_token(track.names[0])} exe_basename={track.exe} "
+        f"SOFFICE-START-DETAIL kind={kind} {verdict} pid={pid} ppid={ppid} "
+        f"parent_comm={_token(parent)} comm={_token(track.names[0])} exe_basename={track.exe} "
         f"cmdline_head={track.cmdline} first_seen_ms={track.first_ms} counted_ms={track.counted_ms} "
         f"pgrp={track.pgrp} first_ppid={track.first_ppid} first_parent_comm={_token(track.first_parent)} "
         f"earlier_fork={'ja' if track.first_fork else 'nein'} ppids={_chain(track.ppids)} "
@@ -326,8 +387,8 @@ class StartCounter:
     """Counts the soffice.bin processes that appear while the block runs (a thread reads /proc).
 
     Besides the count it keeps a StartTrack of every soffice.bin it saw, so
-    detail_lines can say what each counted start was (sandbox run of cfb428a:
-    n=4 for one conversion).
+    detail_lines can say what each counted start was and why a candidate did
+    not count (sandbox run of 335a80f: three zombies, see identity_reason).
     """
 
     def __init__(self, proc: Path = PROC, uid: int | None = None, poll_s: float = POLL_S) -> None:
@@ -369,6 +430,10 @@ class StartCounter:
                 self.tracks[key] = track
             track.note(entry)
             if start and key not in self.seen:
+                reason = identity_reason(self._proc, pid, entry)
+                if reason is not None:
+                    track.refuse(reason)
+                    continue
                 self.seen.add(key)
                 track.counted_ms = self._ms()
                 track.counted_ppid = entry.ppid
@@ -380,9 +445,20 @@ class StartCounter:
                 track.note(entry)
 
     def detail_lines(self, kind: str) -> list[str]:
-        """One SOFFICE-START-DETAIL line per counted start, in the order they were first seen."""
-        counted = sorted((track.first_ms, key[0], key) for key, track in self.tracks.items() if key in self.seen)
-        return [detail_line(kind, pid, self.tracks[key]) for _, pid, key in counted]
+        """One SOFFICE-START-DETAIL line per counted start and per refused candidate, in the order first seen.
+
+        A fork that never left its soffice.bin parent is neither and gets no line.
+        """
+        shown = sorted(
+            (track.first_ms, key[0], key)
+            for key, track in self.tracks.items()
+            if key in self.seen or track.reasons is not None
+        )
+        return [detail_line(kind, pid, self.tracks[key]) for _, pid, key in shown]
+
+    def pgrps(self) -> set[int]:
+        """The process groups of the counted starts (the oosplash group of a conversion)."""
+        return {self.tracks[key].pgrp for key in self.seen}
 
     def _watch(self) -> None:
         while not self._stop.is_set():
@@ -405,6 +481,28 @@ class StartCounter:
     @property
     def n(self) -> int:
         return len(self.seen)
+
+
+def zombie_counts(table: Mapping[int, ProcEntry], pgrps: set[int], uid: int | None = None) -> tuple[int, int]:
+    """Zombies of uid (any uid when None) inside the groups pgrps, and zombies of uid outside them."""
+    inside = outside = 0
+    for entry in table.values():
+        if entry.state != "Z" or (uid is not None and entry.owner != uid):
+            continue
+        if entry.pgrp in pgrps:
+            inside += 1
+        else:
+            outside += 1
+    return inside, outside
+
+
+def zombies_line(after_job: int, other: int, pgrps: set[int], subreaper: bool) -> str:
+    """The ZOMBIES line: zombies of the job's group after convert() returned (a gate: 0), and all others of the uid."""
+    groups = ",".join(str(group) for group in sorted(pgrps)) or "-"
+    return (
+        f"ZOMBIES after_job={after_job} pgrp={groups} other_uid_zombies={other} "
+        f"subreaper={'ja' if subreaper else 'nein'}"
+    )
 
 
 def starts_line(who: str, n: int, extra: str = "") -> str:
@@ -462,6 +560,12 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
         cleanups.append((before, new_entries(snapshot, tmp_entries(TMP))))
 
     monkeypatch.setattr(soffice, "_remove_ipc_sockets", watched_remove)
+    # As the server does at its start (main.harden_process): it is PID 1 of the
+    # product container and a subreaper, so every orphan of a job comes back to
+    # it and reap_group collects it. Here the server is PID 1 and pytest a
+    # docker exec beside it; without this the orphans went to the server, which
+    # never waits for a group it did not start (sandbox run of 335a80f).
+    subreaper = become_subreaper()
     started = time.monotonic()
     result: dict[str, object] = {"exit": "-", "signal": None, "pdf": False, "template": "ok"}
     failure = ""
@@ -478,6 +582,8 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
             failure = f"soffice failed: exit {failed.exit_code}, signal {failed.signal}, stderr {failed.stderr_tail!r}"
     result["ms"] = int((time.monotonic() - started) * 1000)
     result["pdf"] = pdf is not None
+    pgrps = counter.pgrps() | {track.pgrp for track in counter.tracks.values()}
+    after_job, other_zombies = zombie_counts(read_proc(), pgrps, _uid())
     before_cleanup, after_cleanup = cleanups[-1] if cleanups else (["no-cleanup"], ["no-cleanup"])
     expected_pipe = predicted_pipe_name(soffice.command(source, outdir, JOB_ID), _uid())
     pipes = [entry for entry in before_cleanup if entry.startswith("OSL_PIPE_")]
@@ -486,6 +592,7 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
         starts_line("product", counter.n),
         *counter.detail_lines("product"),
         rest_line(before_cleanup, after_cleanup),
+        zombies_line(after_job, other_zombies, pgrps, subreaper),
         f"PIPE-NAME predicted={'ja' if f'{expected_pipe}:sock' in pipes else 'nein'} seen={len(pipes)}",
     ]
     # A string message: pytest cuts the repr of a list in the middle, a string it keeps whole.
@@ -508,6 +615,8 @@ async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(
         assert MARKER in document[0].get_text()
     # R1: the copy of the template starts once, no restart.
     assert counter.n == 1, report
+    # No zombie of the job is left once convert() returned (reap_group with the server as subreaper).
+    assert after_job == 0, report
     # The server cleaned up: nothing new in /tmp, the profile with its copy is gone, no socket is left.
     assert after_cleanup == [], report
     assert _leftovers(JOB_ID) == []
@@ -1252,6 +1361,117 @@ async def test_each_profile_does_its_work_with_connect_denied(
     assert not_run == [], report
     # The profiles that refuse connect() in the product still do their work.
     assert failed == [], report
+
+
+# -- detect on arm64: measurement variants (sandbox run of 335a80f) ----------------------------
+
+# arm64 stopped after gliner_loaded for 300 s, every stack in gliner2
+# score_queries, one thread busy, stderr "Error in cpuinfo: failed to parse
+# the list of present processors"; amd64 extracted in 0.4 s. Four runs of the
+# same detect work, on both architectures, each a DETECT-VARIANT line and no
+# gate beyond "it really ran": (a) without any jail, (b) the product jail
+# plus a Landlock read right on /sys/devices/system/cpu (a diagnosis variant
+# through jail_layers.py, never a product rule), (c) the product jail with
+# OMP_NUM_THREADS and torch.set_num_threads fixed to os.cpu_count(), (d) the
+# product jail unchanged. 120 s each, so a hang costs at most eight minutes.
+VARIANT_TIMEOUT_S = 120.0
+SYS_CPU = "/sys/devices/system/cpu"
+VARIANT_TAIL_CHARS = 1500
+FACT_KEYS = (
+    "interop",
+    "cpu_count",
+    "affinity",
+    "present",
+    "possible",
+    "online",
+    "cpuinfo",
+    "omp_num_threads",
+    "omp_thread_limit",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DetectVariant:
+    """One way to run the detect work: its jail and its thread setting (profile_work.py detect <threads>)."""
+
+    name: str
+    jail: str
+    threads: str = "-"
+
+
+DETECT_VARIANTS = (
+    DetectVariant("unjailed", "none"),
+    DetectVariant("jailed-sys-cpu-read", "sys-cpu"),
+    DetectVariant("jailed-threads-cpu", "product", "cpu"),
+    DetectVariant("jailed-product", "product"),
+)
+
+
+def variant_argv(variant: DetectVariant, models: Path, out: Path) -> list[str]:
+    """The command of one variant; sys-cpu is the product jail of detect plus read=SYS_CPU through the driver."""
+    argv = work_argv("detect", str(models), str(out), str(DETECT_DUMP_EVERY_S), variant.threads)
+    if variant.jail == "none":
+        return argv
+    product = jail_argv("detect", argv, read=(str(models),), write=(str(out),))
+    if variant.jail == "product":
+        return product
+    if variant.jail == "sys-cpu":
+        return [sys.executable, "-I", str(DRIVER), "variant", f"read={SYS_CPU},seccomp", *product[4:]]
+    msg = f"unknown jail {variant.jail!r}"
+    raise ValueError(msg)
+
+
+def trace_facts(text: str) -> dict[str, str]:
+    """The last FACTS line of a trace as a dict, plus ms_extract from the EXTRACT line ("-" when missing)."""
+    facts: dict[str, str] = {}
+    for line in text.splitlines():
+        if line.startswith("FACTS "):
+            pairs = (part.partition("=") for part in line.split()[1:] if "=" in part)
+            facts = {key: value for key, _, value in pairs}
+    extract = [line.split("ms=", 1)[1].strip() for line in text.splitlines() if line.startswith("EXTRACT ms=")]
+    facts["ms_extract"] = extract[-1] if extract else "-"
+    return facts
+
+
+def variant_line(variant: DetectVariant, run: Mapping[str, object], trace_text: str) -> str:
+    """The DETECT-VARIANT line of one run."""
+    facts = trace_facts(trace_text)
+    result = str(run["result"]).partition(" events=")[0].removeprefix("result=")
+    tail = "-" if run["ok"] else _NOT_PRINTABLE.sub("?", str(run["tail"] or "-"))[:VARIANT_TAIL_CHARS]
+    extra = " ".join(f"{key}={facts.get(key, '-')}" for key in FACT_KEYS)
+    return (
+        f"DETECT-VARIANT name={variant.name} ok={_ja(run['ok'])} ms_extract={facts['ms_extract']} "
+        f"threads={facts.get('torch_threads', '-')} cpu_cap={facts.get('cpu_cap', '-')} {extra} "
+        f"result={result} tail={tail}"
+    )
+
+
+async def test_detect_variants_measure_the_arm64_hang(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """DETECT-VARIANT lines for (a) to (d); a measurement, the only gate is that each variant really ran."""
+    models = Path(os.environ.get("PII_MODELS", "/models"))
+    if not (models / "gliner2").is_dir():
+        pytest.skip("no models for detect")
+    lines: list[str] = []
+    measured: dict[str, object] = {}
+    not_run: list[str] = []
+    for variant in DETECT_VARIANTS:
+        out = tmp_path / f"detect-{variant.name}"
+        out.mkdir()
+        trace = out / TRACE_FILE
+        run = await _run_work(variant_argv(variant, models, out), "detect", VARIANT_TIMEOUT_S, trace)
+        text = ""
+        with contextlib.suppress(OSError):
+            text = trace.read_text(encoding="ascii", errors="replace")
+        lines.append(variant_line(variant, run, text))
+        measured[variant.name] = {**run, "facts": trace_facts(text)}
+        if not really_ran(run):
+            not_run.append(variant.name)
+    with capsys.disabled():
+        print()
+        for line in lines:
+            print(line)
+    record_measurement("detect_variants", measured)
+    assert not_run == [], "\n".join(lines)
 
 
 async def _probe(argv: list[str]) -> str:

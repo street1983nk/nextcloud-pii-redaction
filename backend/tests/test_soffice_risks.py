@@ -26,16 +26,42 @@ from tests import test_container_soffice as diag
 # -- R1: the start counter ------------------------------------------------------------------
 
 
-def stat_line(pid: int, name: str, start: int, ppid: int = 1) -> str:
+def stat_line(pid: int, name: str, start: int, ppid: int = 1, state: str = "S") -> str:
     # Fields from 3 on: state, ppid (field 4), 17 more, then field 22, the start time.
-    rest = " ".join(["S", str(ppid), *[str(n) for n in range(17)], str(start), "0"])
+    rest = " ".join([state, str(ppid), *[str(n) for n in range(17)], str(start), "0"])
     return f"{pid} ({name}) {rest}\n"
 
 
-def fake_process(proc: Path, pid: int, name: str, start: int, ppid: int = 1) -> None:
+# A fake /proc cannot hold the exe symlink everywhere (Windows needs a right
+# for symlinks), so the fake keeps the target name in a plain file and the
+# counter tests read it through FAKE_EXE instead of readlink.
+FAKE_EXE = "exe-name"
+REAL_EXE_BASENAME = diag.exe_basename
+LO_CMDLINE = b"/usr/lib/libreoffice/program/soffice.bin\0-env:UserInstallation=file:///tmp/lo-1\0--headless\0"
+
+
+def _fake_exe_basename(proc: Path, pid: int) -> str:
+    try:
+        return (proc / str(pid) / FAKE_EXE).read_text(encoding="ascii")
+    except OSError:
+        return "-"
+
+
+@pytest.fixture(autouse=True)
+def fake_exe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(diag, "exe_basename", _fake_exe_basename)
+
+
+def fake_process(
+    proc: Path, pid: int, name: str, start: int, ppid: int = 1, *, identity: bool | None = None, state: str = "S"
+) -> None:
+    """A fake /proc/<pid>; a soffice.bin gets the cmdline and exe of the real program unless identity is False."""
     folder = proc / str(pid)
     folder.mkdir(parents=True)
-    (folder / "stat").write_text(stat_line(pid, name, start, ppid), encoding="ascii")
+    (folder / "stat").write_text(stat_line(pid, name, start, ppid, state), encoding="ascii")
+    if identity if identity is not None else name == diag.SOFFICE_BIN:
+        (folder / "cmdline").write_bytes(LO_CMDLINE)
+        (folder / FAKE_EXE).write_text(diag.SOFFICE_BIN, encoding="ascii")
 
 
 def test_the_fake_stat_line_has_ppid_and_start_where_the_kernel_puts_them() -> None:
@@ -116,36 +142,125 @@ def test_the_same_pid_with_a_new_start_time_is_a_new_start(tmp_path: Path) -> No
     assert counter.n == 2
 
 
-def _move(proc: Path, pid: int, name: str, start: int, ppid: int) -> None:
-    (proc / str(pid) / "stat").write_text(stat_line(pid, name, start, ppid), encoding="ascii")
+def _move(proc: Path, pid: int, name: str, start: int, ppid: int, state: str = "S") -> None:
+    (proc / str(pid) / "stat").write_text(stat_line(pid, name, start, ppid, state), encoding="ascii")
+
+
+def _gone(proc: Path, pid: int) -> None:
+    for path in (proc / str(pid)).iterdir():
+        path.unlink()
+    (proc / str(pid)).rmdir()
 
 
 def test_a_fork_handed_to_another_parent_is_counted_and_its_detail_says_so(tmp_path: Path) -> None:
-    """The counter as it stands counts a fork whose soffice.bin parent is gone; the detail line names that."""
+    """A live fork with the program identity whose soffice.bin parent is gone still counts (a known limit)."""
     proc = tmp_path / "proc"
     fake_process(proc, 11, "oosplash", 901)
     with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
         fake_process(proc, 12, "soffice.bin", 902, ppid=11)
         time.sleep(0.05)
-        fake_process(proc, 13, "soffice.bin", 903, ppid=12)  # a fork of the start
+        fake_process(proc, 13, "soffice.bin", 903, ppid=12)  # a fork of the start, before its exec
         time.sleep(0.05)
         # The start ends; the kernel hands its fork to the subreaper (pid 1 here).
         _move(proc, 13, "soffice.bin", 903, ppid=1)
-        for path in (proc / "12").iterdir():
-            path.unlink()
-        (proc / "12").rmdir()
+        _gone(proc, 12)
         time.sleep(0.05)
     assert counter.seen == {(12, 902), (13, 903)}
     lines = counter.detail_lines("product")
     assert len(lines) == 2
     start, fork = lines
-    assert start.startswith("SOFFICE-START-DETAIL kind=product pid=12 ppid=11 parent_comm=oosplash comm=soffice.bin")
+    assert start.startswith(
+        "SOFFICE-START-DETAIL kind=product counted=ja pid=12 ppid=11 parent_comm=oosplash comm=soffice.bin "
+        "exe_basename=soffice.bin cmdline_head=/usr/lib/libreoffice/program/soffice.bin,"
+    )
     assert "earlier_fork=nein" in start
     assert "ppids=11 " in start
-    assert fork.startswith("SOFFICE-START-DETAIL kind=product pid=13 ppid=1 parent_comm=gone comm=soffice.bin")
+    assert fork.startswith(
+        "SOFFICE-START-DETAIL kind=product counted=ja pid=13 ppid=1 parent_comm=gone comm=soffice.bin"
+    )
     assert "first_ppid=12 first_parent_comm=soffice.bin earlier_fork=ja ppids=12>1 " in fork
-    # Fake /proc has no exe or cmdline: the fields say so instead of failing.
-    assert "exe_basename=- cmdline_head=-" in fork
+
+
+def test_negative_the_zombies_of_335a80f_are_no_start(tmp_path: Path) -> None:
+    """Sandbox run of 335a80f: three orphaned soffice.bin without exe and cmdline, state Z or R>Z, counted n=4."""
+    proc = tmp_path / "proc"
+    fake_process(proc, 56, "oosplash", 900)
+    with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
+        fake_process(proc, 71, "soffice.bin", 901, ppid=56)  # the real start
+        time.sleep(0.05)
+        fake_process(proc, 76, "soffice.bin", 902, identity=False, state="Z")
+        fake_process(proc, 78, "soffice.bin", 903, identity=False, state="R")  # in its exit, not yet Z
+        time.sleep(0.05)
+        _move(proc, 78, "soffice.bin", 903, ppid=1, state="Z")
+        fake_process(proc, 80, "soffice.bin", 904, identity=False, state="Z")
+        time.sleep(0.05)
+    assert counter.seen == {(71, 901)}
+    assert counter.n == 1
+    lines = counter.detail_lines("product")
+    assert len(lines) == 4
+    assert lines[0].startswith("SOFFICE-START-DETAIL kind=product counted=ja pid=71 ppid=56 parent_comm=oosplash")
+    refused = {line.split(" pid=")[1].split()[0]: line for line in lines[1:]}
+    assert set(refused) == {"76", "78", "80"}
+    assert "counted=nein reason=zombie pid=76 ppid=1 " in refused["76"]
+    assert "counted=nein reason=no_cmdline>zombie pid=78 " in refused["78"]
+    assert "states=R>Z" in refused["78"]
+    assert "exe_basename=- cmdline_head=-" in refused["80"]
+    # The fake stat line carries 0 in the group field.
+    assert counter.pgrps() == {0}
+
+
+def test_a_real_second_start_with_its_cmdline_still_counts(tmp_path: Path) -> None:
+    """The positive control of the fix: a restart is a live soffice.bin with cmdline and exe, so n stays 2."""
+    proc = tmp_path / "proc"
+    fake_process(proc, 82, "oosplash", 900)
+    with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
+        fake_process(proc, 97, "soffice.bin", 901, ppid=82)
+        time.sleep(0.05)
+        _gone(proc, 97)
+        fake_process(proc, 101, "soffice.bin", 902, ppid=82)  # the restart
+        time.sleep(0.05)
+        fake_process(proc, 102, "soffice.bin", 903, ppid=1, identity=False, state="Z")
+        time.sleep(0.05)
+    assert counter.seen == {(97, 901), (101, 902)}
+    assert counter.n == 2
+    assert [line.split()[2] for line in counter.detail_lines("control-fresh-unjailed")] == [
+        "counted=ja",
+        "counted=ja",
+        "counted=nein",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("cmdline", "exe", "state", "reason"),
+    [
+        (LO_CMDLINE, "soffice.bin", "S", None),
+        (LO_CMDLINE, "soffice.bin", "R", None),
+        (LO_CMDLINE, "soffice.bin", "Z", "zombie"),
+        (LO_CMDLINE, "soffice.bin", "X", "zombie"),
+        (None, "soffice.bin", "S", "no_cmdline"),
+        (b"", "soffice.bin", "S", "no_cmdline"),
+        (b"/usr/bin/python3\0-c\0", "soffice.bin", "S", "other_cmdline"),
+        (b"soffice.bin\0", "soffice.bin", "S", "other_cmdline"),
+        (LO_CMDLINE, None, "S", "no_exe"),
+        (LO_CMDLINE, "python3.13", "S", "other_exe"),
+    ],
+)
+def test_identity_reason(
+    tmp_path: Path, cmdline: bytes | None, exe: str | None, state: str, reason: str | None
+) -> None:
+    fake_process(tmp_path, 5, "soffice.bin", 1, identity=False, state=state)
+    if cmdline is not None:
+        (tmp_path / "5" / "cmdline").write_bytes(cmdline)
+    if exe is not None:
+        (tmp_path / "5" / FAKE_EXE).write_text(exe, encoding="ascii")
+    entry = diag.read_proc(tmp_path)[5]
+    assert diag.identity_reason(tmp_path, 5, entry) == reason
+
+
+def test_cmdline_program_reads_the_first_argument(tmp_path: Path) -> None:
+    fake_process(tmp_path, 6, "soffice.bin", 1)
+    assert diag.cmdline_program(tmp_path, 6) == diag.SOFFICE_BIN_PATH
+    assert diag.cmdline_program(tmp_path, 7) is None
 
 
 def test_the_detail_line_follows_an_exec_and_a_zombie(tmp_path: Path) -> None:
@@ -160,6 +275,7 @@ def test_the_detail_line_follows_an_exec_and_a_zombie(tmp_path: Path) -> None:
         )
         time.sleep(0.05)
     (line,) = counter.detail_lines("control-fresh-unjailed")
+    assert "counted=ja" in line
     assert "states=S>Z" in line
     # An exec renames the process: the names chain shows what it became.
     proc2 = tmp_path / "proc2"
@@ -178,7 +294,19 @@ def test_cmdline_head_and_exe_from_a_fake_proc(tmp_path: Path) -> None:
     (tmp_path / "41" / "cmdline").write_bytes(b"/usr/lib/libreoffice/program/soffice.bin\0--headless\0--a b\0x\0")
     assert diag.cmdline_head(tmp_path, 41) == "/usr/lib/libreoffice/program/soffice.bin,--headless,--a_b"
     assert diag.cmdline_head(tmp_path, 42) == "-"
-    assert diag.exe_basename(tmp_path, 41) == "-"
+    assert REAL_EXE_BASENAME(tmp_path, 41) == "-"
+
+
+def test_zombie_counts_and_line() -> None:
+    def entry(state: str, pgrp: int, owner: int = 10001) -> diag.ProcEntry:
+        return diag.ProcEntry("soffice.bin", 1, 1, owner, state, pgrp)
+
+    table = {1: entry("Z", 56), 2: entry("S", 56), 3: entry("Z", 99), 4: entry("Z", 56, owner=0), 5: entry("Z", 57)}
+    assert diag.zombie_counts(table, {56, 57}, 10001) == (2, 1)
+    assert diag.zombie_counts(table, {56}, None) == (2, 2)
+    assert diag.zombie_counts({}, set(), 10001) == (0, 0)
+    assert diag.zombies_line(0, 3, {82, 56}, True) == "ZOMBIES after_job=0 pgrp=56,82 other_uid_zombies=3 subreaper=ja"
+    assert diag.zombies_line(1, 0, set(), False) == "ZOMBIES after_job=1 pgrp=- other_uid_zombies=0 subreaper=nein"
 
 
 def test_the_starts_line() -> None:
@@ -581,3 +709,112 @@ def test_uid_is_a_number() -> None:
     assert isinstance(diag._uid(), int)
     if sys.platform != "win32":
         assert diag._uid() == os.getuid()
+
+
+# -- detect on arm64: the measurement variants ---------------------------------------------------
+
+
+def test_the_four_detect_variants_and_their_commands(tmp_path: Path) -> None:
+    models, out = tmp_path / "models", tmp_path / "out"
+    by_name = {variant.name: variant for variant in diag.DETECT_VARIANTS}
+    assert list(by_name) == ["unjailed", "jailed-sys-cpu-read", "jailed-threads-cpu", "jailed-product"]
+    work = diag.work_argv("detect", str(models), str(out), str(diag.DETECT_DUMP_EVERY_S), "-")
+    # (a) the work itself, no jail.
+    assert diag.variant_argv(by_name["unjailed"], models, out) == work
+    # (d) exactly the product jail of detect.
+    product = jail.jail_argv("detect", work, read=(str(models),), write=(str(out),))
+    assert diag.variant_argv(by_name["jailed-product"], models, out) == product
+    # (c) the product jail, only the thread argument differs.
+    threads = diag.variant_argv(by_name["jailed-threads-cpu"], models, out)
+    assert threads[:4] == product[:4]
+    assert threads[-1] == "cpu"
+    assert threads[:-1] == product[:-1]
+    # (b) the driver with one extra read path and the product seccomp filter, then the product call.
+    sys_cpu = diag.variant_argv(by_name["jailed-sys-cpu-read"], models, out)
+    assert sys_cpu[2:5] == [str(diag.DRIVER), "variant", "read=/sys/devices/system/cpu,seccomp"]
+    assert sys_cpu[5:] == product[4:]
+    assert jail_layers.parse_specs(sys_cpu[4]) == ("read=/sys/devices/system/cpu", "seccomp")
+    if sys.platform != "win32":
+        # The jail takes only absolute POSIX paths; a Windows tmp_path is none.
+        call = jail.parse(sys_cpu[5:])
+        assert call is not None
+        assert call.profile == profiles.PROFILES["detect"]
+        assert call.read == (str(models),)
+    with pytest.raises(ValueError, match="unknown jail"):
+        diag.variant_argv(diag.DetectVariant("x", "bogus"), models, out)
+
+
+TRACE_WITH_FACTS = (
+    "MARK t=0.0s step=start torch=nein rss=-\n"
+    "FACTS torch_threads=8 interop=8 cpu_cap=NO_AVX cpu_count=8 affinity=8:0-7 present=EACCES possible=EACCES "
+    "online=EACCES cpuinfo=EACCES omp_num_threads=- omp_thread_limit=1\n"
+    "MARK t=9.0s step=gliner_loaded torch=ja rss=-\n"
+    "EXTRACT ms=412\n"
+)
+
+
+def test_trace_facts_and_the_variant_line() -> None:
+    facts = diag.trace_facts(TRACE_WITH_FACTS)
+    assert facts["torch_threads"] == "8"
+    assert facts["present"] == "EACCES"
+    assert facts["ms_extract"] == "412"
+    assert diag.trace_facts("") == {"ms_extract": "-"}
+    variant = diag.DETECT_VARIANTS[0]
+    ok = {"ok": True, "result": "result=ok events=-", "tail": "", "exit": 0}
+    assert diag.variant_line(variant, ok, TRACE_WITH_FACTS) == (
+        "DETECT-VARIANT name=unjailed ok=ja ms_extract=412 threads=8 cpu_cap=NO_AVX interop=8 cpu_count=8 "
+        "affinity=8:0-7 present=EACCES possible=EACCES online=EACCES cpuinfo=EACCES omp_num_threads=- "
+        "omp_thread_limit=1 result=ok tail=-"
+    )
+    hung = {"ok": False, "result": "result=fail:timeout events=-", "tail": "state=R x" * 400, "exit": None}
+    line = diag.variant_line(variant, hung, "")
+    assert line.startswith("DETECT-VARIANT name=unjailed ok=nein ms_extract=- threads=- cpu_cap=- interop=- ")
+    assert " result=fail:timeout tail=state=R" in line
+    assert len(line.partition(" tail=")[2]) == diag.VARIANT_TAIL_CHARS
+
+
+def test_the_detect_thread_setting() -> None:
+    assert profile_work.thread_count("-") is None
+    assert profile_work.thread_count("cpu") == (os.cpu_count() or 1)
+    with pytest.raises(profile_work.WorkFailed, match="usage"):
+        profile_work.thread_count("4")
+    # A bad thread word ends the run before anything is loaded.
+    assert profile_work.main(["detect", "/models", "/work", "60", "many"]) == 1
+
+
+def test_cpu_facts_is_one_line_with_every_key() -> None:
+    line = profile_work.cpu_facts()
+    assert line.startswith("FACTS torch_threads=")
+    keys = [part.partition("=")[0] for part in line.split()[1:]]
+    assert keys == [
+        "torch_threads",
+        "interop",
+        "cpu_cap",
+        "cpu_count",
+        "affinity",
+        "present",
+        "possible",
+        "online",
+        "cpuinfo",
+        "omp_num_threads",
+        "omp_thread_limit",
+    ]
+    assert "\n" not in line
+
+
+def test_readable_names_the_errno_of_a_missing_file(tmp_path: Path) -> None:
+    assert profile_work._readable(str(tmp_path / "absent")) == "ENOENT"
+    (tmp_path / "present").write_text("0-3\n", encoding="ascii")
+    assert profile_work._readable(str(tmp_path / "present")) == "0-3"
+
+
+def test_the_trace_takes_extra_lines(tmp_path: Path) -> None:
+    was_enabled = faulthandler.is_enabled()
+    trace = profile_work.Trace(tmp_path, 60.0)
+    try:
+        trace.line("EXTRACT ms=5")
+    finally:
+        trace.close()
+        if was_enabled and sys.__stderr__ is not None:
+            faulthandler.enable(file=sys.__stderr__)
+    assert "EXTRACT ms=5\n" in (tmp_path / profile_work.TRACE_FILE).read_text(encoding="ascii")

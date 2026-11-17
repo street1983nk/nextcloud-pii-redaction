@@ -9,7 +9,7 @@ deny_connect (jail_layers.py deny-connect) and compares.
     python -I profile_work.py module <child> <args...>   a product child (render, placeholder) as __main__
     python -I profile_work.py precheck <pdf> <docx>       the intake checks of the pre-check
     python -I profile_work.py sanitize <docx> <out>       the sanitizer on a DOCX
-    python -I profile_work.py detect <models root> <work> [<dump every s>]
+    python -I profile_work.py detect <models root> <work> [<dump every s> [<threads>]]
                                                           Presidio with de_core_news_lg and GLiNER2, offline
 
 detect writes <work>/detect-trace.txt (sandbox run of cfb428a: on arm64 it
@@ -17,6 +17,15 @@ ran into the 900 s limit with nothing on stdout or stderr): a MARK line after
 each step (seconds since start, torch loaded or not, VmRSS), the Python stack
 of every thread each <dump every s> seconds (faulthandler, also on SIGUSR1
 and on a fatal signal). The test reads it when the run times out.
+
+Sandbox run of 335a80f (arm64): detect stopped after gliner_loaded, all
+stacks in gliner2 score_queries, one thread busy for 300 s, stderr "Error in
+cpuinfo: failed to parse the list of present processors"; amd64 extracted in
+0.4 s. So detect also writes a FACTS line (what torch and the kernel say about
+the CPUs, and whether /sys/devices/system/cpu/{present,possible,online} and
+/proc/cpuinfo are readable) and an EXTRACT line (ms of extract_entities).
+<threads> is "-" (unchanged, the product) or "cpu": OMP_NUM_THREADS and
+torch.set_num_threads fixed to os.cpu_count(), a measurement variant only.
 
 Exactly one line goes to stdout:
 
@@ -31,6 +40,7 @@ exists yet (plan 02-05, 02-19); this runs the intake functions they will run.
 The OCR profile runs Tesseract directly and needs no helper here.
 """
 
+import errno
 import faulthandler
 import os
 import runpy
@@ -50,6 +60,14 @@ DETECT_NAME: Final = "Mustermann"
 SPACY_FOLDER: Final = ("spacy", "de_core_news_lg-3.8.0")
 TRACE_FILE: Final = "detect-trace.txt"
 DUMP_EVERY_S: Final = 60.0
+THREADS_UNCHANGED: Final = "-"
+THREADS_CPU: Final = "cpu"
+CPU_FILES: Final = (
+    ("present", "/sys/devices/system/cpu/present"),
+    ("possible", "/sys/devices/system/cpu/possible"),
+    ("online", "/sys/devices/system/cpu/online"),
+    ("cpuinfo", "/proc/cpuinfo"),
+)
 
 
 class WorkFailed(Exception):
@@ -161,6 +179,11 @@ class Trace:
         self._file.write(f"MARK t={elapsed:.1f}s step={step} torch={torch} rss={_rss()}\n")
         self._file.flush()
 
+    def line(self, text: str) -> None:
+        """One extra line (FACTS, EXTRACT) in the trace file."""
+        self._file.write(f"{text}\n")
+        self._file.flush()
+
     def close(self) -> None:
         faulthandler.cancel_dump_traceback_later()
         if sys.platform != "win32":
@@ -169,13 +192,81 @@ class Trace:
         self._file.close()
 
 
-def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S) -> None:
+def _word(text: str) -> str:
+    """One blank-free word for a key=value line; - when empty."""
+    return "_".join(text.split()) or "-"
+
+
+def _readable(path: str) -> str:
+    """The first line of a small kernel file as one word (cpuinfo: ok), or the errno name when it cannot be read."""
+    try:
+        with Path(path).open(encoding="ascii", errors="replace") as handle:
+            first = handle.readline()
+    except OSError as exc:
+        return errno.errorcode.get(exc.errno or 0, "OSError")
+    return "ok" if path == "/proc/cpuinfo" else _word(first)
+
+
+def _affinity() -> str:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return "-"
+    try:
+        cpus = sorted(getter(0))
+    except OSError:
+        return "error"
+    return f"{len(cpus)}:{cpus[0]}-{cpus[-1]}" if cpus else "0"
+
+
+def cpu_facts() -> str:
+    """What torch, os and the kernel files say about the CPUs, one FACTS line; never raises."""
+    parts: list[str] = []
+    torch = sys.modules.get("torch")
+    for key, call in (
+        ("torch_threads", "get_num_threads"),
+        ("interop", "get_num_interop_threads"),
+    ):
+        value = "-"
+        if torch is not None:
+            try:
+                value = str(getattr(torch, call)())
+            except Exception as exc:
+                value = f"error:{type(exc).__name__}"
+        parts.append(f"{key}={value}")
+    capability = "-"
+    if torch is not None:
+        try:
+            getter = getattr(torch.backends.cpu, "get_cpu_capability", None)
+            capability = _word(str(getter())) if getter is not None else "absent"
+        except Exception as exc:
+            capability = f"error:{type(exc).__name__}"
+    parts += [f"cpu_cap={capability}", f"cpu_count={os.cpu_count()}", f"affinity={_affinity()}"]
+    parts += [f"{name}={_readable(path)}" for name, path in CPU_FILES]
+    for name in ("OMP_NUM_THREADS", "OMP_THREAD_LIMIT"):
+        parts.append(f"{name.lower()}={_word(os.environ.get(name, ''))}")
+    return "FACTS " + " ".join(parts)
+
+
+def thread_count(spec: str) -> int | None:
+    """None for the product setting, the CPU count for "cpu"; anything else is a usage error."""
+    if spec == THREADS_UNCHANGED:
+        return None
+    if spec == THREADS_CPU:
+        return os.cpu_count() or 1
+    raise WorkFailed("usage")
+
+
+def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S, threads: str = THREADS_UNCHANGED) -> None:
     """Load both detectors from local folders, offline as the detection child will be, and find a name."""
+    count = thread_count(threads)
     use_work_folder_as_temp(work)
+    if count is not None:
+        # Before torch is imported: OpenMP reads it when it loads.
+        os.environ["OMP_NUM_THREADS"] = str(count)
     trace = Trace(work, every_s)
     try:
         trace.mark("start")
-        _detect(models, trace)
+        _detect(models, trace, count)
         trace.mark("done")
     except BaseException as exc:
         trace.mark(f"raised:{type(exc).__name__}")
@@ -184,7 +275,7 @@ def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S) -> None:
         trace.close()
 
 
-def _detect(models: Path, trace: Trace) -> None:
+def _detect(models: Path, trace: Trace, threads: int | None = None) -> None:
     from pii_redaction_backend import offline
 
     offline.configure()
@@ -193,6 +284,11 @@ def _detect(models: Path, trace: Trace) -> None:
     from presidio_analyzer.nlp_engine import SpacyNlpEngine
 
     trace.mark("presidio_imported")
+    if threads is not None:
+        import torch
+
+        torch.set_num_threads(threads)
+    trace.line(cpu_facts())
     engine = SpacyNlpEngine(models=[{"lang_code": "de", "model_name": str(models.joinpath(*SPACY_FOLDER))}])
     engine.load()
     trace.mark("spacy_loaded")
@@ -206,7 +302,9 @@ def _detect(models: Path, trace: Trace) -> None:
     trace.mark("gliner_imported")
     model = GLiNER2.from_pretrained(str(_gliner_folder(models)))
     trace.mark("gliner_loaded")
+    begun = time.monotonic()
     entities = model.extract_entities(DETECT_TEXT, ["person", "location"])
+    trace.line(f"EXTRACT ms={int((time.monotonic() - begun) * 1000)}")
     trace.mark("gliner_extracted")
     if DETECT_NAME not in str(entities):
         raise WorkFailed("gliner_missed")
@@ -223,6 +321,8 @@ def work(argv: list[str]) -> None:
         detect(Path(argv[1]), Path(argv[2]))
     elif len(argv) == 4 and argv[0] == "detect":
         detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]))
+    elif len(argv) == 5 and argv[0] == "detect":
+        detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]), argv[4])
     else:
         raise WorkFailed("usage")
 
