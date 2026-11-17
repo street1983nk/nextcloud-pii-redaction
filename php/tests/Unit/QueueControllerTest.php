@@ -7,6 +7,7 @@ namespace OCA\PiiRedaction\Tests\Unit;
 use OCA\PiiRedaction\AppInfo\Application;
 use OCA\PiiRedaction\Controller\QueueController;
 use OCA\PiiRedaction\Db\Job;
+use OCA\PiiRedaction\Db\JobEventMapper;
 use OCA\PiiRedaction\Model\Status;
 use OCA\PiiRedaction\Model\Task;
 use OCP\AppFramework\Http;
@@ -159,7 +160,12 @@ final class QueueControllerTest extends TestCase {
 
 		$data = self::data($this->controller()->claim());
 
-		self::assertSame(['jobId', 'task', 'token', 'fileId', 'userId', 'etag', 'leaseSeconds'], array_keys($data));
+		self::assertSame(
+			['jobId', 'task', 'token', 'fileId', 'userId', 'etag', 'leaseSeconds', 'expected', 'confirmed'],
+			array_keys($data),
+		);
+		self::assertSame('pdf', $data['expected']);
+		self::assertFalse($data['confirmed']);
 		self::assertSame($job->getId(), $data['jobId']);
 		self::assertSame(42, $data['fileId']);
 		self::assertSame('alice', $data['userId']);
@@ -278,13 +284,127 @@ final class QueueControllerTest extends TestCase {
 		self::assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
 	}
 
-	public function testAConfirmIsNotYetHandledAndNeverPurges(): void {
+	public function testAckConfirmFromAnalyzingWaitsForTheInitiator(): void {
 		$claim = $this->claimedAnalyze();
 		$response = $this->controller()->ack($claim['jobId'], $claim['token'], 'confirm', null, null, null, null, null);
-		self::assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
+		self::assertSame(Http::STATUS_OK, $response->getStatus());
 		$job = $this->job($claim['jobId']);
-		self::assertSame(Status::Analyzing, $job->getStatusEnum());
-		self::assertSame(Task::Analyze, $job->getTaskEnum());
+		self::assertSame(Status::Confirm, $job->getStatusEnum());
+		self::assertNull($job->getTaskEnum());
+		self::assertContains(JobEventMapper::ACTION_SIGNATURE_NOTICE, $this->actions($claim['jobId']));
+		self::assertSame([], $this->sent);
+	}
+
+	public function testAckConfirmOutsideAnalyzeIs409(): void {
+		$claim = $this->claimedApply();
+		$response = $this->controller()->ack($claim['jobId'], $claim['token'], 'confirm', null, null, null, null, null);
+		self::assertSame(Http::STATUS_CONFLICT, $response->getStatus());
+		self::assertSame(Status::Applying, $this->job($claim['jobId'])->getStatusEnum());
+	}
+
+	public function testAClaimNamesTheExpectedFormatOfEachType(): void {
+		foreach ([
+			'application/pdf' => 'pdf',
+			'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+			'application/vnd.oasis.opendocument.text' => 'odt',
+		] as $mime => $format) {
+			$this->cleanTables();
+			$this->mime = $mime;
+			self::assertNotNull($this->service->start('alice', 42)['job']);
+			self::assertSame($format, self::data($this->controller()->claim())['expected'], $mime);
+		}
+	}
+
+	public function testAFileOfAnotherTypeByNowHasNoExpectedFormat(): void {
+		self::assertNotNull($this->service->start('alice', 42)['job']);
+		$this->mime = 'image/png';
+		self::assertNull(self::data($this->controller()->claim())['expected']);
+	}
+
+	public function testTheClaimSaysConfirmedOnlyAfterTheConfirmation(): void {
+		$claim = $this->claimedAnalyze();
+		$this->controller()->ack($claim['jobId'], $claim['token'], 'confirm', null, null, null, null, null);
+		$this->service->confirmSignature($this->job($claim['jobId']), 'alice');
+
+		$again = self::data($this->controller()->claim());
+		self::assertSame($claim['jobId'], $again['jobId']);
+		self::assertTrue($again['confirmed']);
+	}
+
+	public function testApplyClaimsCarryNoPrecheckFields(): void {
+		$claim = $this->claimedAnalyze();
+		$this->ackReview($claim);
+		$this->service->toApproved($this->job($claim['jobId']), 'alice');
+		$data = self::data($this->controller()->claim());
+		self::assertSame('apply', $data['task']);
+		self::assertArrayNotHasKey('expected', $data);
+		self::assertArrayNotHasKey('confirmed', $data);
+	}
+
+	/**
+	 * @return list<array{0: mixed, 1: mixed, 2: mixed}>
+	 */
+	public static function badFlags(): array {
+		return [
+			['yes', null, null],
+			[1, null, null],
+			[null, -1, null],
+			[null, 10001, null],
+			[null, '3', null],
+			[null, 2.5, null],
+			[null, null, 'true'],
+		];
+	}
+
+	#[\PHPUnit\Framework\Attributes\DataProvider('badFlags')]
+	public function testAckReviewWithAFlagOutOfTypeOrRangeIs400(mixed $macros, mixed $links, mixed $owner): void {
+		$claim = $this->claimedAnalyze();
+		$response = $this->controller()->ack(
+			$claim['jobId'], $claim['token'], 'review', null, 3, 'etag-1', ['width' => 992, 'height' => 1403], null,
+			$macros, $links, $owner,
+		);
+		self::assertSame(Http::STATUS_BAD_REQUEST, $response->getStatus());
+		self::assertSame(Status::Analyzing, $this->job($claim['jobId'])->getStatusEnum());
+	}
+
+	public function testAckReviewRecordsTheFlagsItGot(): void {
+		$claim = $this->claimedAnalyze();
+		$response = $this->controller()->ack(
+			$claim['jobId'], $claim['token'], 'review', null, 3, 'etag-1', ['width' => 992, 'height' => 1403], null,
+			true, 10000, true,
+		);
+		self::assertSame(Http::STATUS_OK, $response->getStatus());
+		$actions = $this->actions($claim['jobId']);
+		self::assertContains(JobEventMapper::ACTION_MACROS_REMOVED, $actions);
+		self::assertContains(JobEventMapper::ACTION_EXTERNAL_LINKS_REMOVED, $actions);
+		self::assertContains(JobEventMapper::ACTION_OWNER_PROTECTION_DROPPED, $actions);
+		self::assertSame(Status::Review, $this->job($claim['jobId'])->getStatusEnum());
+	}
+
+	public function testAckReviewWithoutFlagsRecordsNone(): void {
+		$claim = $this->claimedAnalyze();
+		self::assertSame(Http::STATUS_OK, $this->ackReview($claim)->getStatus());
+		$actions = $this->actions($claim['jobId']);
+		self::assertNotContains(JobEventMapper::ACTION_MACROS_REMOVED, $actions);
+		self::assertNotContains(JobEventMapper::ACTION_EXTERNAL_LINKS_REMOVED, $actions);
+		self::assertNotContains(JobEventMapper::ACTION_OWNER_PROTECTION_DROPPED, $actions);
+	}
+
+	/**
+	 * @return list<array{0: string}>
+	 */
+	public static function precheckReasons(): array {
+		return [['unsafe_content'], ['wrong_type'], ['damaged'], ['too_large'], ['encrypted_document']];
+	}
+
+	#[\PHPUnit\Framework\Attributes\DataProvider('precheckReasons')]
+	public function testAckFailedTakesThePrecheckReasons(string $reason): void {
+		$claim = $this->claimedAnalyze();
+		$response = $this->controller()->ack($claim['jobId'], $claim['token'], 'failed', $reason, null, null, null, null);
+		self::assertSame(Http::STATUS_OK, $response->getStatus());
+		$job = $this->job($claim['jobId']);
+		self::assertSame(Status::Failed, $job->getStatusEnum());
+		self::assertSame($reason, $job->getReason());
 	}
 
 	public function testAckWithAForeignTokenIs409(): void {
