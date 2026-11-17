@@ -27,6 +27,18 @@ the CPUs, and whether /sys/devices/system/cpu/{present,possible,online} and
 <threads> is "-" (unchanged, the product) or "cpu": OMP_NUM_THREADS and
 torch.set_num_threads fixed to os.cpu_count(), a measurement variant only.
 
+    python -I profile_work.py torchbench <work>           torch facts and three timings
+
+Sandbox run of c2ac178 (arm64): all four detect variants hung 120 s, the
+unjailed one too, with cpuinfo=ok and /sys readable; amd64 extracted in
+about 230 ms. torchbench writes <work>/torch-bench.txt, one BENCH line per
+step: facts (torch version, the summary of torch.__config__.parallel_info(),
+threads, mkldnn/ACL flags), a 512x512 float32 matmul x20, the tensor work of
+gliner2 SpanMarkerV0.score_queries in the shapes of the detect text x20, and
+the same with torch.set_flush_denormal(True). Each step runs in its own
+thread with BENCH_STEP_S; a step that does not finish writes ms=timeout and
+the next step still runs, so a hang still yields a line.
+
 Exactly one line goes to stdout:
 
     result=<ok|fail:<word>> events=<comma separated audit events|->
@@ -47,6 +59,7 @@ import runpy
 import signal
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -68,6 +81,29 @@ CPU_FILES: Final = (
     ("online", "/sys/devices/system/cpu/online"),
     ("cpuinfo", "/proc/cpuinfo"),
 )
+BENCH_FILE: Final = "torch-bench.txt"
+BENCH_STEPS: Final = ("facts", "matmul", "score_queries", "score_queries_ftz")
+BENCH_STEP_S: Final = 10.0
+BENCH_REPEAT: Final = 20
+MATMUL_SIZE: Final = 512
+# gliner2 2.1.0 layers.py SpanMarkerV0.score_queries for the detect text:
+# batch 1, two queries (person, location), mDeBERTa-v3-base hidden size 768,
+# max_width 8 (configuration.py default), about 32 tokens. The hot frame of
+# the arm64 hang was layers.py:487, torch.matmul(queries, final_linear.weight)
+# with the weight of the 4H -> H layer, [768, 3072].
+SQ_QUERIES: Final = 2
+SQ_TOKENS: Final = 32
+SQ_HIDDEN: Final = 768
+SQ_WIDTH: Final = 8
+# The lines of torch.__config__.parallel_info() worth a key (key : value).
+PARALLEL_KEYS: Final = {
+    "at::get_num_threads()": "aten_threads",
+    "at::get_num_interop_threads()": "aten_interop",
+    "omp_get_max_threads()": "omp_max_threads",
+    "mkl_get_max_threads()": "mkl_max_threads",
+    "std::thread::hardware_concurrency()": "hw_concurrency",
+    "ATen parallel backend": "backend",
+}
 
 
 class WorkFailed(Exception):
@@ -310,6 +346,158 @@ def _detect(models: Path, trace: Trace, threads: int | None = None) -> None:
         raise WorkFailed("gliner_missed")
 
 
+class BenchHung(Exception):
+    """A bench step is still running in its thread: main writes the result line and leaves with os._exit."""
+
+
+def parallel_summary(text: str) -> str:
+    """torch.__config__.parallel_info() as key=value words (PARALLEL_KEYS, openmp, mkldnn); - for a missing key."""
+    values: dict[str, str] = {}
+    openmp = mkldnn = "-"
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("OpenMP "):
+            openmp = _word(line.split("(")[0].removeprefix("OpenMP "))
+        elif "MKL-DNN" in line or "oneDNN" in line:
+            versions = [word for word in line.split() if word.startswith("v") and word[1:2].isdigit()]
+            mkldnn = versions[0] if versions else "ja"
+        key, sep, value = line.rpartition(":")
+        if sep and key.strip() in PARALLEL_KEYS:
+            values[PARALLEL_KEYS[key.strip()]] = _word(value)
+    words = [f"{name}={values.get(name, '-')}" for name in PARALLEL_KEYS.values()]
+    return " ".join([*words, f"openmp={openmp}", f"mkldnn_version={mkldnn}"])
+
+
+def _flag(call: Callable[[], object] | None) -> str:
+    if call is None:
+        return "absent"
+    try:
+        return "ja" if call() else "nein"
+    except Exception as exc:
+        return f"error:{type(exc).__name__}"
+
+
+def torch_facts() -> str:
+    """The facts step: version, parallel_info summary, threads, mkldnn/ACL/MKL/OpenMP flags, CPU capability."""
+    import torch
+
+    backends = torch.backends
+    capability = getattr(backends.cpu, "get_cpu_capability", None)
+    parts = [
+        f"torch={_word(torch.__version__)}",
+        parallel_summary(torch.__config__.parallel_info()),
+        f"num_threads={torch.get_num_threads()}",
+        f"interop={torch.get_num_interop_threads()}",
+        f"mkldnn={_flag(backends.mkldnn.is_available)}",
+        f"acl={_flag(getattr(backends.mkldnn, 'is_acl_available', None))}",
+        f"config_acl={'ja' if 'ACL' in torch.__config__.show() else 'nein'}",
+        f"mkl={_flag(backends.mkl.is_available)}",
+        f"omp_avail={_flag(backends.openmp.is_available)}",
+        f"cpu_cap={_word(str(capability())) if capability is not None else 'absent'}",
+        f"omp_thread_limit={_word(os.environ.get('OMP_THREAD_LIMIT', ''))}",
+        f"omp_num_threads={_word(os.environ.get('OMP_NUM_THREADS', ''))}",
+    ]
+    return " ".join(parts)
+
+
+def _ms(begun: float) -> str:
+    return f"{(time.perf_counter() - begun) * 1000:.1f}"
+
+
+def _matmul() -> str:
+    import torch
+
+    left = torch.randn(MATMUL_SIZE, MATMUL_SIZE)
+    right = torch.randn(MATMUL_SIZE, MATMUL_SIZE)
+    begun = time.perf_counter()
+    for _ in range(BENCH_REPEAT):
+        torch.matmul(left, right)
+    return f"ms={_ms(begun)}"
+
+
+def _score_queries() -> str:
+    """The tensor work of gliner2 SpanMarkerV0.score_queries (layers.py 441 to 502), random weights, x BENCH_REPEAT."""
+    import torch
+    from torch.nn import functional
+
+    hidden, wide = SQ_HIDDEN, 4 * SQ_HIDDEN
+    h = torch.randn(1, SQ_TOKENS, hidden).relu()
+    queries = torch.randn(1, SQ_QUERIES, hidden)
+    first = torch.randn(wide, 2 * hidden) / hidden
+    first_bias = torch.randn(wide)
+    final = torch.randn(hidden, wide) / wide
+    final_bias = torch.randn(hidden)
+    first_ms = "-"
+    begun = time.perf_counter()
+    for index in range(BENCH_REPEAT):
+        start_hidden = functional.linear(h, first[:, :hidden], None)
+        end_hidden = functional.linear(h, first[:, hidden:], None)
+        end_padded = functional.pad(end_hidden, (0, 0, 0, SQ_WIDTH - 1))
+        windows = end_padded.unfold(1, SQ_WIDTH, 1).permute(0, 1, 3, 2)
+        spans = (start_hidden.unsqueeze(2) + windows + first_bias).relu().reshape(1, SQ_TOKENS * SQ_WIDTH, -1)
+        folded = torch.matmul(queries, final)  # layers.py:487
+        bias = torch.matmul(queries, final_bias)
+        torch.baddbmm(bias[:, None, :], spans, folded.transpose(1, 2))
+        if index == 0:
+            first_ms = _ms(begun)
+    return f"ms={_ms(begun)} first_ms={first_ms}"
+
+
+def _score_queries_ftz() -> str:
+    import torch
+
+    flushed = torch.set_flush_denormal(True)
+    return f"{_score_queries()} ftz={'ja' if flushed else 'nein'}"
+
+
+BENCH_CALLS: Final[dict[str, Callable[[], str]]] = {
+    "facts": torch_facts,
+    "matmul": _matmul,
+    "score_queries": _score_queries,
+    "score_queries_ftz": _score_queries_ftz,
+}
+
+
+def bench_step(step: str, budget_s: float) -> tuple[str, bool]:
+    """The BENCH line of one step run in its own thread, and whether that thread still runs after budget_s."""
+    box: list[str] = []
+
+    def run() -> None:
+        import torch
+
+        try:
+            with torch.inference_mode():
+                box.append(BENCH_CALLS[step]())
+        except Exception as exc:
+            box.append(f"ms=fail:{type(exc).__name__}")
+
+    thread = threading.Thread(target=run, name=f"bench-{step}", daemon=True)
+    thread.start()
+    thread.join(budget_s)
+    if thread.is_alive():
+        return f"BENCH step={step} ms=timeout", True
+    return f"BENCH step={step} {box[0] if box else 'ms=fail:nothing'}", False
+
+
+def torchbench(work: Path, budget_s: float = BENCH_STEP_S) -> None:
+    """Every BENCH_STEPS step into <work>/BENCH_FILE; raises BenchHung when a step thread is left running."""
+    use_work_folder_as_temp(work)
+    hung = False
+    with (work / BENCH_FILE).open("a", encoding="ascii", errors="replace") as handle:
+        handle.write("BENCH step=start\n")
+        handle.flush()
+        import torch
+
+        torch.manual_seed(0)
+        for step in BENCH_STEPS:
+            line, still_running = bench_step(step, budget_s)
+            handle.write(f"{line}\n")
+            handle.flush()
+            hung = hung or still_running
+    if hung:
+        raise BenchHung
+
+
 def work(argv: list[str]) -> None:
     if len(argv) >= 2 and argv[0] == "module":
         run_module(argv[1], argv[2:])
@@ -323,6 +511,8 @@ def work(argv: list[str]) -> None:
         detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]))
     elif len(argv) == 5 and argv[0] == "detect":
         detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]), argv[4])
+    elif len(argv) == 2 and argv[0] == "torchbench":
+        torchbench(Path(argv[1]))
     else:
         raise WorkFailed("usage")
 
@@ -346,6 +536,10 @@ def main(argv: list[str]) -> int:
     sys.addaudithook(_recorder(seen))
     try:
         work(argv)
+    except BenchHung:
+        # A thread still spins in a torch call: no interpreter shutdown that could wait for it.
+        print(result_line("ok", seen), flush=True)
+        os._exit(0)
     except WorkFailed as failed:
         print(result_line(f"fail:{failed.word}", seen), flush=True)
         return 1

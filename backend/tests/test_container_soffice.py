@@ -43,7 +43,15 @@ the lasting checks:
         (on a timeout tail= holds state, threads, cpu_s, wchan, top_threads, stderr= and trace= of the child)
     ZOMBIES after_job=<zombies of the job group after convert()> pgrp=<groups> other_uid_zombies=<n>
         subreaper=<ja|nein>   (a gate: after_job=0)
-    DETECT-VARIANT name=<unjailed|jailed-sys-cpu-read|jailed-threads-cpu|jailed-product> ok=<ja|nein>
+    DETECT-STACK name=<variant> dump=<i>/<n> at=<0:00:30|0:01:00|0:01:30|harness> threads=<n>
+        stacks=<thread < module:line func < ... || ...>   (one per stack dump of a variant run)
+    TORCH-FACTS env=<unjailed|jailed-product> arch= ok= result= torch= aten_threads= aten_interop=
+        omp_max_threads= mkl_max_threads= hw_concurrency= backend= openmp= mkldnn_version= num_threads= interop=
+        mkldnn= acl= config_acl= mkl= omp_avail= cpu_cap= omp_thread_limit= omp_num_threads=
+        matmul512_x20_ms= score_queries_x20_ms= score_queries_first_ms= score_queries_ftz_x20_ms=
+        score_queries_ftz_first_ms= ftz= tail=   (a measurement; ms=timeout for a step past BENCH_STEP_S)
+    DETECT-VARIANT name=<unjailed|jailed-sys-cpu-read|jailed-threads-cpu|jailed-product|unjailed-no-omp-limit|
+        jailed-product-no-omp-limit> ok=<ja|nein>
         ms_extract=<ms|-> threads=<torch threads> cpu_cap=<...> interop= cpu_count= affinity= present= possible=
         online= cpuinfo= omp_num_threads= omp_thread_limit= result=<word> tail=<...>   (a measurement)
 
@@ -76,6 +84,7 @@ import asyncio
 import contextlib
 import hashlib
 import os
+import platform
 import re
 import shutil
 import signal
@@ -99,7 +108,7 @@ from pii_redaction_backend.sandbox.profiles import PROFILES
 from pii_redaction_backend.sandbox.reaper import become_subreaper, reap_group
 from pii_redaction_backend.workers import child, soffice
 from tests.conftest import record_measurement
-from tests.profile_work import TRACE_FILE
+from tests.profile_work import BENCH_FILE, BENCH_STEP_S, BENCH_STEPS, TRACE_FILE
 
 pytestmark = [pytest.mark.container, pytest.mark.linux]
 
@@ -1149,23 +1158,41 @@ def condense_trace(text: str) -> str:
     """
     lines = text.splitlines()
     marks = [line.removeprefix("MARK ").strip() for line in lines if line.startswith("MARK ")]
-    starts = [index for index, line in enumerate(lines) if line.startswith((HARNESS_MARK, "Timeout ("))]
-    dump = lines[starts[-1] + 1 :] if starts else []
+    starts = _dump_starts(lines)
+    threads = _dump_threads(lines[starts[-1] + 1 :] if starts else [], TRACE_FRAMES)
+    text_out = f"marks={' ; '.join(marks) or '-'} dumps={len(starts)} last_dump={' || '.join(threads) or '-'}"
+    return _NOT_PRINTABLE.sub("?", text_out)[:TRACE_CHARS]
+
+
+def _dump_starts(lines: list[str]) -> list[int]:
+    """The index of each dump header: a faulthandler timer dump or the harness mark before SIGUSR1."""
+    return [index for index, line in enumerate(lines) if line.startswith((HARNESS_MARK, "Timeout ("))]
+
+
+def _dump_threads(dump: list[str], frames_kept: int) -> list[str]:
+    """Each thread of one dump as "<thread> < module:line func < ...", innermost first.
+
+    frames_kept counts the thread name as one entry.
+
+    A dump ends at the next MARK, FACTS or dump header line; faulthandler
+    lists the most recent call first.
+    """
     threads: list[str] = []
     frames: list[str] = []
     for line in dump:
+        if line.startswith((HARNESS_MARK, "Timeout (", "MARK ", "FACTS ", "EXTRACT ")):
+            break
         if line.startswith(("Thread ", "Current thread ")):
-            if frames or threads:
-                threads.append(" < ".join(frames[:TRACE_FRAMES]))
+            if frames:
+                threads.append(" < ".join(frames[:frames_kept]))
             frames = [line.split(" (")[0].replace("Current thread", "current")]
             continue
         match = _FRAME.match(line)
         if match is not None:
             frames.append(f"{_short_path(match['path'])}:{match['line']} {match['func'].strip()}")
     if frames:
-        threads.append(" < ".join(frames[:TRACE_FRAMES]))
-    text_out = f"marks={' ; '.join(marks) or '-'} dumps={len(starts)} last_dump={' || '.join(threads) or '-'}"
-    return _NOT_PRINTABLE.sub("?", text_out)[:TRACE_CHARS]
+        threads.append(" < ".join(frames[:frames_kept]))
+    return threads
 
 
 def read_trace(path: Path | None) -> str:
@@ -1189,16 +1216,23 @@ def _ask_for_a_dump(pid: int, trace: Path | None) -> None:
             os.kill(pid, sigusr1)
 
 
-async def _run_work(argv: list[str], profile: str, timeout_s: float, trace: Path | None = None) -> dict[str, object]:
+async def _run_work(
+    argv: list[str],
+    profile: str,
+    timeout_s: float,
+    trace: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     """exit, the result line of profile_work.py (or no-answer), the cleaned stderr tail, ok.
 
     On a timeout the tail is what /proc shows of the child and the condensed
     trace file (MARK lines, the last stacks), read before the group is killed.
-    "trace" holds the condensed trace of every run that has one.
+    "trace" holds the condensed trace of every run that has one. env replaces
+    the child environment of the profile (a measurement variant only).
     """
     process = await asyncio.create_subprocess_exec(
         *argv,
-        env=child.child_env(profile=profile),
+        env=dict(env) if env is not None else child.child_env(profile=profile),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -1374,7 +1408,20 @@ async def test_each_profile_does_its_work_with_connect_denied(
 # through jail_layers.py, never a product rule), (c) the product jail with
 # OMP_NUM_THREADS and torch.set_num_threads fixed to os.cpu_count(), (d) the
 # product jail unchanged. 120 s each, so a hang costs at most eight minutes.
+#
+# Sandbox run of c2ac178 (CI 44126012119): amd64 extracted in about 230 ms in
+# all four; arm64 hung 120 s in all four, the unjailed one too (cpuinfo=ok,
+# /sys readable), one thread at 100 % CPU, cpu_cap=SVE128. Jail and /sys are
+# out. Common to all: OMP_THREAD_LIMIT=1 from SAFE_ENV. Two more variants
+# without it, (e) unjailed and (f) the product jail; their environment is
+# SAFE_ENV minus OMP_THREAD_LIMIT, nothing else. A hang there costs two more
+# times 120 s. Every variant dumps the stacks of all threads every
+# VARIANT_DUMP_EVERY_S (30, 60, 90 s, and once more from the harness at
+# 120 s), each dump a DETECT-STACK line.
 VARIANT_TIMEOUT_S = 120.0
+VARIANT_DUMP_EVERY_S = 30.0
+STACK_FRAMES = 7
+STACK_CHARS = 2500
 SYS_CPU = "/sys/devices/system/cpu"
 VARIANT_TAIL_CHARS = 1500
 FACT_KEYS = (
@@ -1392,11 +1439,12 @@ FACT_KEYS = (
 
 @dataclass(frozen=True, slots=True)
 class DetectVariant:
-    """One way to run the detect work: its jail and its thread setting (profile_work.py detect <threads>)."""
+    """One way to run the detect work: its jail, its thread setting (profile_work.py detect <threads>), its env."""
 
     name: str
     jail: str
     threads: str = "-"
+    omp_limit: bool = True
 
 
 DETECT_VARIANTS = (
@@ -1404,12 +1452,39 @@ DETECT_VARIANTS = (
     DetectVariant("jailed-sys-cpu-read", "sys-cpu"),
     DetectVariant("jailed-threads-cpu", "product", "cpu"),
     DetectVariant("jailed-product", "product"),
+    DetectVariant("unjailed-no-omp-limit", "none", omp_limit=False),
+    DetectVariant("jailed-product-no-omp-limit", "product", omp_limit=False),
 )
+
+
+def variant_env(variant: DetectVariant) -> dict[str, str]:
+    """The child environment of detect; without OMP_THREAD_LIMIT for a variant with omp_limit=False."""
+    env = child.child_env(profile="detect")
+    if not variant.omp_limit:
+        env.pop("OMP_THREAD_LIMIT", None)
+    return env
+
+
+def stack_lines(name: str, text: str) -> list[str]:
+    """One DETECT-STACK line per stack dump in a trace: when (at=), how many threads, the innermost frames of each."""
+    lines = text.splitlines()
+    starts = _dump_starts(lines)
+    out: list[str] = []
+    for number, index in enumerate(starts, start=1):
+        header = lines[index]
+        at = "harness" if header.startswith(HARNESS_MARK) else header.partition("(")[2].partition(")")[0] or "-"
+        threads = _dump_threads(lines[index + 1 :], STACK_FRAMES)
+        line = (
+            f"DETECT-STACK name={name} dump={number}/{len(starts)} at={at} threads={len(threads)} "
+            f"stacks={' || '.join(threads) or '-'}"
+        )
+        out.append(_NOT_PRINTABLE.sub("?", line)[:STACK_CHARS])
+    return out
 
 
 def variant_argv(variant: DetectVariant, models: Path, out: Path) -> list[str]:
     """The command of one variant; sys-cpu is the product jail of detect plus read=SYS_CPU through the driver."""
-    argv = work_argv("detect", str(models), str(out), str(DETECT_DUMP_EVERY_S), variant.threads)
+    argv = work_argv("detect", str(models), str(out), str(VARIANT_DUMP_EVERY_S), variant.threads)
     if variant.jail == "none":
         return argv
     product = jail_argv("detect", argv, read=(str(models),), write=(str(out),))
@@ -1447,30 +1522,156 @@ def variant_line(variant: DetectVariant, run: Mapping[str, object], trace_text: 
 
 
 async def test_detect_variants_measure_the_arm64_hang(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """DETECT-VARIANT lines for (a) to (d); a measurement, the only gate is that each variant really ran."""
+    """DETECT-VARIANT and DETECT-STACK lines for (a) to (f); a measurement, the only gate is that each really ran.
+
+    Not a gate on purpose: arm64 detect hangs (deferred-items, 02-16); a real
+    gate for arm64 detect is due before the release.
+    """
     models = Path(os.environ.get("PII_MODELS", "/models"))
     if not (models / "gliner2").is_dir():
         pytest.skip("no models for detect")
     lines: list[str] = []
+    stacks: list[str] = []
     measured: dict[str, object] = {}
     not_run: list[str] = []
     for variant in DETECT_VARIANTS:
         out = tmp_path / f"detect-{variant.name}"
         out.mkdir()
         trace = out / TRACE_FILE
-        run = await _run_work(variant_argv(variant, models, out), "detect", VARIANT_TIMEOUT_S, trace)
+        argv = variant_argv(variant, models, out)
+        run = await _run_work(argv, "detect", VARIANT_TIMEOUT_S, trace, variant_env(variant))
         text = ""
         with contextlib.suppress(OSError):
             text = trace.read_text(encoding="ascii", errors="replace")
         lines.append(variant_line(variant, run, text))
+        stacks += stack_lines(variant.name, text)
         measured[variant.name] = {**run, "facts": trace_facts(text)}
         if not really_ran(run):
             not_run.append(variant.name)
     with capsys.disabled():
         print()
-        for line in lines:
+        for line in [*lines, *stacks]:
             print(line)
     record_measurement("detect_variants", measured)
+    assert not_run == [], "\n".join(lines)
+
+
+# -- torch on each architecture: facts and a micro benchmark in the detect child env ----------
+
+# What the hang is made of, without the models: the TORCH-FACTS line of
+# profile_work.py torchbench, once unjailed and once in the product jail of
+# detect, both with SAFE_ENV (OMP_THREAD_LIMIT=1). Each step has
+# BENCH_STEP_S in the child (a hung step writes ms=timeout, the next one
+# still runs); BENCH_TIMEOUT_S covers the torch import and all steps. Normal
+# cost: a few seconds per run; two hung score_queries steps add 20 s per run.
+# The steps run in their own threads: torch.set_flush_denormal and the
+# OpenMP pool are per thread, which is what OMP_THREAD_LIMIT=1 leaves anyway.
+BENCH_ENVS = ("unjailed", "jailed-product")
+BENCH_TIMEOUT_S = 60.0 + len(BENCH_STEPS) * BENCH_STEP_S
+TORCH_FACT_KEYS = (
+    "torch",
+    "aten_threads",
+    "aten_interop",
+    "omp_max_threads",
+    "mkl_max_threads",
+    "hw_concurrency",
+    "backend",
+    "openmp",
+    "mkldnn_version",
+    "num_threads",
+    "interop",
+    "mkldnn",
+    "acl",
+    "config_acl",
+    "mkl",
+    "omp_avail",
+    "cpu_cap",
+    "omp_thread_limit",
+    "omp_num_threads",
+)
+# Step of torchbench and the key of its timing in the TORCH-FACTS line.
+TORCH_TIMINGS = (
+    ("matmul", "matmul512_x20_ms"),
+    ("score_queries", "score_queries_x20_ms"),
+    ("score_queries_ftz", "score_queries_ftz_x20_ms"),
+)
+
+
+def bench_argv(env: str, out: Path) -> list[str]:
+    """profile_work.py torchbench unjailed, or in the product jail of detect with out as its only write path."""
+    argv = work_argv("torchbench", str(out))
+    if env == "unjailed":
+        return argv
+    if env == "jailed-product":
+        return jail_argv("detect", argv, write=(str(out),))
+    msg = f"unknown bench env {env!r}"
+    raise ValueError(msg)
+
+
+def bench_values(text: str) -> dict[str, str]:
+    """The BENCH lines of torch-bench.txt as one dict: the facts keys, <step>=<ms>, first ms and ftz of the steps."""
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.startswith("BENCH "):
+            continue
+        pairs: dict[str, str] = {}
+        for part in line.split()[1:]:
+            key, sep, value = part.partition("=")
+            if sep:
+                pairs[key] = value
+        step = pairs.pop("step", "-")
+        if step == "facts":
+            values.update(pairs)
+        elif step in BENCH_STEPS:
+            values[step] = pairs.get("ms", "-")
+            if "first_ms" in pairs:
+                values[f"{step}_first_ms"] = pairs["first_ms"]
+            if "ftz" in pairs:
+                values["ftz"] = pairs["ftz"]
+    return values
+
+
+def torch_facts_line(env: str, arch: str, run: Mapping[str, object], text: str) -> str:
+    """The TORCH-FACTS line of one bench run; - for every value the run did not write."""
+    values = bench_values(text)
+    result = str(run["result"]).partition(" events=")[0].removeprefix("result=")
+    facts = " ".join(f"{key}={values.get(key, '-')}" for key in TORCH_FACT_KEYS)
+    timings = " ".join(
+        f"{key}={values.get(step, '-')} {step}_first_ms={values.get(f'{step}_first_ms', '-')}"
+        if step != "matmul"
+        else f"{key}={values.get(step, '-')}"
+        for step, key in TORCH_TIMINGS
+    )
+    tail = "-" if run["ok"] else _NOT_PRINTABLE.sub("?", str(run["tail"] or "-"))[:VARIANT_TAIL_CHARS]
+    return (
+        f"TORCH-FACTS env={env} arch={arch} ok={_ja(run['ok'])} result={result} {facts} {timings} "
+        f"ftz={values.get('ftz', '-')} tail={tail}"
+    )
+
+
+async def test_torch_facts_and_a_micro_benchmark_per_architecture(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """TORCH-FACTS unjailed and in the product jail of detect; a measurement, the gate is only that it really ran."""
+    lines: list[str] = []
+    measured: dict[str, object] = {}
+    not_run: list[str] = []
+    for env in BENCH_ENVS:
+        out = tmp_path / f"torchbench-{env}"
+        out.mkdir()
+        run = await _run_work(bench_argv(env, out), "detect", BENCH_TIMEOUT_S)
+        text = ""
+        with contextlib.suppress(OSError):
+            text = (out / BENCH_FILE).read_text(encoding="ascii", errors="replace")
+        lines.append(torch_facts_line(env, platform.machine(), run, text))
+        measured[env] = {**run, "bench": bench_values(text)}
+        if not really_ran(run):
+            not_run.append(env)
+    with capsys.disabled():
+        print()
+        for line in lines:
+            print(line)
+    record_measurement("torch_facts", measured)
     assert not_run == [], "\n".join(lines)
 
 

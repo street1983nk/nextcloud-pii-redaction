@@ -12,7 +12,9 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import pymupdf
@@ -714,16 +716,28 @@ def test_uid_is_a_number() -> None:
 # -- detect on arm64: the measurement variants ---------------------------------------------------
 
 
-def test_the_four_detect_variants_and_their_commands(tmp_path: Path) -> None:
+def test_the_six_detect_variants_and_their_commands(tmp_path: Path) -> None:
     models, out = tmp_path / "models", tmp_path / "out"
     by_name = {variant.name: variant for variant in diag.DETECT_VARIANTS}
-    assert list(by_name) == ["unjailed", "jailed-sys-cpu-read", "jailed-threads-cpu", "jailed-product"]
-    work = diag.work_argv("detect", str(models), str(out), str(diag.DETECT_DUMP_EVERY_S), "-")
+    assert list(by_name) == [
+        "unjailed",
+        "jailed-sys-cpu-read",
+        "jailed-threads-cpu",
+        "jailed-product",
+        "unjailed-no-omp-limit",
+        "jailed-product-no-omp-limit",
+    ]
+    # Stacks at 30, 60 and 90 s, before the 120 s kill.
+    assert diag.VARIANT_TIMEOUT_S / diag.VARIANT_DUMP_EVERY_S >= 3
+    work = diag.work_argv("detect", str(models), str(out), str(diag.VARIANT_DUMP_EVERY_S), "-")
     # (a) the work itself, no jail.
     assert diag.variant_argv(by_name["unjailed"], models, out) == work
     # (d) exactly the product jail of detect.
     product = jail.jail_argv("detect", work, read=(str(models),), write=(str(out),))
     assert diag.variant_argv(by_name["jailed-product"], models, out) == product
+    # (e) and (f): the commands of (a) and (d); only the environment differs.
+    assert diag.variant_argv(by_name["unjailed-no-omp-limit"], models, out) == work
+    assert diag.variant_argv(by_name["jailed-product-no-omp-limit"], models, out) == product
     # (c) the product jail, only the thread argument differs.
     threads = diag.variant_argv(by_name["jailed-threads-cpu"], models, out)
     assert threads[:4] == product[:4]
@@ -771,6 +785,189 @@ def test_trace_facts_and_the_variant_line() -> None:
     assert line.startswith("DETECT-VARIANT name=unjailed ok=nein ms_extract=- threads=- cpu_cap=- interop=- ")
     assert " result=fail:timeout tail=state=R" in line
     assert len(line.partition(" tail=")[2]) == diag.VARIANT_TAIL_CHARS
+
+
+def test_the_variant_env_drops_only_the_omp_limit() -> None:
+    product = diag.child.child_env(profile="detect")
+    assert product["OMP_THREAD_LIMIT"] == "1"
+    for variant in diag.DETECT_VARIANTS:
+        env = diag.variant_env(variant)
+        if variant.omp_limit:
+            assert env == product
+        else:
+            assert "OMP_THREAD_LIMIT" not in env
+            assert env == {key: value for key, value in product.items() if key != "OMP_THREAD_LIMIT"}
+    # The product environment itself is untouched by a variant.
+    assert diag.child.child_env(profile="detect")["OMP_THREAD_LIMIT"] == "1"
+
+
+STACK_SAMPLE = """MARK t=0.0s step=start torch=nein rss=-
+MARK t=21.0s step=gliner_loaded torch=ja rss=-
+Timeout (0:00:30)!
+Thread 0x0000ffff8a1bf120 (most recent call first):
+  File "/usr/lib/python3.13/threading.py", line 359 in wait
+
+Current thread 0x0000ffff9b2c0040 (most recent call first):
+  File "/app/.venv/lib/python3.13/site-packages/gliner2/layers.py", line 487 in score_queries
+  File "/app/.venv/lib/python3.13/site-packages/gliner2/models/span/model.py", line 621 in _compute_span_scores_core
+Timeout (0:01:00)!
+Current thread 0x0000ffff9b2c0040 (most recent call first):
+  File "/app/.venv/lib/python3.13/site-packages/gliner2/layers.py", line 487 in score_queries
+HARNESS dump on timeout
+Current thread 0x0000ffff9b2c0040 (most recent call first):
+  File "/app/.venv/lib/python3.13/site-packages/gliner2/layers.py", line 491 in score_queries
+"""
+
+
+def test_stack_lines_one_per_dump() -> None:
+    lines = diag.stack_lines("unjailed", STACK_SAMPLE)
+    assert len(lines) == 3
+    assert lines[0] == (
+        "DETECT-STACK name=unjailed dump=1/3 at=0:00:30 threads=2 "
+        "stacks=Thread 0x0000ffff8a1bf120 < python3.13/threading.py:359 wait || "
+        "current 0x0000ffff9b2c0040 < gliner2/layers.py:487 score_queries < "
+        "gliner2/models/span/model.py:621 _compute_span_scores_core"
+    )
+    # Each dump ends at the next header: the second holds one thread only.
+    assert lines[1] == (
+        "DETECT-STACK name=unjailed dump=2/3 at=0:01:00 threads=1 "
+        "stacks=current 0x0000ffff9b2c0040 < gliner2/layers.py:487 score_queries"
+    )
+    assert lines[2].startswith("DETECT-STACK name=unjailed dump=3/3 at=harness threads=1 ")
+    assert lines[2].endswith("gliner2/layers.py:491 score_queries")
+    assert diag.stack_lines("x", "MARK t=0.0s step=start torch=nein rss=-\n") == []
+    long = STACK_SAMPLE.replace("score_queries", "score_queries" * 400)
+    assert all(len(line) <= diag.STACK_CHARS for line in diag.stack_lines("x", long))
+    # condense_trace still sees the last dump only.
+    assert diag.condense_trace(STACK_SAMPLE).endswith(
+        "last_dump=current 0x0000ffff9b2c0040 < gliner2/layers.py:491 score_queries"
+    )
+
+
+PARALLEL_INFO_SAMPLE = """ATen/Parallel:
+\tat::get_num_threads() : 1
+\tat::get_num_interop_threads() : 4
+OpenMP 201511 (a.k.a. OpenMP 4.5)
+\tomp_get_max_threads() : 1
+Intel(R) MKL-DNN v3.7.1 (Git Hash 8d263e693366ef8db40acc569cc7d8edf644556d)
+std::thread::hardware_concurrency() : 4
+Environment variables:
+\tOMP_NUM_THREADS : [not set]
+\tMKL_NUM_THREADS : [not set]
+ATen parallel backend: OpenMP
+"""
+
+
+def test_parallel_summary_names_threads_backend_and_versions() -> None:
+    assert profile_work.parallel_summary(PARALLEL_INFO_SAMPLE) == (
+        "aten_threads=1 aten_interop=4 omp_max_threads=1 mkl_max_threads=- hw_concurrency=4 backend=OpenMP "
+        "openmp=201511 mkldnn_version=v3.7.1"
+    )
+    assert profile_work.parallel_summary("") == (
+        "aten_threads=- aten_interop=- omp_max_threads=- mkl_max_threads=- hw_concurrency=- backend=- "
+        "openmp=- mkldnn_version=-"
+    )
+
+
+BENCH_SAMPLE = (
+    "BENCH step=start\n"
+    "BENCH step=facts torch=2.15.0+cpu aten_threads=1 aten_interop=4 omp_max_threads=1 mkl_max_threads=- "
+    "hw_concurrency=4 backend=OpenMP openmp=201511 mkldnn_version=v3.7.1 num_threads=1 interop=4 mkldnn=ja "
+    "acl=ja config_acl=ja mkl=nein omp_avail=ja cpu_cap=SVE128 omp_thread_limit=1 omp_num_threads=-\n"
+    "BENCH step=matmul ms=41.5\n"
+    "BENCH step=score_queries ms=timeout\n"
+    "BENCH step=score_queries_ftz ms=3.2 first_ms=0.4 ftz=ja\n"
+)
+
+
+def test_bench_values_and_the_torch_facts_line() -> None:
+    values = diag.bench_values(BENCH_SAMPLE)
+    assert values["torch"] == "2.15.0+cpu"
+    assert values["acl"] == "ja"
+    assert values["matmul"] == "41.5"
+    assert values["score_queries"] == "timeout"
+    assert values["score_queries_ftz_first_ms"] == "0.4"
+    assert values["ftz"] == "ja"
+    assert "start" not in values
+    ok = {"ok": True, "result": "result=ok events=-", "tail": "", "exit": 0}
+    line = diag.torch_facts_line("unjailed", "aarch64", ok, BENCH_SAMPLE)
+    assert line.startswith("TORCH-FACTS env=unjailed arch=aarch64 ok=ja result=ok torch=2.15.0+cpu aten_threads=1 ")
+    assert " cpu_cap=SVE128 omp_thread_limit=1 omp_num_threads=- matmul512_x20_ms=41.5 " in line
+    assert " score_queries_x20_ms=timeout score_queries_first_ms=- " in line
+    assert line.endswith(" score_queries_ftz_x20_ms=3.2 score_queries_ftz_first_ms=0.4 ftz=ja tail=-")
+    keys = [part.partition("=")[0] for part in line.split()[1:]]
+    assert len(keys) == len(set(keys))
+    # A run killed by the harness before the bench wrote anything: every value -, the tail kept.
+    hung = {"ok": False, "result": "result=fail:timeout events=-", "tail": "state=R", "exit": None}
+    empty = diag.torch_facts_line("jailed-product", "aarch64", hung, "")
+    assert " result=fail:timeout torch=- " in empty
+    assert empty.endswith("ftz=- tail=state=R")
+
+
+def test_the_bench_commands(tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    work = diag.work_argv("torchbench", str(out))
+    assert diag.bench_argv("unjailed", out) == work
+    assert diag.bench_argv("jailed-product", out) == jail.jail_argv("detect", work, write=(str(out),))
+    with pytest.raises(ValueError, match="unknown bench env"):
+        diag.bench_argv("bogus", out)
+    assert len(profile_work.BENCH_STEPS) * profile_work.BENCH_STEP_S < diag.BENCH_TIMEOUT_S
+    assert profile_work.main(["torchbench"]) == 1
+
+
+def test_a_hung_bench_step_still_yields_its_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("torch")
+    monkeypatch.setitem(profile_work.BENCH_CALLS, "matmul", partial(_slow_step, 2.0))
+    assert profile_work.bench_step("matmul", 0.1) == ("BENCH step=matmul ms=timeout", True)
+    monkeypatch.setitem(profile_work.BENCH_CALLS, "matmul", lambda: 1 / 0)
+    assert profile_work.bench_step("matmul", 5.0) == ("BENCH step=matmul ms=fail:ZeroDivisionError", False)
+
+
+def _fake_step(step: str) -> str:
+    return f"ms=1.0 seen={step}"
+
+
+def _slow_step(seconds: float) -> str:
+    time.sleep(seconds)
+    return "ms=never"
+
+
+def test_a_hung_step_lets_the_others_run_and_ends_in_bench_hung(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("torch")
+    monkeypatch.setattr(profile_work, "use_work_folder_as_temp", lambda _work: None)
+    calls: dict[str, Callable[[], str]] = {step: partial(_fake_step, step) for step in profile_work.BENCH_STEPS}
+    calls["score_queries"] = partial(_slow_step, 2.0)
+    monkeypatch.setattr(profile_work, "BENCH_CALLS", calls)
+    with pytest.raises(profile_work.BenchHung):
+        profile_work.torchbench(tmp_path, 0.1)
+    lines = (tmp_path / profile_work.BENCH_FILE).read_text(encoding="ascii").splitlines()
+    assert lines == [
+        "BENCH step=start",
+        "BENCH step=facts ms=1.0 seen=facts",
+        "BENCH step=matmul ms=1.0 seen=matmul",
+        "BENCH step=score_queries ms=timeout",
+        "BENCH step=score_queries_ftz ms=1.0 seen=score_queries_ftz",
+    ]
+
+
+def test_the_real_torch_bench_writes_every_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("torch")
+    monkeypatch.setattr(profile_work, "use_work_folder_as_temp", lambda _work: None)
+    profile_work.torchbench(tmp_path, 120.0)
+    text = (tmp_path / profile_work.BENCH_FILE).read_text(encoding="ascii")
+    values = diag.bench_values(text)
+    for step in ("matmul", "score_queries", "score_queries_ftz"):
+        assert float(values[step]) > 0, text
+    assert values["torch"].startswith("2.")
+    assert values["mkldnn"] in {"ja", "nein"}
+    assert values["ftz"] in {"ja", "nein"}
+    assert values["aten_threads"] != "-", text
+    # The torch_facts keys of the line are exactly what the facts step writes.
+    facts = next(line for line in text.splitlines() if line.startswith("BENCH step=facts "))
+    keys = [part.partition("=")[0] for part in facts.split()[2:]]
+    assert keys == list(diag.TORCH_FACT_KEYS)
 
 
 def test_the_detect_thread_setting() -> None:
