@@ -256,6 +256,9 @@ TEMPLATE_NEEDS = {
     "--headless": "no display in the build",
     'rm -rf "${scratch}" /tmp/.cache /tmp/.config /tmp/OSL_PIPE_* /tmp/lu*.tmp;': "no build remains in the image",
     f'test -f "${{template}}/user/{soffice.TEMPLATE_MARKER}";': "the build fails when the init did not run",
+    # LibreOffice 25.2 desktop/source/app/app.cxx: without user/extensions/buildid
+    # cleanExtensionCache() returns true and the start ends in a restart.
+    'test -s "${template}/user/extensions/buildid";': "the copy starts without the extension restart",
     'test -z "$(find "${template}" ! -type d ! -type f)";': "only folders and files",
     'chown -R root:root "${template}";': "root-owned",
     'find "${template}" -type d -exec chmod 0555 {} +;': "folders read only",
@@ -315,4 +318,40 @@ def test_the_pushed_image_is_checked_for_the_template() -> None:
     assert smoke_template_findings(workflow) == []
     assert smoke_template_findings(workflow.replace('= "root:444"', '= "exapp:644"')) == [
         "the smoke test does not gate owner and mode of the template"
+    ]
+
+
+# -- risk R3: a new LibreOffice package gets no tag without the product conversion ----------
+
+# What the smoke step of docker.yml must hold, each with the reason it matters.
+GATE_NEEDS = {
+    "docker cp ci/soffice_gate.py smoke:/tmp/soffice_gate.py": "the gate runs inside the pushed digest",
+    "gate=$(docker exec smoke /app/.venv/bin/python -I /tmp/soffice_gate.py) || gate_status=$?": "its exit is kept",
+    'test "${gate_status}" = "0"': "a failed conversion fails the job",
+    "dpkg-query -W -f '${Version}' libreoffice-core-nogui": "the package version stands in the log",
+}
+
+
+def smoke_gate_findings(workflow: str) -> list[str]:
+    """docker.yml converts a DOCX on the pushed digest, and the tagging merge job needs that job."""
+    findings = [f"missing: {needle} ({reason})" for needle, reason in GATE_NEEDS.items() if needle not in workflow]
+    merge = workflow.partition("\n  merge:\n")[2]
+    if "needs: build" not in merge.split("steps:")[0]:
+        findings.append("the merge job does not wait for the build job")
+    return findings
+
+
+def test_the_pushed_image_must_convert_before_it_is_tagged() -> None:
+    workflow = repo_text(REPO_ROOT / ".github" / "workflows" / "docker.yml")
+    assert smoke_gate_findings(workflow) == []
+    assert (REPO_ROOT / "ci" / "soffice_gate.py").is_file()
+
+
+def test_the_gate_rule_fires() -> None:
+    workflow = repo_text(REPO_ROOT / ".github" / "workflows" / "docker.yml")
+    assert smoke_gate_findings(workflow.replace('test "${gate_status}" = "0"', "true")) == [
+        'missing: test "${gate_status}" = "0" (a failed conversion fails the job)'
+    ]
+    assert smoke_gate_findings(workflow.replace("    needs: build\n", "")) == [
+        "the merge job does not wait for the build job"
     ]

@@ -108,6 +108,15 @@ jobs:
           uid=$(docker exec smoke id -u || echo unknown)
           # The LibreOffice profile template (plan 02-16): in the image, root-owned, read only.
           template=$(docker exec smoke stat -c '%U:%a' /opt/pii/soffice-profile-template/user/registrymodifications.xcu || echo missing)
+          # LibreOffice is not pinned (risk R3 of plan 02-16): the product conversion
+          # runs on this very digest, template copy and jail included, and the merge
+          # job below sets no tag unless it passed (ci/soffice_gate.py).
+          lo_package=$(docker exec smoke dpkg-query -W -f '${Version}' libreoffice-core-nogui || echo unknown)
+          docker cp ci/soffice_gate.py smoke:/tmp/soffice_gate.py
+          gate_status=0
+          gate=$(docker exec smoke /app/.venv/bin/python -I /tmp/soffice_gate.py) || gate_status=$?
+          echo "LO-PACKAGE libreoffice-core-nogui=${lo_package}"
+          echo "${gate}"
           health=""
           for _ in $(seq 30); do
             health=$(docker inspect --format '{{.State.Health.Status}}' smoke)
@@ -122,6 +131,7 @@ jobs:
           test "${uid}" = "10001"
           test "${health}" = "healthy"
           test "${template}" = "root:444"
+          test "${gate_status}" = "0"
 
       - name: Write the digest to a file
         env:

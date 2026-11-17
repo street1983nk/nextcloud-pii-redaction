@@ -86,6 +86,10 @@ RUN apt-get update \
 # PROFILE_TEMPLATE). Root-owned and read only; the child never reads it. HOME
 # and TMPDIR point into a build folder that goes in the same RUN, together
 # with whatever the first start leaves in /tmp (dconf, fontconfig, the pipe).
+# The restart of a fresh profile comes from user/extensions/buildid (LibreOffice
+# 25.2 sources: app.cxx cleanExtensionCache, check_ext_deps.cxx requestRestart);
+# Desktop::Init writes it before the init-only start below returns, so the
+# build fails without it. The profile path is no input of that decision.
 RUN set -eux; \
     template=/opt/pii/soffice-profile-template; \
     scratch="$(mktemp -d)"; \
@@ -95,6 +99,7 @@ RUN set -eux; \
     rm -rf "${scratch}" /tmp/.cache /tmp/.config /tmp/OSL_PIPE_* /tmp/lu*.tmp; \
     find "${template}" -mindepth 1 -maxdepth 1 ! -name user -exec rm -rf {} +; \
     test -f "${template}/user/registrymodifications.xcu"; \
+    test -s "${template}/user/extensions/buildid"; \
     test -z "$(find "${template}" ! -type d ! -type f)"; \
     chown -R root:root "${template}"; \
     find "${template}" -type d -exec chmod 0555 {} +; \
