@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: 02-02 Task 1 Paket-Freigabe (checkpoint:human-verify, blocking)
-last_updated: "2026-11-16T21:42:14.020Z"
-last_activity: 2026-11-16 -- Welle 1 bis auf 02-02 ausgeführt
+stopped_at: "02-02 abgeschlossen; Halt vor Welle 2 (AV-Sicherheitscheck dazwischen)"
+last_updated: "2026-11-17T02:48:15.482Z"
+last_activity: 2026-11-17 -- 02-02 abgeschlossen (Paket- und Lock-Freigabe, exclude-newer 2026-11-03)
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 27
+  completed_plans: 28
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 6 of 25 in current phase (02-01, 02-03 bis 02-07 abgeschlossen, lokal ungepusht; Halt an 02-02 Task 1 Paket-Freigabe, blocking)
-Status: Waiting for owner (package legitimacy gate 02-02)
-Last activity: 2026-11-16 -- Welle 1 bis auf 02-02 ausgeführt
+Plan: 7 of 25 in current phase (Welle 1 komplett: 02-01 bis 02-07 abgeschlossen, lokal ungepusht; nächste Welle 2: 02-08 bis 02-12)
+Status: Halt vor Welle 2 (AV-Sicherheitscheck läuft dazwischen)
+Last activity: 2026-11-17 -- 02-02 abgeschlossen
 
-Progress: [██████░░░░] 59%
+Progress: [██████░░░░] 61%
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [██████░░░░] 59%
 | Phase 01 P13 | 30 min | 1 tasks | 8 files |
 | Phase 01 P14 | 40 min | 3 tasks | 13 files |
 | Phase 01 P15 | 45 min | 3 tasks | 14 files |
+| Phase 02 P02 | 60 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -100,6 +101,7 @@ Recent decisions affecting current work:
 - [Phase 02-05]: ack confirm antwortet bis 02-15 mit 400, expliziter purged-Arm statt default
 - [Phase 02-06]: tests/ wieder im Build-Kontext nur für die Teststufe; runtime kopiert nie tests, Push nur target runtime
 - [Phase 02-07]: zip_lying_size und XML/PDF-Strukturfälle bestehen Stufe A/B; 02-09 muss sie ablehnen (Querprobe)
+- [Phase 02-02]: transformers 5.22.1, hub 2.4.0, tokenizers 0.23.3 statt 4.57.6 (Owner-Freigabe 1); Lock mit exclude-newer 2026-11-03 für alle Pakete inkl. torch aus dem CPU-Index (Owner-Freigabe 2, Option B); pip-audit mit +cpu-Strip
 
 ### Pending Todos
 
@@ -122,6 +124,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-16T21:42:13.999Z
-Stopped at: 02-02 Task 1 Paket-Freigabe (blocking)
-Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-02-PLAN.md
+Last session: 2026-11-17T02:48:15.464Z
+Stopped at: 02-02 abgeschlossen; Halt vor Welle 2
+Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-08-PLAN.md
