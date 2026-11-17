@@ -46,14 +46,26 @@ SAFE_ENV: Final[dict[str, str]] = {
     "MALLOC_ARENA_MAX": "1",
 }
 
-# The only extra variables a caller may hand to a child.
-# TMPDIR points LibreOffice at a folder inside its job profile (plan 02-08).
-EXTRA_ALLOWED: Final = frozenset({"TESSDATA_PREFIX", "SAL_USE_VCLPLUGIN", "TMPDIR"})
+# The only extra variables a caller may hand to any child.
+EXTRA_ALLOWED: Final = frozenset({"TESSDATA_PREFIX", "SAL_USE_VCLPLUGIN"})
+
+# Variables only the soffice child may get, and only with a folder inside its
+# job profile as value (plan 02-08, 02-16): TMPDIR for its temporary files,
+# HOME and the XDG folders for fontconfig, dconf and the VCL caches, which
+# otherwise try /tmp, where the jail grants no write. Every other child keeps
+# HOME=/tmp from SAFE_ENV and gets none of them.
+SOFFICE_ENV: Final = frozenset({"TMPDIR", "HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"})
+# The job profile of soffice is /tmp/lo-<job id> (workers/soffice.py,
+# PROFILE_ROOT); a value is that folder or a plain folder below it: no dots,
+# so no "..", no hidden name, nothing outside.
+SOFFICE_PROFILE_VALUE: Final = re.compile(r"/tmp/lo-[0-9]+(?:/[A-Za-z0-9_-]+)*")  # noqa: S108 - a pattern, no file
 
 # The diagnosis of a failed child: how much stderr is kept while it runs, and
-# how much of it may reach the log.
-STDERR_KEEP_BYTES: Final = 4096
+# how much of it may reach the log. soffice prints several harmless warnings
+# (fontconfig, dconf) before the line that matters, so its tail is longer.
+STDERR_KEEP_BYTES: Final = 8192
 TAIL_LINES: Final = 5
+SOFFICE_TAIL_LINES: Final = 12
 TAIL_LINE_CHARS: Final = 160
 _QUOTED: Final = re.compile(r"'[^'\n]*'|\"[^\"\n]*\"|`[^`\n]*`")
 # A path or URL runs to the end of its line: a file name may hold spaces.
@@ -81,7 +93,7 @@ class ChildFailed(Exception):
         self.stderr_tail = stderr_tail
 
 
-def diagnostic_tail(raw: bytes) -> str:
+def diagnostic_tail(raw: bytes, lines_kept: int = TAIL_LINES) -> str:
     """The last lines of stderr, safe for the log: no path, no quoted text, printable ASCII, short.
 
     A path can name a user file, a quoted string can quote the document, so
@@ -98,7 +110,7 @@ def diagnostic_tail(raw: bytes) -> str:
         line = _NOT_PRINTABLE.sub("?", line).strip()
         if line:
             lines.append(line[:TAIL_LINE_CHARS])
-    return " | ".join(lines[-TAIL_LINES:])
+    return " | ".join(lines[-lines_kept:])
 
 
 async def _keep_tail(stream: asyncio.StreamReader | None, kept: bytearray) -> None:
@@ -110,11 +122,19 @@ async def _keep_tail(stream: asyncio.StreamReader | None, kept: bytearray) -> No
         del kept[: max(0, len(kept) - STDERR_KEEP_BYTES)]
 
 
-def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    """SAFE_ENV plus allowlisted extras; any other key is a programming error."""
+def child_env(extra: dict[str, str] | None = None, *, profile: str | None = None) -> dict[str, str]:
+    """SAFE_ENV plus allowlisted extras; any other key or value is a programming error.
+
+    The SOFFICE_ENV keys pass only for the soffice profile and only with a
+    value inside its job profile (SOFFICE_PROFILE_VALUE).
+    """
     env = dict(SAFE_ENV)
     for key, value in (extra or {}).items():
-        if key not in EXTRA_ALLOWED:
+        if key in SOFFICE_ENV and profile == "soffice":
+            if not SOFFICE_PROFILE_VALUE.fullmatch(value):
+                msg = f"environment variable {key} must name a folder inside the soffice job profile"
+                raise ValueError(msg)
+        elif key not in EXTRA_ALLOWED:
             msg = f"environment variable {key} is not allowed for a child"
             raise ValueError(msg)
         env[key] = value
@@ -139,18 +159,20 @@ async def run_child(
     timeout_s: float | None = None,
     extra_env: dict[str, str] | None = None,
     diagnose: bool = False,
+    tail_lines: int = TAIL_LINES,
 ) -> None:
     """Run one child in the jail of its profile to its end, or kill its group at the time limit.
 
     The time limit is the wall clock of the profile unless the caller names one.
     The group is killed and collected on every way out, success included. With
-    diagnose, a failure carries the cleaned tail of stderr (diagnostic_tail).
+    diagnose, a failure carries the cleaned tail of stderr (diagnostic_tail),
+    at most tail_lines lines.
     """
     limit = profile_for(profile).wall_s if timeout_s is None else timeout_s
     process = await asyncio.create_subprocess_exec(
         *jail_argv(profile, args, read=read, write=write),
         cwd=cwd,
-        env=child_env(extra_env),
+        env=child_env(extra_env, profile=profile),
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE if diagnose else asyncio.subprocess.DEVNULL,
@@ -176,7 +198,7 @@ async def run_child(
             await asyncio.wait_for(asyncio.shield(reader), timeout=2)
         reader.cancel()
     if code != 0:
-        raise ChildFailed(code, diagnostic_tail(bytes(kept)) if diagnose else "")
+        raise ChildFailed(code, diagnostic_tail(bytes(kept), tail_lines) if diagnose else "")
 
 
 def _kill_group(pid: int) -> None:

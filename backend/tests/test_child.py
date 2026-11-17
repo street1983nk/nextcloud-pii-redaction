@@ -206,18 +206,77 @@ def test_a_signal_is_reported_apart_from_the_exit_code() -> None:
     assert "Fatal" not in str(failed)
 
 
-def test_tmpdir_is_the_only_new_extra_variable() -> None:
-    assert child.child_env({"TMPDIR": "/work/lo-1/tmp"})["TMPDIR"] == "/work/lo-1/tmp"
+TMP = "/tmp"  # noqa: S108 - the soffice profile root under test, nothing is written there
+JOB = f"{TMP}/lo-1"
+SOFFICE_ENV_VALUES = {
+    "TMPDIR": f"{JOB}/tmp",  # noqa: S108 - inside the profile under test
+    "HOME": f"{JOB}/home",
+    "XDG_CACHE_HOME": f"{JOB}/cache",
+    "XDG_CONFIG_HOME": f"{JOB}/config",
+    "XDG_RUNTIME_DIR": f"{JOB}/runtime",
+}
+
+
+def test_the_soffice_variables_are_exactly_tmpdir_home_and_three_xdg_folders() -> None:
+    assert set(SOFFICE_ENV_VALUES) == child.SOFFICE_ENV
+    assert {"TESSDATA_PREFIX", "SAL_USE_VCLPLUGIN"} == child.EXTRA_ALLOWED
+
+
+def test_soffice_gets_its_variables_inside_its_job_profile() -> None:
+    env = child.child_env(SOFFICE_ENV_VALUES, profile="soffice")
+    for key, value in SOFFICE_ENV_VALUES.items():
+        assert env[key] == value
+    # The profile folder itself is allowed, too.
+    assert child.child_env({"HOME": JOB}, profile="soffice")["HOME"] == JOB
+
+
+@pytest.mark.parametrize("profile", [None, "render", "precheck", "sanitize", "ocr", "detect"])
+@pytest.mark.parametrize("key", sorted(SOFFICE_ENV_VALUES))
+def test_negative_no_other_child_gets_a_soffice_variable(profile: str | None, key: str) -> None:
     with pytest.raises(ValueError, match="not allowed"):
-        child.child_env({"HOME": "/"})
+        child.child_env({key: SOFFICE_ENV_VALUES[key]}, profile=profile)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/",
+        TMP,
+        f"{TMP}/lo-",
+        f"{TMP}/lo-x",
+        f"{TMP}/lo-1/../exapp.sock",
+        f"{TMP}/lo-1/..",
+        f"{TMP}/lo-1/.cache",
+        f"{TMP}/lo-1/",
+        f"{TMP}/lo-1//home",
+        f"{TMP}/lo-12abc",
+        "tmp/lo-1/home",
+        f"{TMP}/lo-1/home\n",
+        "/nc_app_pii_redaction_backend_data/work/1",
+        f"{TMP}/other/lo-1",
+    ],
+)
+@pytest.mark.parametrize("key", sorted(SOFFICE_ENV_VALUES))
+def test_negative_a_soffice_value_outside_the_job_profile_is_refused(key: str, value: str) -> None:
+    with pytest.raises(ValueError, match="inside the soffice job profile"):
+        child.child_env({key: value}, profile="soffice")
+
+
+def test_positive_control_other_children_keep_home_tmp() -> None:
+    assert child.child_env(profile="render")["HOME"] == TMP
+    assert "TMPDIR" not in child.child_env(profile="render")
+    with pytest.raises(ValueError, match="not allowed"):
+        child.child_env({"APP_SECRET": "x"}, profile="soffice")
 
 
 @pytest.mark.linux
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
 async def test_a_diagnosed_child_hands_back_its_cleaned_stderr(tmp_path: Path) -> None:
+    # \\n: the child script needs the two characters backslash and n inside its
+    # string literals, a real line break there is a SyntaxError (exit 1).
     script = (
-        "import sys; sys.stderr.write(\"Error: cannot open '/data/Bescheid Meier.docx'\n\"); "
-        "sys.stderr.write('Fatal error at /secret/path\n'); sys.exit(77)"
+        "import sys; sys.stderr.write(\"Error: cannot open '/data/Bescheid Meier.docx'\\n\"); "
+        "sys.stderr.write('Fatal error at /secret/path\\n'); sys.exit(77)"
     )
 
     with pytest.raises(child.ChildFailed) as failure:
@@ -230,9 +289,20 @@ async def test_a_diagnosed_child_hands_back_its_cleaned_stderr(tmp_path: Path) -
 @pytest.mark.linux
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
 async def test_without_diagnose_nothing_of_stderr_comes_back(tmp_path: Path) -> None:
-    script = "import sys; sys.stderr.write('Fatal error\n'); sys.exit(77)"
+    script = "import sys; sys.stderr.write('Fatal error\\n'); sys.exit(77)"
 
     with pytest.raises(child.ChildFailed) as failure:
         await child.run_child([sys.executable, "-I", "-c", script], **_jailed(tmp_path), timeout_s=20)
 
+    # 77 proves the script ran to its end; a broken script would end with 1.
+    assert failure.value.exit_code == 77
     assert failure.value.stderr_tail == ""
+
+
+def test_the_soffice_tail_keeps_twelve_lines() -> None:
+    raw = "".join(f"Fontconfig warning {n}\n" for n in range(30)).encode()
+    lines = child.diagnostic_tail(raw, child.SOFFICE_TAIL_LINES).split(" | ")
+    assert len(lines) == child.SOFFICE_TAIL_LINES == 12
+    assert lines[-1] == "Fontconfig warning 29"
+    # The default stays five lines for every other child.
+    assert len(child.diagnostic_tail(raw).split(" | ")) == child.TAIL_LINES == 5

@@ -5,11 +5,14 @@ profile block each other and keep state between jobs) and is deleted after
 the run. The call goes through run_child: empty environment, own process
 group, time limit, nothing read from stdout, inside the jail of the "soffice"
 profile: it may read the source, write only the output folder and its own
-profile folder (TMPDIR points into it) and create its single-instance socket
-in /tmp. stderr is kept only for the diagnosis of a failure (child.py,
-diagnostic_tail). The jail execs by absolute path, so the command names
-/usr/bin/soffice. Full hardening of the profile (macros, external links,
-update check) follows in phase 2 (SAFE-03).
+profile folder (TMPDIR, HOME and the XDG folders point into it) and create
+its single-instance socket in /tmp. stderr is kept only for the diagnosis of
+a failure (child.py, diagnostic_tail, 12 lines). No SAL_USE_VCLPLUGIN: with
+--headless and no plugin named, LibreOffice 25.2 picks the headless "svp"
+plugin itself (vcl/source/app/salplug.cxx, IsHeadlessModeRequested). The
+jail execs by absolute path, so the command names /usr/bin/soffice. Full
+hardening of the profile (macros, external links, update check) follows in
+phase 2 (SAFE-03).
 """
 
 import contextlib
@@ -20,13 +23,21 @@ import sys
 from pathlib import Path
 from typing import Final
 
-from pii_redaction_backend.workers.child import run_child
+from pii_redaction_backend.workers.child import SOFFICE_TAIL_LINES, run_child
 
 PROFILE_ROOT: Final = "/tmp"  # noqa: S108 - one throwaway profile per job, deleted in finally
 DEFAULT_TIMEOUT_S: Final = 120.0
 SOFFICE: Final = "/usr/bin/soffice"
 # sal/osl/unx/pipe.cxx: OSL_PIPE_<user ident>_<pipe name>, pipe name SingleOfficeIPC_<md5>.
 IPC_SOCKET_GLOB: Final = "OSL_PIPE_*_SingleOfficeIPC_*"
+# Each variable of the soffice environment and the folder inside the job profile it names.
+PROFILE_FOLDERS: Final = {
+    "TMPDIR": "tmp",
+    "HOME": "home",
+    "XDG_CACHE_HOME": "cache",
+    "XDG_CONFIG_HOME": "config",
+    "XDG_RUNTIME_DIR": "runtime",
+}
 
 
 class ConversionFailed(Exception):
@@ -87,16 +98,36 @@ def _remove_ipc_sockets(root: Path) -> None:
                 entry.unlink()
 
 
+def job_profile(job_id: str) -> Path:
+    """The throwaway profile folder of one job: /tmp/lo-<job id>."""
+    return Path(PROFILE_ROOT) / f"lo-{_checked(job_id)}"
+
+
+def prepare_profile(job_id: str) -> tuple[Path, dict[str, str]]:
+    """Make the job profile with its folders (0700) and return it with the environment that points into it.
+
+    Landlock grants paths that exist, so the profile folder is made here and
+    the jail hands it to LibreOffice as writable. Everything LibreOffice and
+    its libraries would put below /tmp or $HOME goes into it instead, where
+    the child may write: temporary files (TMPDIR), the fontconfig cache
+    (XDG_CACHE_HOME), dconf and other settings (XDG_CONFIG_HOME,
+    XDG_RUNTIME_DIR) and anything else below HOME. The values pass the
+    allowlist of child.child_env only for the soffice profile.
+    """
+    profile = job_profile(job_id)
+    profile.mkdir(mode=0o700, exist_ok=True)
+    env: dict[str, str] = {}
+    for key, name in PROFILE_FOLDERS.items():
+        folder = profile / name
+        folder.mkdir(mode=0o700, exist_ok=True)
+        env[key] = str(folder)
+    return profile, env
+
+
 async def convert(src: Path, outdir: Path, job_id: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> Path:
     """Convert src into outdir and return the one PDF it produced."""
-    profile = Path(PROFILE_ROOT) / f"lo-{_checked(job_id)}"
     _prepare(outdir)
-    # Landlock grants paths that exist; the profile folder is made here so the
-    # jail can hand it to LibreOffice as writable. Its temporary files go to a
-    # folder inside it (TMPDIR), not to /tmp, where the child may not write.
-    profile.mkdir(mode=0o700, exist_ok=True)
-    temporary = profile / "tmp"
-    temporary.mkdir(mode=0o700, exist_ok=True)
+    profile, env = prepare_profile(job_id)
     _remove_ipc_sockets(Path(PROFILE_ROOT))
     try:
         await run_child(
@@ -106,8 +137,9 @@ async def convert(src: Path, outdir: Path, job_id: str, timeout_s: float = DEFAU
             read=(str(src),),
             write=(str(outdir), str(profile)),
             timeout_s=timeout_s,
-            extra_env={"TMPDIR": str(temporary)},
+            extra_env=env,
             diagnose=True,
+            tail_lines=SOFFICE_TAIL_LINES,
         )
     finally:
         shutil.rmtree(profile, ignore_errors=True)

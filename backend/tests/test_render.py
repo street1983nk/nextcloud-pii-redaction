@@ -13,7 +13,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from pii_redaction_backend.workers import render, soffice
+from pii_redaction_backend.workers import child, render, soffice
 
 
 def _two_page_pdf(path: Path) -> Path:
@@ -100,9 +100,17 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
 
     assert pdf == tmp_path / "out" / "in.pdf"
     assert seen["profile"] == "soffice"
-    assert seen["extra_env"] == {"TMPDIR": str(tmp_path / "lo-5" / "tmp")}
-    assert seen["write"] == (str(tmp_path / "out"), str(tmp_path / "lo-5"))
+    profile = tmp_path / "lo-5"
+    assert seen["extra_env"] == {
+        "TMPDIR": str(profile / "tmp"),
+        "HOME": str(profile / "home"),
+        "XDG_CACHE_HOME": str(profile / "cache"),
+        "XDG_CONFIG_HOME": str(profile / "config"),
+        "XDG_RUNTIME_DIR": str(profile / "runtime"),
+    }
+    assert seen["write"] == (str(tmp_path / "out"), str(profile))
     assert seen["diagnose"] is True
+    assert seen["tail_lines"] == child.SOFFICE_TAIL_LINES
     assert seen["profile_existed"] is True
     # The profile with its temporary folder is gone after the run.
     assert not (tmp_path / "lo-5").exists()
@@ -131,3 +139,12 @@ def test_only_the_libreoffice_sockets_of_this_uid_are_removed(tmp_path: Path) ->
     assert not pipe.exists()
     assert lookalike.exists()
     assert other.exists()
+
+
+def test_the_real_soffice_profile_folders_pass_the_child_allowlist() -> None:
+    # The values convert() hands over with the real PROFILE_ROOT are exactly
+    # what child.child_env lets through for the soffice profile.
+    profile = soffice.job_profile("5")
+    env = {key: f"{profile.as_posix()}/{name}" for key, name in soffice.PROFILE_FOLDERS.items()}
+    assert set(env) == child.SOFFICE_ENV
+    assert child.child_env(env, profile="soffice") == {**child.SAFE_ENV, **env}
