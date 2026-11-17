@@ -462,12 +462,36 @@ async def test_purge_removes_folder_and_row(fake: Fake) -> None:
 
 # -- the real child ------------------------------------------------------------------
 
+# On the runner of python.yml the interpreter (uv), the venv and the editable
+# package live below /home/runner, which the render profile does not read; the
+# jail then refuses the execv of the child with EACCES and ends with 71, which
+# is the right, fail-closed answer. In the image all three live below /usr and
+# /app (profiles.SYSTEM_READ). The test hands exactly these three folders to
+# the jail as extra read paths, the same way _jailed() in test_child.py does;
+# the profile itself stays as it ships.
+_TEST_INTERPRETER: tuple[str, ...] = (
+    sys.base_prefix,
+    sys.prefix,
+    str(Path(runner.__file__).resolve().parents[2]),
+)
+
+
+async def _with_the_test_interpreter(args: list[str], **kwargs: Any) -> None:
+    kwargs["read"] = (*kwargs.get("read", ()), *_TEST_INTERPRETER)
+    await child.run_child(args, **kwargs)
+
+
+def test_the_test_interpreter_paths_are_only_the_interpreter_and_the_package() -> None:
+    package_root = Path(runner.__file__).resolve().parents[2]
+    assert (package_root / "pii_redaction_backend").is_dir()
+    assert (sys.base_prefix, sys.prefix, str(package_root)) == _TEST_INTERPRETER
+
 
 @pytest.mark.linux
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
 async def test_analyze_through_the_real_render_child(fake: Fake) -> None:
     fake.claims = [_claim(job_id=9)]
-    await fake.runner(run_child=child.run_child).run_once()
+    await fake.runner(run_child=_with_the_test_interpreter).run_once()
 
     (ack,) = fake.acks()
     assert ack[1] == "review", ack
