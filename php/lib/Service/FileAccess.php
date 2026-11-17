@@ -30,8 +30,19 @@ use Psr\Log\LoggerInterface;
  * asking count as blocked. There is no exception for the server setting that
  * allows viewing without download: this app hands the content to a program,
  * which is a download in all but name.
+ *
+ * End-to-end encryption is judged at the folders above a file (JOB-05,
+ * RESEARCH Pitfall 5): the E2E app marks the folder, and the server only ever
+ * holds cipher text below it. A file of its own with the encrypted flag is
+ * server side encryption, which Nextcloud decrypts on the fly; such a file is
+ * not refused. The walk stops at the user folder and fails closed.
  */
 final class FileAccess {
+	/** Deeper than any real tree; a longer walk is treated as E2E (fail closed). */
+	private const MAX_FOLDER_DEPTH = 256;
+	/** The user folder, /<uid>/files: the walk ends there. */
+	private const USER_FOLDER = '#^/[^/]+/files$#D';
+
 	public function __construct(
 		private IRootFolder $rootFolder,
 		private ReaderContext $readerContext,
@@ -80,6 +91,33 @@ final class FileAccess {
 			return $share->getAttributes()?->getAttribute('permissions', 'download') === false;
 		} catch (\Throwable $e) {
 			$this->logger->warning('PII Redaction: download permission unclear, treated as blocked', ['class' => $e::class]);
+			return true;
+		}
+	}
+
+	/**
+	 * True when a folder above $node carries the E2E flag, and true whenever
+	 * that cannot be decided. Only folders count: the flag on the file itself
+	 * is server side encryption (Pitfall 5). The end-to-end encryption app
+	 * asks the same flag on folders.
+	 */
+	public function inE2eFolder(Node $node): bool {
+		try {
+			$current = $node;
+			for ($depth = 0; $depth < self::MAX_FOLDER_DEPTH; $depth++) {
+				$parent = $current->getParent();
+				$path = $parent->getPath();
+				if ($path === '' || $path === '/' || preg_match(self::USER_FOLDER, $path) === 1) {
+					return false;
+				}
+				if ($parent instanceof Folder && $parent->isEncrypted()) {
+					return true;
+				}
+				$current = $parent;
+			}
+			return true;
+		} catch (\Throwable $e) {
+			$this->logger->warning('PII Redaction: encryption of the folder unclear, treated as end-to-end', ['class' => $e::class]);
 			return true;
 		}
 	}

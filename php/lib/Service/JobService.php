@@ -89,6 +89,11 @@ final class JobService {
 		if (!in_array($mime, self::ALLOWED_MIMES, true)) {
 			return self::refused(Reason::UnsupportedFormat);
 		}
+		// The server holds only cipher text below an E2E folder (JOB-05); no
+		// notification for a refusal (D-02-02), the toast says it.
+		if ($this->files->inE2eFolder($file)) {
+			return self::refused(Reason::E2eEncrypted);
+		}
 		if ($etag === '' || strlen($etag) > 40) {
 			// The column holds 40 characters and the container refuses longer
 			// ones; a file without a usable etag cannot be bound to a job.
