@@ -30,6 +30,7 @@ the lasting checks:
     UNLINK-RISK target=<socket-copy|file|file-in-subdir> jail=<none|product> result=<ok|EACCES|...> like_exapp=...
     SOCKET-CONNECT <test-process|profile>=<ok|refused <errno>|absent>
     SOCKET-CONNECT-DENY <profile>=<refused EACCES|...>
+    PROFILE-WORK profile=<p> work=<w> product_ok=<ja|nein> result=<word> events=<...> tail=<...>
     PROFILE-DENY-CONNECT profile=<p> work=<w> ok=<ja|nein|-> product_ok=<ja|nein|-> result=<word>
         events=<...> tail=<...>
     PROFILE-PRODUCT profile=<p> work=<w> result=<word> tail=<...>   (only when the product run failed)
@@ -38,9 +39,14 @@ Risks of the template (owner 17.11., "allen Risiken nachgehen"): R1 does the
 copy start without a restart (SOFFICE-STARTS product n=1, a gate; the fresh
 profile control must show the restart the counter is meant to see), and does
 the server remove the one socket the child leaves (TMP-REST, after_cleanup
-empty, a gate). R2 would the other profiles still work without connect()
-(PROFILE-DENY-CONNECT, a measurement; its control SOCKET-CONNECT-DENY is a
-gate). Why a fresh profile restarts and a copy should not, from the LibreOffice
+empty, a gate). R2 would the other profiles still work without connect()?
+Sandbox run of df2d2e5 measured render, precheck and sanitize: ok on amd64 and
+arm64, so the owner switched them (17.11.); their product jail refuses
+connect() now (SOCKET-CONNECT refused EACCES, a gate) and their work must run
+in it (PROFILE-WORK, a gate). detect and ocr stay a measurement
+(PROFILE-DENY-CONNECT; its control SOCKET-CONNECT-DENY is a gate).
+
+Why a fresh profile restarts and a copy should not, from the LibreOffice
 25.2.3.2 sources: desktop/source/app/app.cxx cleanExtensionCache() returns
 true when user/extensions/buildid is missing or differs from the build id of
 the installation, and check_ext_deps.cxx SynchronizeExtensionRepositories then
@@ -49,8 +55,9 @@ calls requestRestart; the build writes buildid in Desktop::Init, before
 that decision; userinstall.cxx reads ooSetupInstCompleted, not the path.
 
 The gates: the product converts with one start; the template is root-owned
-and read only; a child in the product jail removes nothing in /tmp; soffice
-reaches no socket. The real HaRP socket is only described, never named to a child.
+and read only; a child in the product jail removes nothing in /tmp; soffice,
+render, precheck and sanitize reach no socket and still do their work. The
+real HaRP socket is only described, never named to a child.
 """
 
 import asyncio
@@ -676,15 +683,21 @@ def deny_connect_argv(
     return [sys.executable, "-I", str(DRIVER), "deny-connect", *product[4:]]
 
 
+# The profiles whose product jail refuses connect() (owner 17.11.): a gate in
+# the container. detect and ocr keep connect() and are only described.
+CONNECT_REFUSED = ("soffice", "render", "precheck", "sanitize")
+
+
 async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> None:
     """SOCKET-CONNECT <who>=<ok|refused|absent> for every profile as it stands, and SOCKET-CONNECT-DENY.
 
-    soffice: the product jail, whose seccomp filter refuses connect() for
-    every family: must answer "refused EACCES" (owner decision 17.11.). The
-    other profiles keep connect() for now: their answers describe the state
-    (R2). SOCKET-CONNECT-DENY is the same probe in each profile with
-    deny_connect on: every one must answer "refused EACCES", or the
-    PROFILE-DENY-CONNECT measurement would not mean what it says.
+    soffice, render, precheck and sanitize: the product jail, whose seccomp
+    filter refuses connect() for every family: each must answer "refused
+    EACCES" (owner decisions 17.11.). detect and ocr keep connect() for now:
+    their answers describe the state (R2). SOCKET-CONNECT-DENY is the same
+    probe in each profile with deny_connect on: every one must answer
+    "refused EACCES", or the PROFILE-DENY-CONNECT measurement would not mean
+    what it says.
     """
     path = os.environ.get("HP_EXAPP_SOCK", HARP_SOCKET)
     probe = [sys.executable, "-I", str(DRIVER), "connect", path]
@@ -705,7 +718,9 @@ async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> 
     assert answers["test-process"] == "ok", answers
     for who, answer in answers.items():
         assert answer == "ok" or answer.startswith("refused"), (who, answer)
-    assert answers["soffice"] == "refused EACCES", answers
+    assert set(CONNECT_REFUSED) <= set(PROFILES), CONNECT_REFUSED
+    for name in CONNECT_REFUSED:
+        assert answers[name] == "refused EACCES", (name, answers)
     assert set(denied.values()) == {"refused EACCES"}, denied
 
 
@@ -747,6 +762,15 @@ def work_line(work: Work, product: Mapping[str, object], denied: Mapping[str, ob
         f"PROFILE-DENY-CONNECT profile={work.profile} work={work.name} ok={_ja(denied['ok'])} "
         f"product_ok={_ja(product['ok'])} result={result.removeprefix('result=')} events={events or '-'} "
         f"tail={denied['tail'] or '-'}"
+    )
+
+
+def product_work_line(work: Work, product: Mapping[str, object]) -> str:
+    """The PROFILE-WORK line: the work of a profile whose product jail already refuses connect()."""
+    result, _, events = str(product["result"]).partition(" events=")
+    return (
+        f"PROFILE-WORK profile={work.profile} work={work.name} product_ok={_ja(product['ok'])} "
+        f"result={result.removeprefix('result=')} events={events or '-'} tail={product['tail'] or '-'}"
     )
 
 
@@ -833,16 +857,23 @@ def profile_works(pdf: Path, docx: Path, png: Path, models: Path, tesseract: str
     return works
 
 
+def jails_for(profile: str) -> tuple[str, ...]:
+    """Only the product jail where it already refuses connect(); else the product and the deny variant."""
+    return ("product",) if PROFILES[profile].deny_connect else JAILS
+
+
 async def test_each_profile_does_its_work_with_connect_denied(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """PROFILE-DENY-CONNECT per profile: a measurement for R2, nothing in the product changes.
+    """PROFILE-WORK for the profiles that refuse connect(), PROFILE-DENY-CONNECT for detect and ocr.
 
-    Each work runs twice in fresh folders: in the product jail of its profile
-    and in the same jail with deny_connect. A switch is only safe where
-    product_ok=ja and ok=ja. The gate here is only that every run really ran
-    (a result line, no jail failure), so a broken jail or driver cannot pass
-    as a measurement.
+    render, precheck and sanitize refuse connect() in the product since
+    17.11.: their work runs once, in the product jail, and must work (a gate).
+    detect and ocr run twice in fresh folders: in the product jail of their
+    profile and in the same jail with deny_connect, a measurement for R2; a
+    switch is only safe where product_ok=ja and ok=ja. For every run the gate
+    is that it really ran (a result line, no jail failure), so a broken jail
+    or driver cannot pass as a measurement.
     """
     models = Path(os.environ.get("PII_MODELS", "/models"))
     works = profile_works(
@@ -855,12 +886,13 @@ async def test_each_profile_does_its_work_with_connect_denied(
     lines: list[str] = []
     measured: dict[str, object] = {}
     not_run: list[str] = []
+    failed: list[str] = []
     for work in works:
         if isinstance(work, str):
             lines.append(work)
             continue
         runs: dict[str, dict[str, object]] = {}
-        for build in JAILS:
+        for build in jails_for(work.profile):
             out = tmp_path / f"{work.profile}-{work.name}-{build}"
             out.mkdir()
             if not work.python:
@@ -869,8 +901,13 @@ async def test_each_profile_does_its_work_with_connect_denied(
             make = jail_argv if build == "product" else deny_connect_argv
             command = make(work.profile, work.argv(out), read=work.read, write=(str(out),))
             runs[build] = await _run_work(command, work.profile, work.timeout_s)
-        lines.append(work_line(work, runs["product"], runs["deny"]))
-        if not runs["product"]["ok"]:
+        if "deny" not in runs:
+            lines.append(product_work_line(work, runs["product"]))
+            if not runs["product"]["ok"]:
+                failed.append(f"{work.profile}/{work.name}")
+        else:
+            lines.append(work_line(work, runs["product"], runs["deny"]))
+        if "deny" in runs and not runs["product"]["ok"]:
             product = runs["product"]
             lines.append(
                 f"PROFILE-PRODUCT profile={work.profile} work={work.name} "
@@ -884,6 +921,8 @@ async def test_each_profile_does_its_work_with_connect_denied(
             print(line)
     record_measurement("profile_deny_connect", measured)
     assert not_run == [], lines
+    # The profiles that refuse connect() in the product still do their work.
+    assert failed == [], lines
 
 
 async def _probe(argv: list[str]) -> str:

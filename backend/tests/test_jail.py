@@ -217,21 +217,34 @@ def test_only_libreoffice_gets_a_socket_path(name: str) -> None:
     assert sockets == ((SOCKET_ROOT,) if name == "soffice" else ())
 
 
+# Owner decisions 17.11.: soffice (secure-phase SOCKET-CONNECT), render,
+# precheck and sanitize (R2, sandbox run of df2d2e5) reach no socket, the HaRP
+# socket included. detect and ocr keep connect() until their work is measured
+# without it (that run had no working detect and no tesseract).
+CONNECT_REFUSED = frozenset({"soffice", "render", "precheck", "sanitize"})
+CONNECT_KEPT = frozenset({"detect", "ocr"})
+
+
+def test_the_two_sets_cover_every_profile() -> None:
+    assert set(PROFILES) == CONNECT_REFUSED | CONNECT_KEPT
+    assert not CONNECT_REFUSED & CONNECT_KEPT
+
+
 @pytest.mark.parametrize("name", sorted(PROFILES))
-def test_only_libreoffice_gets_connect_refused(name: str) -> None:
-    # Owner decision 17.11. (secure-phase SOCKET-CONNECT): soffice may reach no
-    # socket, the HaRP socket included; the other profiles are not changed.
+def test_connect_is_refused_exactly_where_the_owner_decided(name: str) -> None:
     recorder = Recorder()
     jail.main([name, "--", "/bin/true"], recorder.ops())
-    assert ("seccomp", name == "soffice") in recorder.calls
+    assert ("seccomp", name in CONNECT_REFUSED) in recorder.calls
 
 
-def test_negative_render_keeps_connect_and_soffice_does_not() -> None:
-    soffice, render = Recorder(), Recorder()
+@pytest.mark.parametrize("name", sorted(CONNECT_KEPT))
+def test_negative_detect_and_ocr_keep_connect(name: str) -> None:
+    kept, soffice = Recorder(), Recorder()
+    jail.main([name, "--", "/bin/true"], kept.ops())
     jail.main(["soffice", "--", "/usr/bin/soffice"], soffice.ops())
-    jail.main(["render", "--", "/bin/true"], render.ops())
     assert ("seccomp", True) in soffice.calls
-    assert ("seccomp", True) not in render.calls
+    assert ("seccomp", True) not in kept.calls
+    assert ("seccomp", False) in kept.calls
 
 
 def test_the_system_ops_hand_deny_connect_to_the_filter(monkeypatch: pytest.MonkeyPatch) -> None:

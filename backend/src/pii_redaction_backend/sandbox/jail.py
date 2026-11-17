@@ -16,7 +16,8 @@ replaces itself with the command through os.execv:
    write only the job paths, and create a Unix socket only in the socket
    paths of the profile (LibreOffice: /tmp, nothing else);
 4. seccomp: no INET, INET6, PACKET or NETLINK socket, no ptrace and friends;
-   for a profile with deny_connect (LibreOffice) also no connect() at all.
+   for a profile with deny_connect (soffice, render, precheck, sanitize) also
+   no connect() at all.
 
 Why not preexec_fn: the server runs asyncio plus worker threads, and CPython
 documents preexec_fn as unsafe in the presence of threads. A ctypes call into

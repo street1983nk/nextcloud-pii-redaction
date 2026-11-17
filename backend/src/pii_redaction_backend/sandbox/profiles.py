@@ -114,21 +114,26 @@ def _profile(
     )
 
 
+# connect() refused for every family (seccomp, deny_connect): a child of
+# soffice, render, precheck and sanitize reaches no socket, the HaRP socket of the server included. soffice
+# first (owner 17.11., secure-phase SOCKET-CONNECT); render, precheck and
+# sanitize after the sandbox run of df2d2e5 (R2, PROFILE-DENY-CONNECT: ok=ja
+# and product_ok=ja with no audit event on amd64 and arm64; owner 17.11.).
+# detect and ocr keep connect() until a run measures their real work without
+# it (that run had no models for detect and no tesseract for ocr).
+
 PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
     {
         # MuPDF renders one page to PNG: 60 s like the phase 1 deadline, 1 GiB
         # address space, the PNG of a large page stays far below 512 MiB.
-        "render": _profile("render", wall_s=60, address_space=GIB, file_size=512 * MIB),
+        "render": _profile("render", wall_s=60, address_space=GIB, file_size=512 * MIB, deny_connect=True),
         # The pre-check only answers with a verdict file of a few hundred bytes.
-        "precheck": _profile("precheck", wall_s=60, address_space=GIB, file_size=MIB),
+        "precheck": _profile("precheck", wall_s=60, address_space=GIB, file_size=MIB, deny_connect=True),
         # The sanitizer writes the cleaned copy of the source.
-        "sanitize": _profile("sanitize", wall_s=60, address_space=GIB, file_size=SANITIZE_FILE_SIZE),
+        "sanitize": _profile("sanitize", wall_s=60, address_space=GIB, file_size=SANITIZE_FILE_SIZE, deny_connect=True),
         # LibreOffice: 120 s like phase 1; no address space limit until plan
         # 02-24 has measured it (D-02-13); it opens many files at start.
-        # connect() is refused for every family (owner 17.11., secure-phase
-        # SOCKET-CONNECT): it may bind its own pipe but reach no other socket,
-        # the HaRP socket of the server included. The other profiles keep
-        # connect() until a measurement shows they convert without it.
+        # It may bind its own pipe, connect() is refused (see above).
         "soffice": _profile(
             "soffice",
             wall_s=120,

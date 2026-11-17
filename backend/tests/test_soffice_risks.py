@@ -208,19 +208,24 @@ def test_negative_restart_facts_see_setup_and_self_references(tmp_path: Path) ->
 
 
 def test_deny_connect_changes_only_the_flag_and_leaves_the_profiles_alone() -> None:
-    call = jail.parse(["render", "--read", "/x", "--", "/usr/bin/true"])
+    call = jail.parse(["detect", "--read", "/x", "--", "/usr/bin/true"])
     assert call is not None
     changed = jail_layers.with_deny_connect(call)
     assert changed.profile.deny_connect is True
     assert replace(changed.profile, deny_connect=False) == call.profile
     assert (changed.read, changed.write, changed.command) == (call.read, call.write, call.command)
-    # The product profiles stay as they are: render keeps connect(), soffice does not.
-    assert profiles.profile_for("render").deny_connect is False
+    # The product profiles stay as they are: detect keeps connect(), soffice and render do not.
+    assert profiles.profile_for("detect").deny_connect is False
     assert profiles.profile_for("soffice").deny_connect is True
+    assert profiles.profile_for("render").deny_connect is True
 
 
 @pytest.mark.parametrize("profile", ["render", "precheck", "sanitize", "ocr", "detect"])
 def test_the_deny_connect_jail_installs_seccomp_with_deny_connect(profile: str) -> None:
+    # Since 17.11. the product refuses connect() for render, precheck and
+    # sanitize too; for them the variant equals the product. detect and ocr
+    # still differ (negative control below).
+    product_flag = profile in ("render", "precheck", "sanitize")
     calls: list[str] = []
     ops = jail.Ops(
         setrlimit=lambda name, _value: calls.append(name),
@@ -233,12 +238,12 @@ def test_the_deny_connect_jail_installs_seccomp_with_deny_connect(profile: str) 
     )
     assert jail_layers.deny_connect_main([profile, "--", "/usr/bin/true"], ops) == jail.EXIT_LAYER_FAILED
     assert calls[-4:] == ["prctl", "landlock", "seccomp True", "exec /usr/bin/true"]
-    # Negative control: the product jail of the same profile hands on False.
+    # The product jail of the same profile hands on what the profile says.
     calls.clear()
     call = jail.parse([profile, "--", "/usr/bin/true"])
     assert call is not None
     jail.run(call, ops)
-    assert "seccomp False" in calls
+    assert f"seccomp {product_flag}" in calls
 
 
 def test_negative_a_malformed_deny_connect_call_is_a_usage_error() -> None:
@@ -273,6 +278,28 @@ def test_the_work_list_names_every_profile_but_soffice(tmp_path: Path) -> None:
     assert any("profile=ocr" in line and "result=absent" in line for line in absent)
     covered = {line.split("profile=")[1].split()[0] for line in absent} | {profile for profile, _ in named}
     assert covered == set(profiles.PROFILES) - {"soffice"}
+
+
+def test_only_detect_and_ocr_are_still_measured_with_deny_connect() -> None:
+    # render, precheck and sanitize refuse connect() in the product: one run, a gate.
+    for name in ("render", "precheck", "sanitize"):
+        assert diag.jails_for(name) == ("product",)
+    # detect and ocr keep connect(): the product and the variant, a measurement.
+    for name in ("detect", "ocr"):
+        assert diag.jails_for(name) == ("product", "deny")
+    assert set(diag.CONNECT_REFUSED) == {name for name, p in profiles.PROFILES.items() if p.deny_connect}
+
+
+def test_the_product_work_line() -> None:
+    work = diag.Work("sanitize", "sanitize", (), ())
+    product = {"ok": True, "result": "result=ok events=-", "tail": "", "exit": 0}
+    assert diag.product_work_line(work, product) == (
+        "PROFILE-WORK profile=sanitize work=sanitize product_ok=ja result=ok events=- tail=-"
+    )
+    failed = {"ok": False, "result": "result=fail:exit2 events=socket.connect", "tail": "boom", "exit": 1}
+    assert diag.product_work_line(work, failed) == (
+        "PROFILE-WORK profile=sanitize work=sanitize product_ok=nein result=fail:exit2 events=socket.connect tail=boom"
+    )
 
 
 def test_with_models_and_tesseract_detect_and_ocr_are_work(tmp_path: Path) -> None:

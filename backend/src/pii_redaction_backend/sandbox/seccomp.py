@@ -16,7 +16,9 @@ finding SOCKET-CONNECT): without it soffice could reach any Unix socket it can
 see, the HaRP socket of the server included. soffice still converts, because it
 binds its own single-instance pipe and only tries connect() to find an earlier
 instance (sandbox run of 11fb9f9: no-landlock,seccomp,deny-connect converts on
-amd64 and arm64).
+amd64 and arm64). render, precheck and sanitize followed (owner 17.11., sandbox
+run of df2d2e5: their work runs with deny_connect on both architectures);
+detect and ocr keep connect() until their work is measured without it.
 
 available() is the probe: no Linux, no libseccomp or a context that cannot be
 created means "unavailable", reported as False, never raised. Once the probe

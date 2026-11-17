@@ -26,9 +26,11 @@ nothing here changes them.
 
 is the full product jail of the profile (all layers, the code of jail.run),
 with exactly one change: Profile.deny_connect is True, so seccomp refuses
-connect() for every family as it does for soffice. Risk R2 of plan 02-16:
-does the work of render, precheck, sanitize, ocr and detect still run when
-the child can reach no socket? The profiles themselves are not touched.
+connect() for every family as the product does for soffice, render, precheck
+and sanitize. Risk R2 of plan 02-16: does the work of ocr and detect still
+run when the child can reach no socket? (render, precheck and sanitize were
+measured in the sandbox run of df2d2e5 and switched by the owner on 17.11.)
+The profiles themselves are not touched.
 
     python -I jail_layers.py abi       prints abi=<Landlock ABI> kernel=<release>
     python -I jail_layers.py connect <socket path>

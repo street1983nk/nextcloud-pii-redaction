@@ -106,10 +106,15 @@ def test_the_process_count_limit_is_never_set() -> None:
     assert "never set" in source
 
 
-def test_only_libreoffice_has_connect_refused() -> None:
-    # Owner decision 17.11.: connect() -> EACCES for soffice only; render, ocr,
-    # detect and the others are unchanged until a measurement shows they convert without it.
-    assert {name for name, profile in PROFILES.items() if profile.deny_connect} == {"soffice"}
+def test_connect_is_refused_for_soffice_render_precheck_and_sanitize() -> None:
+    # Owner decisions 17.11.: soffice first (secure-phase SOCKET-CONNECT), then
+    # render, precheck and sanitize (R2, sandbox run of df2d2e5: their work ran
+    # with deny_connect on amd64 and arm64). detect and ocr keep connect(): that
+    # run had no working detect (FileNotFoundError of the test setup) and no
+    # tesseract, so nothing shows yet that their work runs without it.
+    denied = {name for name, profile in PROFILES.items() if profile.deny_connect}
+    assert denied == {"soffice", "render", "precheck", "sanitize"}
+    assert set(PROFILES) - denied == {"detect", "ocr"}
 
 
 def test_only_libreoffice_may_create_a_socket_and_only_in_tmp() -> None:
