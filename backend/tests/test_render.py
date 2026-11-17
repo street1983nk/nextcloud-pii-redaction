@@ -92,8 +92,13 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
         seen.update(kwargs)
         seen["profile_existed"] = (tmp_path / "lo-5" / "tmp").is_dir()
         seen["profile_folders"] = sorted(path.name for path in (tmp_path / "lo-5").iterdir())
+        seen["seeded"] = (tmp_path / "lo-5" / "user" / soffice.TEMPLATE_MARKER).read_bytes()
         (tmp_path / "out" / "in.pdf").write_bytes(b"%PDF-1.7\n")
 
+    template = tmp_path / "template"
+    (template / "user").mkdir(parents=True)
+    (template / "user" / soffice.TEMPLATE_MARKER).write_bytes(b"<oor:items/>")
+    monkeypatch.setattr(soffice, "PROFILE_TEMPLATE", str(template))
     monkeypatch.setattr(soffice, "PROFILE_ROOT", str(tmp_path))
     monkeypatch.setattr(soffice, "run_child", fake_run_child)
 
@@ -104,7 +109,9 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
     profile = tmp_path / "lo-5"
     # Only TMPDIR: HOME and XDG stay closed until a run proves them needed.
     assert seen["extra_env"] == {"TMPDIR": str(profile / "tmp")}
-    assert seen["profile_folders"] == ["tmp"]
+    # The template copy is in place before the start (plan 02-16), next to TMPDIR.
+    assert seen["profile_folders"] == ["tmp", "user"]
+    assert seen["seeded"] == b"<oor:items/>"
     assert seen["write"] == (str(tmp_path / "out"), str(profile))
     assert seen["diagnose"] is True
     assert seen["tail_lines"] == child.SOFFICE_TAIL_LINES

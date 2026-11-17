@@ -22,7 +22,7 @@ from pii_redaction_backend import nc
 from pii_redaction_backend.model import AckResult, Reason, Stage, Task
 from pii_redaction_backend.runner import runner
 from pii_redaction_backend.store import repo
-from pii_redaction_backend.workers import child
+from pii_redaction_backend.workers import child, soffice
 
 TOKEN = "0123456789abcdef0123456789abcdef"  # noqa: S105 - a test value in the shape of a claim token
 ETAG = "6a1f3c0e9b2d4"
@@ -85,6 +85,7 @@ class Fake:
         self.converted: list[str] = []
         self.child_gate: asyncio.Event | None = None
         self.child_error: Exception | None = None
+        self.convert_error: Exception | None = None
         self.sleeps: list[float] = []
         self.beats = asyncio.Event()
 
@@ -158,6 +159,8 @@ class Fake:
     async def convert(self, src: Path, outdir: Path, job_id: str, _timeout: float) -> Path:
         self.converted.append(job_id)
         assert src.suffix == ".docx"
+        if self.convert_error is not None:
+            raise self.convert_error
         return _converted(outdir)
 
     async def sleep(self, seconds: float) -> None:
@@ -381,6 +384,32 @@ async def test_a_failed_child_logs_exit_code_signal_and_its_cleaned_tail(
     assert record.__dict__["signal"] is None
     assert record.__dict__["stderr_tail"] == "Fatal exception <path>"
     assert fake.acks() == [("ack", "failed", {"reason": Reason.RENDER_FAILED})]
+
+
+async def test_a_missing_soffice_template_fails_closed_and_logs_only_its_reason(
+    fake: Fake, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake.source = _docx_bytes()
+    fake.convert_error = soffice.ProfileTemplateMissing("missing")
+    fake.claims = [_claim()]
+    with caplog.at_level(logging.INFO, logger="pii_redaction_backend"):
+        await fake.runner().run_once()
+    (record,) = [record for record in caplog.records if record.getMessage() == "render step failed"]
+    assert record.__dict__["exc_type"] == "ProfileTemplateMissing"
+    assert record.__dict__["reason"] == "missing"
+    assert soffice.PROFILE_TEMPLATE not in str(record.__dict__)
+    assert fake.acks() == [("ack", "failed", {"reason": Reason.RENDER_FAILED})]
+
+
+async def test_negative_other_failures_log_no_template_reason(fake: Fake, caplog: pytest.LogCaptureFixture) -> None:
+    fake.source = _docx_bytes()
+    fake.convert_error = soffice.ConversionFailed()
+    fake.claims = [_claim()]
+    with caplog.at_level(logging.INFO, logger="pii_redaction_backend"):
+        await fake.runner().run_once()
+    (record,) = [record for record in caplog.records if record.getMessage() == "render step failed"]
+    assert record.__dict__["exc_type"] == "ConversionFailed"
+    assert record.__dict__["reason"] is None
 
 
 async def test_the_heartbeat_repeats_the_stage_while_a_child_runs(fake: Fake) -> None:

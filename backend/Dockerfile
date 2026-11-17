@@ -77,6 +77,28 @@ RUN apt-get update \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-liberation2 fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
     && rm -rf /var/lib/apt/lists/*
+# The empty LibreOffice profile every job starts from (plan 02-16, owner
+# decision 17.11.2026). With an empty profile soffice initialises it and
+# restarts itself once; in the child jail the second process cannot get past
+# the pipe socket of the first (sandbox run 44054386548). So the build makes
+# the profile once, without a document and before any user data exists, and
+# the server copies its user folder into each job profile (workers/soffice.py,
+# PROFILE_TEMPLATE). Root-owned and read only; the child never reads it. HOME
+# and TMPDIR point into a build folder that goes in the same RUN, together
+# with whatever the first start leaves in /tmp (dconf, fontconfig, the pipe).
+RUN set -eux; \
+    template=/opt/pii/soffice-profile-template; \
+    scratch="$(mktemp -d)"; \
+    install -d -o root -g root -m 0755 /opt/pii; \
+    HOME="${scratch}" TMPDIR="${scratch}" /usr/bin/soffice --headless --norestore --nolockcheck --nodefault --nologo \
+        "-env:UserInstallation=file://${template}" --terminate_after_init; \
+    rm -rf "${scratch}" /tmp/.cache /tmp/.config /tmp/OSL_PIPE_* /tmp/lu*.tmp; \
+    find "${template}" -mindepth 1 -maxdepth 1 ! -name user -exec rm -rf {} +; \
+    test -f "${template}/user/registrymodifications.xcu"; \
+    test -z "$(find "${template}" ! -type d ! -type f)"; \
+    chown -R root:root "${template}"; \
+    find "${template}" -type d -exec chmod 0555 {} +; \
+    find "${template}" -type f -exec chmod 0444 {} +
 # A fixed uid without a root moment at run time. start.sh writes /frpc.toml, so
 # that file and the two directories AppAPI and HaRP fill are prepared for it.
 RUN groupadd --gid 10001 exapp \

@@ -325,6 +325,8 @@ class Runner:
                     "exit_code": getattr(exc, "exit_code", None),
                     "signal": getattr(exc, "signal", None),
                     "stderr_tail": getattr(exc, "stderr_tail", None) or None,
+                    # ProfileTemplateMissing: missing, unreadable or unsafe_entry, never a path.
+                    "reason": exc.reason if isinstance(exc, soffice.ProfileTemplateMissing) else None,
                 },
             )
             await self._fail(job, Reason.RENDER_FAILED)

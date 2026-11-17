@@ -10,7 +10,8 @@ import hashlib
 import re
 
 from pii_redaction_backend import APP_ID
-from tests.conftest import BACKEND_ROOT, repo_text
+from pii_redaction_backend.workers import soffice
+from tests.conftest import BACKEND_ROOT, REPO_ROOT, repo_text
 
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}")
 
@@ -243,3 +244,75 @@ def test_the_libreoffice_rule_fires() -> None:
     ]
     assert libreoffice_findings(good + "RUN apt-get install -y default-jre\n") == ["default-jre in the image"]
     assert libreoffice_findings("USER 10001\n") == ["0 RUN lines install libreoffice-writer-nogui"]
+
+
+# -- the LibreOffice profile template (plan 02-16, owner decision 17.11.) -------------------
+
+# What the RUN that makes the template must hold, each with the reason it matters.
+TEMPLATE_NEEDS = {
+    f"template={soffice.PROFILE_TEMPLATE};": "the path the product copies from",
+    '"-env:UserInstallation=file://${template}"': "the profile lands in the template folder",
+    "--terminate_after_init": "an init run without a document",
+    "--headless": "no display in the build",
+    'rm -rf "${scratch}" /tmp/.cache /tmp/.config /tmp/OSL_PIPE_* /tmp/lu*.tmp;': "no build remains in the image",
+    f'test -f "${{template}}/user/{soffice.TEMPLATE_MARKER}";': "the build fails when the init did not run",
+    'test -z "$(find "${template}" ! -type d ! -type f)";': "only folders and files",
+    'chown -R root:root "${template}";': "root-owned",
+    'find "${template}" -type d -exec chmod 0555 {} +;': "folders read only",
+    'find "${template}" -type f -exec chmod 0444 {} +': "files read only",
+}
+
+
+def template_findings(source: str) -> list[str]:
+    """The template RUN: exactly one, in the runtime stage, after the LibreOffice install, before USER."""
+    runtime = stage_block(source, "runtime")
+    blocks = re.split(r"(?m)^(?=[A-Z]+ )", runtime)
+    runs = [" ".join(block.split()) for block in blocks if block.startswith("RUN ")]
+    holding = [run for run in runs if "--terminate_after_init" in run]
+    if len(holding) != 1:
+        return [f"{len(holding)} RUN lines make the profile template"]
+    run = holding[0]
+    findings = [f"missing: {need} ({why})" for need, why in TEMPLATE_NEEDS.items() if need not in run]
+    install = runtime.find("libreoffice-writer-nogui")
+    make = runtime.find("--terminate_after_init")
+    user = runtime.find("USER 10001")
+    if not install < make < user:
+        findings.append("the template is not made between the LibreOffice install and USER")
+    if soffice.PROFILE_TEMPLATE in stage_block(source, "test"):
+        findings.append("the test stage touches the template")
+    return findings
+
+
+def test_the_image_makes_the_soffice_profile_template() -> None:
+    assert template_findings(read_dockerfile()) == []
+
+
+def test_the_template_rule_fires() -> None:
+    source = read_dockerfile()
+    assert template_findings(source.replace(" --terminate_after_init", "")) == ["0 RUN lines make the profile template"]
+    cleanup = 'rm -rf "${scratch}" /tmp/.cache /tmp/.config /tmp/OSL_PIPE_* /tmp/lu*.tmp;'
+    assert template_findings(source.replace(" /tmp/OSL_PIPE_* /tmp/lu*.tmp;", ";")) == [
+        f"missing: {cleanup} (no build remains in the image)"
+    ]
+    assert template_findings(source.replace("chmod 0444", "chmod 0644")) == [
+        'missing: find "${template}" -type f -exec chmod 0444 {} + (files read only)'
+    ]
+    late = source.replace("USER 10001:10001\n", "USER 10001:10001\nRUN true --terminate_after_init\n")
+    assert "2 RUN lines make the profile template" in template_findings(late)
+
+
+def smoke_template_findings(workflow: str) -> list[str]:
+    """docker.yml checks the pushed image: the template file is there, root-owned and read only."""
+    needle = f"stat -c '%U:%a' {soffice.PROFILE_TEMPLATE}/user/{soffice.TEMPLATE_MARKER}"
+    findings = [] if needle in workflow else ["the smoke test does not look at the template"]
+    if 'test "${template}" = "root:444"' not in workflow:
+        findings.append("the smoke test does not gate owner and mode of the template")
+    return findings
+
+
+def test_the_pushed_image_is_checked_for_the_template() -> None:
+    workflow = repo_text(REPO_ROOT / ".github" / "workflows" / "docker.yml")
+    assert smoke_template_findings(workflow) == []
+    assert smoke_template_findings(workflow.replace('= "root:444"', '= "exapp:644"')) == [
+        "the smoke test does not gate owner and mode of the template"
+    ]
