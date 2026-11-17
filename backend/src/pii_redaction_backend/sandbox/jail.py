@@ -158,6 +158,8 @@ def run(call: Call, ops: Ops) -> int:
 
 
 def _setrlimit(name: str, value: tuple[int, int]) -> None:
+    if sys.platform == "win32":
+        raise OSError(0, "no rlimits on Windows")
     import resource
 
     resource.setrlimit(getattr(resource, name), value)

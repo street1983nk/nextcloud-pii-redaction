@@ -297,7 +297,15 @@ class Runner:
 
             await self._report(job, stage, Stage.RENDERING, 0, None)
             args = child.python_child("render", str(pdf), str(folder / PAGE_FILE), str(RENDER_DPI))
-            await self._timed("render", self._run_child(args, timeout_s=RENDER_TIMEOUT_SECONDS, cwd=folder))
+            run = self._run_child(
+                args,
+                profile="render",
+                cwd=folder,
+                read=(str(pdf),),
+                write=(str(folder),),
+                timeout_s=RENDER_TIMEOUT_SECONDS,
+            )
+            await self._timed("render", run)
             pages, width, height = await asyncio.to_thread(_read_meta, folder / META_FILE)
             await self._report(job, stage, Stage.RENDERING, 1, pages)
         except _Abort:
@@ -325,7 +333,10 @@ class Runner:
             await asyncio.to_thread(_ensure_folder, folder)
             await self._report(job, stage, Stage.RENDERING, None, None)
             args = child.python_child("placeholder", str(output), str(job.job_id))
-            await self._timed("placeholder", self._run_child(args, timeout_s=PLACEHOLDER_TIMEOUT_SECONDS, cwd=folder))
+            run = self._run_child(
+                args, profile="render", cwd=folder, write=(str(folder),), timeout_s=PLACEHOLDER_TIMEOUT_SECONDS
+            )
+            await self._timed("placeholder", run)
             digest, size = await asyncio.to_thread(_hash_file, output)
         except _Abort:
             await asyncio.to_thread(_remove, folder)
