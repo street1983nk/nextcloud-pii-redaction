@@ -351,3 +351,21 @@ def test_a_wrong_call_is_refused(args: list[str], tmp_path: Path) -> None:
     )
     assert result.returncode == 2
     assert "usage" in result.stderr
+
+
+def test_every_package_that_should_pass_has_well_formed_xml(corpus: tuple[Path, dict]) -> None:
+    """A file the pre-check must accept may not fail on its own syntax (the INCLUDEPICTURE lesson)."""
+    from xml.etree import ElementTree
+
+    folder, manifest = corpus
+    checked = 0
+    for name, entry in manifest.items():
+        # unit_only files are judged by one stage only (zip_entries_10000 has empty parts).
+        if entry["expect"] != ["ok"] or entry["unit_only"] or not name.endswith((".docx", ".odt")):
+            continue
+        with zipfile.ZipFile(folder / name) as archive:
+            for member in archive.namelist():
+                if member.endswith((".xml", ".rels")):
+                    ElementTree.fromstring(archive.read(member))  # noqa: S314
+                    checked += 1
+    assert checked > 10

@@ -302,7 +302,8 @@ def _ext_template(canary: str) -> bytes:
 
 
 def _ext_includepicture(canary: str) -> bytes:
-    instr = f'INCLUDEPICTURE "{canary}/p.png" \\d'
+    # The quotes of the field code are escaped: the instruction sits in an attribute.
+    instr = f'INCLUDEPICTURE &quot;{canary}/p.png&quot; \\d'
     body = f'<w:p><w:fldSimple w:instr="{instr}"><w:r><w:t>Bild</w:t></w:r></w:fldSimple></w:p>'
     return _docx(document=_document(body))
 
