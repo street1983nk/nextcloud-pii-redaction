@@ -833,3 +833,79 @@ def test_self_rule21_fires_on_a_write_before_the_candidate_check() -> None:
     slot_route = QUIET_ROUTE.replace("$claim =", "$this->jobs->ensureSlot();\n\t\t$claim =")
     assert idle_claim_writes(READ_FIRST_CLAIM, slot_route) == ["QueueController::claim: ensureSlot("]
     assert idle_claim_writes("", QUIET_ROUTE) == ["JobMapper::claimNext missing"]
+
+
+# -- job events live as long as their job (JOB-05, plan 02-11) ------------------------
+#
+# The signature confirmation and the macro notice exist only as events in
+# pii_job_events. A later cleanup that deleted events on its own would make a
+# confirmed job look unconfirmed. Events may go only together with their job:
+# in JobEventMapper.php inside a method whose name ends with ForJob, nowhere
+# else in php/lib.
+
+EVENT_MAPPER = "php/lib/Db/JobEventMapper.php"
+_EVENT_TABLE_DELETE = re.compile(
+    r"delete\(\s*(?:'pii_job_events'|\"pii_job_events\"|JobEventMapper::TABLE_NAME|self::TABLE_NAME)"
+    r"|DELETE\s+FROM\s+\S*pii_job_events"
+    r"|events->delete\(",
+    re.IGNORECASE,
+)
+
+
+def _methods(source: str) -> list[tuple[str, str]]:
+    lines = source.splitlines()
+    found = []
+    for index, line in enumerate(lines):
+        match = _FUNCTION.match(line)
+        if match is not None:
+            found.append((match.group(1), _method_body(lines, index)))
+    return found
+
+
+def event_deletion_paths(sources: dict[str, str]) -> list[str]:
+    """Every way to delete job events that is not tied to deleting the job."""
+    found = []
+    for name, text in sources.items():
+        if name == EVENT_MAPPER:
+            found += [
+                f"{name}: {method}"
+                for method, body in _methods(text)
+                if "delete(" in body.lower() and not method.endswith("ForJob")
+            ]
+            outside = text
+            for _, body in _methods(text):
+                outside = outside.replace(body, "")
+            if "delete(" in outside.lower():
+                found.append(f"{name}: delete outside a method")
+        elif _EVENT_TABLE_DELETE.search(text):
+            found.append(name)
+    return found
+
+
+def test_job_events_live_as_long_as_the_job() -> None:
+    sources = _lib_sources()
+    assert EVENT_MAPPER in sources
+    assert event_deletion_paths(sources) == []
+
+
+def test_self_job_events_gate_fires_on_a_cleanup() -> None:
+    mapper = (REPO_ROOT / EVENT_MAPPER).read_text(encoding="utf-8")
+    cleanup = mapper.rstrip().removesuffix("}") + (
+        "\n\tpublic function deleteOlderThan(int $at): void {\n"
+        "\t\t$qb = $this->db->getQueryBuilder();\n"
+        "\t\t$qb->delete(self::TABLE_NAME)->executeStatement();\n"
+        "\t}\n}\n"
+    )
+    assert event_deletion_paths({EVENT_MAPPER: cleanup}) == [f"{EVENT_MAPPER}: deleteOlderThan"]
+    together = cleanup.replace("deleteOlderThan", "deleteForJob")
+    assert event_deletion_paths({EVENT_MAPPER: together}) == []
+    for elsewhere in (
+        "$qb->delete('pii_job_events')->executeStatement();",
+        "$qb->delete(JobEventMapper::TABLE_NAME);",
+        "$this->db->executeStatement('DELETE FROM *PREFIX*pii_job_events WHERE at < ?');",
+        "$this->events->delete($event);",
+    ):
+        assert event_deletion_paths({"php/lib/BackgroundJob/Cleanup.php": f"<?php\n{elsewhere}\n"}) == [
+            "php/lib/BackgroundJob/Cleanup.php"
+        ], elsewhere
+    assert event_deletion_paths({"php/lib/Db/JobMapper.php": "<?php\n$qb->delete('pii_jobs');\n"}) == []

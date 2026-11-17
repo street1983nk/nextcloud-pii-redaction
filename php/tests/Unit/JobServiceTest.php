@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\PiiRedaction\Tests\Unit;
 
 use OCA\PiiRedaction\Db\Job;
+use OCA\PiiRedaction\Db\JobEventMapper;
 use OCA\PiiRedaction\Model\Lang;
 use OCA\PiiRedaction\Model\Mode;
 use OCA\PiiRedaction\Model\Reason;
@@ -231,6 +232,115 @@ final class JobServiceTest extends TestCase {
 
 		$this->service->toPurged($job);
 		self::assertNull($this->reload($job)->getTaskEnum());
+	}
+
+	private function inConfirm(): Job {
+		$job = $this->claimed();
+		$this->service->toConfirm($job);
+		return $this->reload($job);
+	}
+
+	public function testASignedFileWaitsForConfirmationWithoutANotification(): void {
+		$job = $this->inConfirm();
+
+		self::assertSame(Status::Confirm, $job->getStatusEnum());
+		self::assertNull($job->getTaskEnum());
+		self::assertNull($job->getStage());
+		self::assertNull($job->getClaimToken());
+		self::assertSame([], $this->sent);
+		$actions = $this->actions($job->getId());
+		self::assertContains('confirm', $actions);
+		self::assertContains(JobEventMapper::ACTION_SIGNATURE_NOTICE, $actions);
+		self::assertFalse($this->service->view($job->getId(), 'alice')['signatureConfirmed'] ?? true);
+	}
+
+	public function testConfirmOnlyFromAnalyzing(): void {
+		$job = $this->started();
+		$this->expectException(\LogicException::class);
+		$this->service->toConfirm($job);
+	}
+
+	public function testAConfirmedSignatureSendsTheJobBackToTheQueue(): void {
+		$job = $this->inConfirm();
+		$this->service->confirmSignature($job, 'alice');
+		$job = $this->reload($job);
+
+		self::assertSame(Status::Queued, $job->getStatusEnum());
+		self::assertSame(Task::Analyze, $job->getTaskEnum());
+		self::assertSame(Stage::Waiting, $job->getStageEnum());
+		self::assertContains(JobEventMapper::ACTION_SIGNATURE_CONFIRMED, $this->actions($job->getId()));
+		self::assertTrue($this->service->view($job->getId(), 'alice')['signatureConfirmed'] ?? false);
+		self::assertSame([], $this->sent);
+	}
+
+	public function testTheConfirmationOutlivesEveryLaterTransition(): void {
+		$job = $this->inConfirm();
+		$this->service->confirmSignature($job, 'alice');
+		$claim = $this->mapper->claimNext();
+		self::assertNotNull($claim);
+		$this->service->toReview($claim['job'], 1, 100, 100);
+		$this->service->toApproved($this->reload($job), 'alice');
+
+		$view = $this->service->view($job->getId(), 'alice');
+		self::assertSame('approved', $view['status'] ?? null);
+		self::assertTrue($view['signatureConfirmed'] ?? false);
+	}
+
+	public function testOnlyTheInitiatorConfirms(): void {
+		$job = $this->inConfirm();
+		$this->expectException(\LogicException::class);
+		$this->service->confirmSignature($job, 'bob');
+	}
+
+	public function testConfirmingOutsideConfirmThrows(): void {
+		$job = $this->inReview();
+		$this->expectException(\LogicException::class);
+		$this->service->confirmSignature($job, 'alice');
+	}
+
+	public function testADeclinedSignatureCancelsWithoutANotification(): void {
+		$job = $this->inConfirm();
+		$this->service->declineSignature($job, 'alice');
+		$job = $this->reload($job);
+
+		self::assertSame(Status::Cancelled, $job->getStatusEnum());
+		self::assertSame(Reason::SignatureDeclined, $job->getReasonEnum());
+		self::assertSame(Task::Purge, $job->getTaskEnum());
+		self::assertSame([], $this->sent);
+		self::assertContains('job:' . $job->getId(), $this->dismissed);
+	}
+
+	public function testOnlyTheInitiatorDeclines(): void {
+		$job = $this->inConfirm();
+		$this->expectException(\LogicException::class);
+		$this->service->declineSignature($job, 'bob');
+	}
+
+	public function testAckFlagsWriteOneEventPerSetFlag(): void {
+		$job = $this->claimed();
+		$this->service->recordAckFlags($job, true, 0, false);
+		$actions = $this->actions($job->getId());
+		self::assertSame(1, count(array_keys($actions, JobEventMapper::ACTION_MACROS_REMOVED, true)));
+		self::assertNotContains(JobEventMapper::ACTION_EXTERNAL_LINKS_REMOVED, $actions);
+		self::assertNotContains(JobEventMapper::ACTION_OWNER_PROTECTION_DROPPED, $actions);
+		self::assertTrue($this->service->view($job->getId(), 'alice')['macrosRemoved'] ?? false);
+
+		$this->service->recordAckFlags($job, false, 3, true);
+		$actions = $this->actions($job->getId());
+		self::assertContains(JobEventMapper::ACTION_EXTERNAL_LINKS_REMOVED, $actions);
+		self::assertContains(JobEventMapper::ACTION_OWNER_PROTECTION_DROPPED, $actions);
+	}
+
+	public function testAPlainJobShowsNeitherNotice(): void {
+		$job = $this->started();
+		$view = $this->service->view($job->getId(), 'alice');
+		self::assertFalse($view['macrosRemoved'] ?? true);
+		self::assertFalse($view['signatureConfirmed'] ?? true);
+	}
+
+	public function testHasActionRefusesAWordOutsideTheClosedLists(): void {
+		$this->expectException(\InvalidArgumentException::class);
+		$this->events->hasAction(1, "x' OR '1'='1");
 	}
 
 	public function testAForbiddenTransitionThrows(): void {
