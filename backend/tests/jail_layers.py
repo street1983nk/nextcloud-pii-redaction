@@ -61,10 +61,44 @@ RESTRICT_SELF_LOG_NEW_EXEC_ON = 1 << 1
 #   no-landlock  no Landlock at all
 #   seccomp      the seccomp filter of the product on top
 #   deny-connect an extra seccomp filter: connect() fails with EACCES, every family
+#   grant=P:R+R  exactly the Landlock rights R (names of GRANT_RIGHTS) on P on top of
+#                the product rules, nothing else: write=/tmp split into its rights
 FLAG_SPECS = frozenset(
     {"refer", "ioctl", "nosock", "net-off", "scope-off", "fs-all", "audit", "no-landlock", "seccomp", "deny-connect"}
 )
 PATH_SPECS = ("read", "write")
+GRANT_SPEC = "grant"
+# The rights a grant= spec may name. READ is the read set of the product
+# (READ_FILE, READ_DIR, EXECUTE) in one word.
+GRANT_RIGHTS = {
+    "READ": landlock.READ_ACCESS,
+    "READ_FILE": landlock.ACCESS_FS_READ_FILE,
+    "READ_DIR": landlock.ACCESS_FS_READ_DIR,
+    "EXECUTE": landlock.ACCESS_FS_EXECUTE,
+    "WRITE_FILE": landlock.ACCESS_FS_WRITE_FILE,
+    "TRUNCATE": landlock.ACCESS_FS_TRUNCATE,
+    "MAKE_DIR": landlock.ACCESS_FS_MAKE_DIR,
+    "MAKE_REG": landlock.ACCESS_FS_MAKE_REG,
+    "MAKE_SOCK": landlock.ACCESS_FS_MAKE_SOCK,
+    "MAKE_FIFO": landlock.ACCESS_FS_MAKE_FIFO,
+    "MAKE_SYM": landlock.ACCESS_FS_MAKE_SYM,
+    "REMOVE_FILE": landlock.ACCESS_FS_REMOVE_FILE,
+    "REMOVE_DIR": landlock.ACCESS_FS_REMOVE_DIR,
+    "REFER": landlock.ACCESS_FS_REFER,
+}
+
+
+def parse_grant(value: str) -> tuple[str, int] | None:
+    """The path and the rights of a grant= value "P:R+R", or None when malformed."""
+    path, has_rights, names = value.rpartition(":")
+    if not has_rights or not path.startswith("/") or not names:
+        return None
+    rights = 0
+    for name in names.split("+"):
+        if name not in GRANT_RIGHTS:
+            return None
+        rights |= GRANT_RIGHTS[name]
+    return path, rights
 
 
 def _no_landlock() -> int:
@@ -91,7 +125,10 @@ def parse_specs(text: str) -> tuple[str, ...] | None:
     specs = tuple(part for part in text.split(",") if part)
     for spec in specs:
         key, has_value, value = spec.partition("=")
-        if has_value:
+        if has_value and key == GRANT_SPEC:
+            if parse_grant(value) is None:
+                return None
+        elif has_value:
             if key not in PATH_SPECS or not value.startswith("/"):
                 return None
         elif spec not in FLAG_SPECS:
@@ -101,6 +138,18 @@ def parse_specs(text: str) -> tuple[str, ...] | None:
 
 def _paths(specs: tuple[str, ...], key: str) -> tuple[str, ...]:
     return tuple(spec.split("=", 1)[1] for spec in specs if spec.startswith(f"{key}="))
+
+
+def _grants(specs: tuple[str, ...]) -> list[tuple[str, int]]:
+    found: list[tuple[str, int]] = []
+    for spec in specs:
+        if spec.startswith(f"{GRANT_SPEC}="):
+            grant = parse_grant(spec.split("=", 1)[1])
+            if grant is None:
+                msg = f"malformed grant spec {spec!r}"
+                raise ValueError(msg)
+            found.append(grant)
+    return found
 
 
 def restrict_variant(
@@ -141,6 +190,8 @@ def restrict_variant(
         landlock._add_paths(syscall, ruleset, (*write, *_paths(specs, "write")), write_access)
         if "nosock" not in specs:
             landlock._add_paths(syscall, ruleset, sockets, landlock.SOCKET_ACCESS & handled.fs)
+        for path, rights in _grants(specs):
+            landlock._add_paths(syscall, ruleset, (path,), rights & handled.fs)
         if "fs-all" in specs:
             landlock._add_paths(syscall, ruleset, ("/",), handled.fs)
         result = syscall(landlock.SYS_RESTRICT_SELF, ruleset, flags)

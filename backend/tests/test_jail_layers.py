@@ -86,13 +86,39 @@ def fd_file(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize(
     "text",
-    ["refer", "read=/proc", "write=/dev/null,refer", "fs-all,net-off,scope-off", "no-landlock,seccomp,deny-connect"],
+    [
+        "refer",
+        "read=/proc",
+        "write=/dev/null,refer",
+        "fs-all,net-off,scope-off",
+        "no-landlock,seccomp,deny-connect",
+        "grant=/tmp:MAKE_DIR",
+        "grant=/tmp:READ+MAKE_DIR+MAKE_REG+WRITE_FILE",
+    ],
 )
 def test_known_specs_parse(text: str) -> None:
     assert jail_layers.parse_specs(text) == tuple(text.split(","))
 
 
-@pytest.mark.parametrize("text", ["", ",", "bogus", "read=proc", "exec=/usr", "read", "refer,unknown", "nosock=/tmp"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        ",",
+        "bogus",
+        "read=proc",
+        "exec=/usr",
+        "read",
+        "refer,unknown",
+        "nosock=/tmp",
+        "grant=/tmp",
+        "grant=/tmp:",
+        "grant=tmp:MAKE_DIR",
+        "grant=/tmp:MAKE_DIR+",
+        "grant=/tmp:make_dir",
+        "grant=/tmp:IOCTL_DEV",
+    ],
+)
 def test_negative_unknown_or_malformed_specs_are_refused(text: str) -> None:
     assert jail_layers.parse_specs(text) is None
     assert jail_layers.main(["variant", text, "soffice", "--", "/usr/bin/soffice"]) == jail.EXIT_USAGE
@@ -155,6 +181,11 @@ def test_each_rule_change_touches_only_its_rule(tmp_path: Path, fd_file: Path) -
     assert rights(f"read={extra}") == [read_rights, read_rights, write_rights, landlock.SOCKET_ACCESS]
     assert rights(f"write={extra}") == [read_rights, write_rights, write_rights, landlock.SOCKET_ACCESS]
     assert rights("fs-all") == [read_rights, write_rights, landlock.SOCKET_ACCESS, handled]
+    make = landlock.ACCESS_FS_MAKE_DIR
+    assert rights(f"grant={extra}:MAKE_DIR") == [read_rights, write_rights, landlock.SOCKET_ACCESS, make]
+    trio = make | landlock.ACCESS_FS_MAKE_REG | landlock.ACCESS_FS_WRITE_FILE
+    assert rights(f"grant={extra}:MAKE_DIR+MAKE_REG+WRITE_FILE")[-1] == trio
+    assert rights(f"grant={extra}:READ+TRUNCATE")[-1] == landlock.READ_ACCESS | landlock.ACCESS_FS_TRUNCATE
     # A missing path is skipped, like in the product.
     assert rights(f"read={tmp_path / 'missing'}") == rights()
 
@@ -228,3 +259,26 @@ def test_a_variant_runs_in_product_order() -> None:
     assert call is not None
     assert jail.run(call, ops) == jail.EXIT_LAYER_FAILED  # a fake execv returns
     assert calls[-4:] == ["prctl", "landlock", "seccomp True", "exec /usr/bin/soffice"]
+
+
+def test_each_grant_right_is_one_landlock_right_and_read_is_the_product_read_set() -> None:
+    singles = {name: bits for name, bits in jail_layers.GRANT_RIGHTS.items() if name != "READ"}
+    assert all(bits and not bits & (bits - 1) for bits in singles.values())
+    assert len(set(singles.values())) == len(singles)
+    assert jail_layers.GRANT_RIGHTS["READ"] == landlock.READ_ACCESS
+    # write=P is exactly the sum of its single rights, so the split covers it.
+    write_names = ("READ", "WRITE_FILE", "TRUNCATE", "MAKE_DIR", "MAKE_REG", "MAKE_SOCK", "MAKE_FIFO", "MAKE_SYM")
+    removal = ("REMOVE_FILE", "REMOVE_DIR")
+    total = 0
+    for name in (*write_names, *removal):
+        total |= jail_layers.GRANT_RIGHTS[name]
+    assert total == landlock.WRITE_ACCESS
+
+
+def test_parse_grant_names_path_and_rights() -> None:
+    assert jail_layers.parse_grant("/srv/data:MAKE_DIR+MAKE_REG") == (
+        "/srv/data",
+        landlock.ACCESS_FS_MAKE_DIR | landlock.ACCESS_FS_MAKE_REG,
+    )
+    assert jail_layers.parse_grant("/srv/data") is None
+    assert jail_layers.parse_grant("/srv/data:NOPE") is None
