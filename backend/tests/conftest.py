@@ -1,12 +1,14 @@
 """Shared fixtures: the environment AppAPI would set, and signed request headers."""
 
 import base64
+import functools
 import importlib.util
 import json
 import os
 import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +38,34 @@ def signed_headers(user: str = "admin", secret: str = SECRET, app_id: str = APP_
     """The three headers AppAPIAuthMiddleware checks."""
     token = base64.b64encode(f"{user}:{secret}".encode()).decode()
     return {"EX-APP-ID": app_id, "EX-APP-VERSION": VERSION, "AUTHORIZATION-APP-API": token, "AA-VERSION": "32.0.0"}
+
+
+# -- repository files, read on first use --------------------------------------------------
+#
+# The test stage of the image carries tests/, pyproject.toml, appinfo/ and
+# l10n/, but not ci/, the Dockerfile, uv.lock or the workflows. sandbox.yml
+# collects every module there and keeps only -m container, so a module that
+# reads such a file at import breaks the collection (exit 2) for tests it would
+# never run. Read them inside the tests, through these two; a test that needs a
+# missing file then fails loudly where it runs, nothing is skipped
+# (tests/test_collection_reads_no_files.py holds the rule).
+
+
+@functools.cache
+def repo_text(path: Path) -> str:
+    """The text of a repository file, read once per session."""
+    return path.read_text(encoding="utf-8")
+
+
+@functools.cache
+def ci_module(name: str) -> ModuleType:
+    """ci/<name>.py as a module, loaded once per session."""
+    spec = importlib.util.spec_from_file_location(f"ci_{name}", REPO_ROOT / "ci" / f"{name}.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture

@@ -19,12 +19,24 @@ pattern of tests/test_dockerfile.py.
 import re
 import tomllib
 
-from tests.conftest import BACKEND_ROOT, REPO_ROOT
+from tests.conftest import BACKEND_ROOT, REPO_ROOT, repo_text
 
-PYPROJECT_TEXT = (BACKEND_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-PYPROJECT = tomllib.loads(PYPROJECT_TEXT)
-LOCK = (BACKEND_ROOT / "uv.lock").read_text(encoding="utf-8")
-PYTHON_YML = (REPO_ROOT / ".github" / "workflows" / "python.yml").read_text(encoding="utf-8")
+
+def read_pyproject_text() -> str:
+    return repo_text(BACKEND_ROOT / "pyproject.toml")
+
+
+def read_pyproject() -> dict:
+    return tomllib.loads(read_pyproject_text())
+
+
+def read_lock() -> str:
+    return repo_text(BACKEND_ROOT / "uv.lock")
+
+
+def read_python_yml() -> str:
+    return repo_text(REPO_ROOT / ".github" / "workflows" / "python.yml")
+
 
 CPU_INDEX = "https://download.pytorch.org/whl/cpu"
 
@@ -113,7 +125,7 @@ def container_filter_findings(workflow: str) -> list[str]:
 
 
 def test_runtime_pins_are_exact() -> None:
-    assert range_findings(dependencies(PYPROJECT)) == []
+    assert range_findings(dependencies(read_pyproject())) == []
 
 
 def test_the_range_rule_fires() -> None:
@@ -121,11 +133,11 @@ def test_the_range_rule_fires() -> None:
 
 
 def test_detection_stack_is_pinned() -> None:
-    assert stack_findings(dependencies(PYPROJECT)) == []
+    assert stack_findings(dependencies(read_pyproject())) == []
 
 
 def test_the_stack_rule_fires() -> None:
-    deps = [dep.replace("transformers==5.22.1", "transformers==4.57.6") for dep in dependencies(PYPROJECT)]
+    deps = [dep.replace("transformers==5.22.1", "transformers==4.57.6") for dep in dependencies(read_pyproject())]
     deps = [dep for dep in deps if not dep.startswith("pikepdf")]
     assert stack_findings(deps) == [
         "transformers: expected ==5.22.1, found ['4.57.6']",
@@ -134,8 +146,8 @@ def test_the_stack_rule_fires() -> None:
 
 
 def test_gliner2_has_no_local_extra() -> None:
-    assert local_extra_findings(dependencies(PYPROJECT)) == []
-    assert "gliner2[" not in PYPROJECT_TEXT
+    assert local_extra_findings(dependencies(read_pyproject())) == []
+    assert "gliner2[" not in read_pyproject_text()
 
 
 def test_the_local_extra_rule_fires() -> None:
@@ -143,29 +155,29 @@ def test_the_local_extra_rule_fires() -> None:
 
 
 def test_torch_comes_from_the_cpu_index() -> None:
-    assert torch_index_findings(PYPROJECT, LOCK) == []
+    assert torch_index_findings(read_pyproject(), read_lock()) == []
 
 
 def test_the_torch_index_rule_fires() -> None:
-    probe = tomllib.loads(PYPROJECT_TEXT.replace("explicit = true", "explicit = false"))
-    assert torch_index_findings(probe, LOCK) == ["torch index is not explicit"]
-    pypi_lock = LOCK.replace(
+    probe = tomllib.loads(read_pyproject_text().replace("explicit = true", "explicit = false"))
+    assert torch_index_findings(probe, read_lock()) == ["torch index is not explicit"]
+    pypi_lock = read_lock().replace(
         f'source = {{ registry = "{CPU_INDEX}" }}', 'source = { registry = "https://pypi.org/simple" }'
     )
-    assert "uv.lock torch source is https://pypi.org/simple" in torch_index_findings(PYPROJECT, pypi_lock)
-    no_source = tomllib.loads(PYPROJECT_TEXT.replace('torch = { index = "pytorch-cpu" }', ""))
-    assert torch_index_findings(no_source, LOCK) == ["torch has no index source"]
+    assert "uv.lock torch source is https://pypi.org/simple" in torch_index_findings(read_pyproject(), pypi_lock)
+    no_source = tomllib.loads(read_pyproject_text().replace('torch = { index = "pytorch-cpu" }', ""))
+    assert torch_index_findings(no_source, read_lock()) == ["torch has no index source"]
 
 
 def test_container_and_linux_markers_are_registered() -> None:
-    assert marker_findings(PYPROJECT) == []
-    assert container_filter_findings(PYTHON_YML) == []
+    assert marker_findings(read_pyproject()) == []
+    assert container_filter_findings(read_python_yml()) == []
 
 
 def test_the_marker_rules_fire() -> None:
-    probe = tomllib.loads(re.sub(r'\s+"linux: [^"]*",', "", PYPROJECT_TEXT))
+    probe = tomllib.loads(re.sub(r'\s+"linux: [^"]*",', "", read_pyproject_text()))
     assert marker_findings(probe) == ["marker linux not registered"]
-    assert container_filter_findings(PYTHON_YML.replace(' -m "not container"', "")) == [
+    assert container_filter_findings(read_python_yml().replace(' -m "not container"', "")) == [
         "pytest step keeps the container tests"
     ]
 
@@ -195,29 +207,31 @@ def exclude_newer_findings(pyproject: dict, lock: str) -> list[str]:
 
 
 def test_the_lock_holds_the_two_week_rule() -> None:
-    assert exclude_newer_findings(PYPROJECT, LOCK) == []
+    assert exclude_newer_findings(read_pyproject(), read_lock()) == []
 
 
 def test_the_exclude_newer_rule_fires() -> None:
-    cutoff = PYPROJECT["tool"]["uv"]["exclude-newer"]
-    no_cutoff = tomllib.loads(PYPROJECT_TEXT.replace(f'exclude-newer = "{cutoff}"', ""))
-    assert exclude_newer_findings(no_cutoff, LOCK) == ["exclude-newer is not a fixed UTC timestamp: None"]
-    relative = tomllib.loads(PYPROJECT_TEXT.replace(f'exclude-newer = "{cutoff}"', 'exclude-newer = "2 weeks"'))
-    assert exclude_newer_findings(relative, LOCK) == ["exclude-newer is not a fixed UTC timestamp: '2 weeks'"]
-    young = LOCK.replace('upload-time = "2026-10-28T13:19:05Z"', 'upload-time = "2026-11-16T10:12:19.491Z"', 1)
-    assert young != LOCK
-    assert exclude_newer_findings(PYPROJECT, young) == ["file uploaded 2026-11-16T10:12:19.491Z, after the cut-off"]
-    stale = LOCK.replace(f'exclude-newer = "{cutoff}"', "", 1)
-    assert exclude_newer_findings(PYPROJECT, stale) == ["uv.lock was not resolved with this exclude-newer"]
+    text, pyproject, lock = read_pyproject_text(), read_pyproject(), read_lock()
+    cutoff = pyproject["tool"]["uv"]["exclude-newer"]
+    no_cutoff = tomllib.loads(text.replace(f'exclude-newer = "{cutoff}"', ""))
+    assert exclude_newer_findings(no_cutoff, lock) == ["exclude-newer is not a fixed UTC timestamp: None"]
+    relative = tomllib.loads(text.replace(f'exclude-newer = "{cutoff}"', 'exclude-newer = "2 weeks"'))
+    assert exclude_newer_findings(relative, lock) == ["exclude-newer is not a fixed UTC timestamp: '2 weeks'"]
+    young = lock.replace('upload-time = "2026-10-28T13:19:05Z"', 'upload-time = "2026-11-16T10:12:19.491Z"', 1)
+    assert young != lock
+    assert exclude_newer_findings(pyproject, young) == ["file uploaded 2026-11-16T10:12:19.491Z, after the cut-off"]
+    stale = lock.replace(f'exclude-newer = "{cutoff}"', "", 1)
+    assert exclude_newer_findings(pyproject, stale) == ["uv.lock was not resolved with this exclude-newer"]
     exempt = tomllib.loads(
-        PYPROJECT_TEXT.replace(
+        text.replace(
             f'exclude-newer = "{cutoff}"', f'exclude-newer = "{cutoff}"\nexclude-newer-package = {{ torch = false }}'
         )
     )
-    assert exclude_newer_findings(exempt, LOCK) == ["exclude-newer-package exempts packages from the cut-off"]
+    assert exclude_newer_findings(exempt, lock) == ["exclude-newer-package exempts packages from the cut-off"]
 
 
-SECURITY_YML = (REPO_ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+def read_security_yml() -> str:
+    return repo_text(REPO_ROOT / ".github" / "workflows" / "security.yml")
 
 
 def audit_order_findings(workflow: str) -> list[str]:
@@ -233,13 +247,13 @@ def audit_order_findings(workflow: str) -> list[str]:
 
 
 def test_the_audit_sees_torch_under_its_upstream_version() -> None:
-    assert audit_order_findings(SECURITY_YML) == []
+    assert audit_order_findings(read_security_yml()) == []
     # The sed expression of the workflow, applied to the line uv export writes.
     line = "torch==2.15.0+cpu ; sys_platform != 'darwin' \\"
     assert re.sub(r"^torch==([0-9.]+)\+cpu ", r"torch==\1 ", line) == "torch==2.15.0 ; sys_platform != 'darwin' \\"
 
 
 def test_the_audit_order_rule_fires() -> None:
-    assert audit_order_findings(SECURITY_YML.replace(r"torch==\1 ", "")) == [
+    assert audit_order_findings(read_security_yml().replace(r"torch==\1 ", "")) == [
         "export, +cpu strip or strict audit missing"
     ]

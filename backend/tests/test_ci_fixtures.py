@@ -6,7 +6,6 @@ fixture, finds two pages and finds the canary in the text, so the canary scan
 at the end of the run (plan 17) has something it must be able to find.
 """
 
-import importlib.util
 import re
 import subprocess
 import sys
@@ -18,24 +17,19 @@ from xml.etree import ElementTree
 import pymupdf
 import pytest
 
-from tests.conftest import REPO_ROOT
+from tests.conftest import REPO_ROOT, ci_module
 
 CI = REPO_ROOT / "ci"
 CANARY = "PIIKANARIE7Q4XZ9"
 NAMES = ("Bescheid 2026-114.pdf", "Antrag.docx", "Vermerk.odt", "notes.txt")
 
 
-def _load(name: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location(f"ci_{name}", CI / f"{name}.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def make_fixtures() -> ModuleType:
+    return ci_module("make_fixtures")
 
 
-fixtures = _load("make_fixtures")
-pdf_text = _load("pdf_text")
+def pdf_text() -> ModuleType:
+    return ci_module("pdf_text")
 
 
 @pytest.fixture
@@ -59,7 +53,7 @@ def test_the_script_writes_exactly_the_four_files(made: Path) -> None:
 
 def test_the_canary_is_in_no_file_name() -> None:
     assert all(CANARY not in name for name in NAMES)
-    assert CANARY in fixtures.CANARY
+    assert CANARY in make_fixtures().CANARY
 
 
 def test_the_pdf_carries_the_canary_in_its_raw_bytes_and_only_in_a_content_stream(made: Path) -> None:
@@ -154,7 +148,7 @@ def test_pdf_text_reads_a_flate_stream_the_raw_bytes_hide(tmp_path: Path) -> Non
     raw = target.read_bytes()
 
     assert CANARY.encode() not in raw
-    assert CANARY in pdf_text.text_of(raw)
+    assert CANARY in pdf_text().text_of(raw)
 
 
 def test_pdf_text_reads_the_placeholder_copy_and_finds_no_canary(tmp_path: Path) -> None:
@@ -162,7 +156,7 @@ def test_pdf_text_reads_the_placeholder_copy_and_finds_no_canary(tmp_path: Path)
 
     target = tmp_path / "copy.pdf"
     assert placeholder.main([str(target), "7"]) == 0
-    text = pdf_text.text_of(target.read_bytes())
+    text = pdf_text().text_of(target.read_bytes())
 
     assert "Placeholder from PII Redaction" in text
     assert CANARY not in text
@@ -171,7 +165,7 @@ def test_pdf_text_reads_the_placeholder_copy_and_finds_no_canary(tmp_path: Path)
 def test_pdf_text_decodes_escapes_hex_and_arrays() -> None:
     body = b"BT (a\\(b\\)c\\\\d\\101) Tj <48656c6c6f> Tj [(Wo) -120 (rld)] TJ % (ignored)\n ET"
 
-    assert pdf_text.runs(body) == ["a(b)c\\dA", "Hello", "World"]
+    assert pdf_text().runs(body) == ["a(b)c\\dA", "Hello", "World"]
 
 
 def test_pdf_text_skips_images_and_unknown_filters() -> None:
@@ -181,13 +175,13 @@ def test_pdf_text_skips_images_and_unknown_filters() -> None:
         b"<< /Length 5 >>\nstream\n(ok) Tj\nendstream\n"
     )
 
-    assert pdf_text.text_of(data) == "ok"
+    assert pdf_text().text_of(data) == "ok"
 
 
 def test_both_scripts_refuse_a_wrong_call() -> None:
-    assert fixtures.main([]) == 2
-    assert pdf_text.main([]) == 2
-    assert pdf_text.main(["/nonexistent/file.pdf"]) == 2
+    assert make_fixtures().main([]) == 2
+    assert pdf_text().main([]) == 2
+    assert pdf_text().main(["/nonexistent/file.pdf"]) == 2
 
 
 def test_neither_script_imports_pymupdf() -> None:

@@ -10,10 +10,13 @@ import hashlib
 import re
 
 from pii_redaction_backend import APP_ID
-from tests.conftest import BACKEND_ROOT
+from tests.conftest import BACKEND_ROOT, repo_text
 
-DOCKERFILE = (BACKEND_ROOT / "Dockerfile").read_text(encoding="utf-8")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}")
+
+
+def read_dockerfile() -> str:
+    return repo_text(BACKEND_ROOT / "Dockerfile")
 
 
 def from_lines(source: str) -> list[str]:
@@ -63,14 +66,14 @@ def stage_findings(source: str) -> list[str]:
 
 
 def test_runtime_is_the_last_shipped_stage() -> None:
-    assert len(re.findall(r"^FROM ", DOCKERFILE, re.MULTILINE)) >= 4
-    assert stage_findings(DOCKERFILE) == []
+    assert len(re.findall(r"^FROM ", read_dockerfile(), re.MULTILINE)) >= 4
+    assert stage_findings(read_dockerfile()) == []
 
 
 def test_the_stage_rule_fires() -> None:
-    debug = DOCKERFILE + "\nFROM runtime AS debug\nRUN true\n"
+    debug = read_dockerfile() + "\nFROM runtime AS debug\nRUN true\n"
     assert stage_findings(debug) == ["stage debug after runtime", "the last stage is not FROM runtime AS test"]
-    leaked = DOCKERFILE.replace("COPY l10n /app/l10n", "COPY l10n /app/l10n\nCOPY tests /app/tests")
+    leaked = read_dockerfile().replace("COPY l10n /app/l10n", "COPY l10n /app/l10n\nCOPY tests /app/tests")
     assert stage_findings(leaked) == ["the runtime stage copies tests"]
 
 
@@ -80,12 +83,12 @@ def frpc_mode_findings(source: str) -> list[str]:
 
 
 def test_frpc_is_installed_execute_only() -> None:
-    assert frpc_mode_findings(DOCKERFILE) == []
-    assert "install -m 0755" not in DOCKERFILE
+    assert frpc_mode_findings(read_dockerfile()) == []
+    assert "install -m 0755" not in read_dockerfile()
 
 
 def test_the_frpc_mode_rule_fires() -> None:
-    assert frpc_mode_findings(DOCKERFILE.replace("install -m 0711", "install -m 0755")) == [
+    assert frpc_mode_findings(read_dockerfile().replace("install -m 0711", "install -m 0755")) == [
         "frpc installed with ['0755']"
     ]
 
@@ -105,15 +108,15 @@ def offline_findings(source: str) -> list[str]:
 
 
 def test_offline_environment_is_set() -> None:
-    assert offline_findings(DOCKERFILE) == []
+    assert offline_findings(read_dockerfile()) == []
 
 
 def test_the_offline_rule_fires() -> None:
-    assert offline_findings(DOCKERFILE.replace("    HF_HUB_OFFLINE=1 \\\n", "")) == ["HF_HUB_OFFLINE=1 missing"]
+    assert offline_findings(read_dockerfile().replace("    HF_HUB_OFFLINE=1 \\\n", "")) == ["HF_HUB_OFFLINE=1 missing"]
 
 
 def test_libseccomp_is_installed() -> None:
-    installs = re.findall(r"apt-get install[^\n]*", stage_block(DOCKERFILE, "runtime"))
+    installs = re.findall(r"apt-get install[^\n]*", stage_block(read_dockerfile(), "runtime"))
     assert any(re.search(r"\blibseccomp2\b", line) for line in installs)
 
 
@@ -154,35 +157,35 @@ def test_the_push_target_rule_fires() -> None:
 
 
 def test_every_base_image_is_pinned_by_digest() -> None:
-    assert resolved_bases(DOCKERFILE)
-    assert unpinned(DOCKERFILE) == []
+    assert resolved_bases(read_dockerfile())
+    assert unpinned(read_dockerfile()) == []
 
 
 def test_the_runtime_runs_as_a_fixed_non_root_user() -> None:
-    runtime = DOCKERFILE.split(" AS runtime", 1)[1]
+    runtime = read_dockerfile().split(" AS runtime", 1)[1]
     users = re.findall(r"^USER (\S+)", runtime, re.MULTILINE)
 
     assert users == ["10001:10001"]
 
 
 def test_health_check_entrypoint_and_app_module() -> None:
-    assert (
-        'HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 CMD ["/healthcheck.sh"]' in DOCKERFILE
-    )
-    assert f'"-m", "{APP_ID}.main"]' in DOCKERFILE
-    assert f"/nc_app_{APP_ID}_data" in DOCKERFILE
+    dockerfile = read_dockerfile()
+    healthcheck = 'HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 CMD ["/healthcheck.sh"]'
+    assert healthcheck in dockerfile
+    assert f'"-m", "{APP_ID}.main"]' in dockerfile
+    assert f"/nc_app_{APP_ID}_data" in dockerfile
 
 
 def test_no_remote_add_and_apt_lists_are_removed() -> None:
-    assert not re.search(r"^ADD\s+https?://", DOCKERFILE, re.MULTILINE)
-    for block in re.findall(r"apt-get install[^\n]*(?:\n\s+[^\n]*)*", DOCKERFILE):
+    assert not re.search(r"^ADD\s+https?://", read_dockerfile(), re.MULTILINE)
+    for block in re.findall(r"apt-get install[^\n]*(?:\n\s+[^\n]*)*", read_dockerfile()):
         assert "--no-install-recommends" in block
-    assert DOCKERFILE.count("apt-get update") == DOCKERFILE.count("rm -rf /var/lib/apt/lists/*")
+    assert read_dockerfile().count("apt-get update") == read_dockerfile().count("rm -rf /var/lib/apt/lists/*")
 
 
 def test_the_frpc_download_is_checked_against_a_checksum() -> None:
-    assert "sha256sum -c -" in DOCKERFILE
-    assert len(re.findall(r"FRP_\w+_SHA256=[0-9a-f]{64}", DOCKERFILE)) == 2
+    assert "sha256sum -c -" in read_dockerfile()
+    assert len(re.findall(r"FRP_\w+_SHA256=[0-9a-f]{64}", read_dockerfile())) == 2
 
 
 def test_the_image_scripts_have_a_shebang_and_strict_mode() -> None:
@@ -228,7 +231,7 @@ def libreoffice_findings(dockerfile: str) -> list[str]:
 
 
 def test_libreoffice_and_the_fonts_are_installed_without_java() -> None:
-    assert libreoffice_findings(DOCKERFILE) == []
+    assert libreoffice_findings(read_dockerfile()) == []
 
 
 def test_the_libreoffice_rule_fires() -> None:
