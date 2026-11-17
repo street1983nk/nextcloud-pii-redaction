@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-02 abgeschlossen; Halt vor Welle 2 (AV-Sicherheitscheck dazwischen)"
+stopped_at: "02-08 bis 02-15 abgeschlossen; Halt am Push-Tor 02-16 (Owner-Freigabe je SHA)"
 last_updated: "2026-11-17T02:48:15.482Z"
-last_activity: 2026-11-17 -- 02-02 abgeschlossen (Paket- und Lock-Freigabe, exclude-newer 2026-11-03)
+last_activity: 2026-11-17 -- Wellen 2 und 3 abgeschlossen (02-08 bis 02-15), Halt am Push-Tor 02-16
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 28
+  completed_plans: 36
   percent: 7
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 7 of 25 in current phase (Welle 1 komplett: 02-01 bis 02-07 abgeschlossen, lokal ungepusht; nächste Welle 2: 02-08 bis 02-12)
-Status: Halt vor Welle 2 (AV-Sicherheitscheck läuft dazwischen)
-Last activity: 2026-11-17 -- 02-02 abgeschlossen
+Plan: 15 of 25 in current phase (Wellen 1 bis 3 komplett: 02-01 bis 02-15 abgeschlossen, lokal ungepusht; nächster Schritt 02-16 Push-Tor, danach 02-17, 02-18)
+Status: Halt am Checkpoint 02-16 Task 1 (Owner-Freigabe für git push origin HEAD:phase-02)
+Last activity: 2026-11-17 -- 02-15 abgeschlossen
 
 Progress: [██████░░░░] 61%
 
@@ -67,6 +67,14 @@ Progress: [██████░░░░] 61%
 | Phase 01 P14 | 40 min | 3 tasks | 13 files |
 | Phase 01 P15 | 45 min | 3 tasks | 14 files |
 | Phase 02 P02 | 60 min | 2 tasks | 5 files |
+| Phase 02 P08 | 50 min | 2 tasks | 10 files |
+| Phase 02 P09 | 40 min | 2 tasks | 4 files |
+| Phase 02 P10 | 25 min | 2 tasks | 2 files |
+| Phase 02 P11 | 35 min | 2 tasks | 7 files |
+| Phase 02 P12 | 35 min | 2 tasks | 4 files |
+| Phase 02 P13 | 45 min | 2 tasks | 4 files |
+| Phase 02 P14 | 30 min | 2 tasks | 9 files |
+| Phase 02 P15 | 30 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -125,5 +133,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-11-17T02:48:15.464Z
-Stopped at: 02-02 abgeschlossen; Halt vor Welle 2
-Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-08-PLAN.md
+Stopped at: 02-15 abgeschlossen; Halt am Push-Tor 02-16 Task 1
+Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-16-PLAN.md

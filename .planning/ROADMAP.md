@@ -102,17 +102,17 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-08-PLAN.md: Jail-Startprogramm, Gruppen-Reaper, run_child mit Profil, Spawn-Gate (Welle 2)
-- [ ] 02-09-PLAN.md: XML- und PDF-Vorprüfung (Welle 2)
-- [ ] 02-10-PLAN.md: Offline-Schalter Presidio/tldextract/GLiNER2 und Netz-Tripwire (Welle 2)
-- [ ] 02-11-PLAN.md: PHP: E2E-Ordnerprüfung, Signatur-Bestätigungszustände, Protokollfelder (Welle 2)
-- [ ] 02-12-PLAN.md: sandbox.yml mit --network none, Host-Mitschnitt, Modell-Cache (Welle 2)
+- [x] 02-08-PLAN.md: Jail-Startprogramm, Gruppen-Reaper, run_child mit Profil, Spawn-Gate (Welle 2)
+- [x] 02-09-PLAN.md: XML- und PDF-Vorprüfung (Welle 2)
+- [x] 02-10-PLAN.md: Offline-Schalter Presidio/tldextract/GLiNER2 und Netz-Tripwire (Welle 2)
+- [x] 02-11-PLAN.md: PHP: E2E-Ordnerprüfung, Signatur-Bestätigungszustände, Protokollfelder (Welle 2)
+- [x] 02-12-PLAN.md: sandbox.yml mit --network none, Host-Mitschnitt, Modell-Cache (Welle 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-13-PLAN.md: Bereiniger DOCX/ODT vor LibreOffice (Welle 3)
-- [ ] 02-14-PLAN.md: Server nicht dumpbar, Subreaper, Fähigkeitsprobe, /status sandbox, jail failed im Betrieb, Smoke-Container-Test (Welle 3)
-- [ ] 02-15-PLAN.md: Claim/Ack-Vertrag und Routen Bestätigen/Abbrechen (Welle 3)
+- [x] 02-13-PLAN.md: Bereiniger DOCX/ODT vor LibreOffice (Welle 3)
+- [x] 02-14-PLAN.md: Server nicht dumpbar, Subreaper, Fähigkeitsprobe, /status sandbox, jail failed im Betrieb, Smoke-Container-Test (Welle 3)
+- [x] 02-15-PLAN.md: Claim/Ack-Vertrag und Routen Bestätigen/Abbrechen (Welle 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -354,7 +354,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Zwei-App-Gerüst und Integrationsbeweis | 21/21 | Complete | 2026-11-15 |
-| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 7/25 | In Progress|  |
+| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 15/25 | In Progress|  |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
 | 5. Unabhängiger Leck-Prüfer | 0/TBD | Not started | - |
