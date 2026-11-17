@@ -348,4 +348,71 @@ final class ReviewControllerTest extends TestCase {
 		self::assertSame(Http::STATUS_NOT_FOUND, $response->getStatus());
 		self::assertSame(Status::Review, $this->mapper->find($job->getId())->getStatusEnum());
 	}
+
+	// -- the signature question (D-02-04) ------------------------------------
+
+	private function inConfirm(): Job {
+		$this->started();
+		$claim = $this->mapper->claimNext();
+		self::assertNotNull($claim);
+		$this->service->toConfirm($claim['job']);
+		return $this->mapper->find($claim['job']->getId());
+	}
+
+	public function testTheInitiatorConfirmsTheSignatureLoss(): void {
+		$job = $this->inConfirm();
+
+		$response = $this->controller()->confirmSignature($job->getId());
+
+		self::assertSame(Http::STATUS_ACCEPTED, $response->getStatus());
+		self::assertSame(['status' => 'queued'], $response->getData());
+		self::assertSame(Status::Queued, $this->mapper->find($job->getId())->getStatusEnum());
+		self::assertContains('signature_confirmed', $this->actions($job->getId()));
+		self::assertGuarded($response);
+	}
+
+	public function testTheInitiatorDeclinesAndTheJobEndsWithoutANotification(): void {
+		$job = $this->inConfirm();
+		$this->sent = [];
+
+		$response = $this->controller()->declineSignature($job->getId());
+
+		self::assertSame(Http::STATUS_ACCEPTED, $response->getStatus());
+		self::assertSame(['status' => 'cancelled'], $response->getData());
+		$after = $this->mapper->find($job->getId());
+		self::assertSame(Status::Cancelled, $after->getStatusEnum());
+		self::assertSame(Reason::SignatureDeclined, $after->getReasonEnum());
+		self::assertSame([], $this->sent);
+		self::assertGuarded($response);
+	}
+
+	public function testAForeignUserGetsTheSame404ForBothAnswers(): void {
+		$job = $this->inConfirm();
+		$this->signedIn = 'bob';
+
+		self::assertSame(Http::STATUS_NOT_FOUND, $this->controller()->confirmSignature($job->getId())->getStatus());
+		self::assertSame(Http::STATUS_NOT_FOUND, $this->controller()->declineSignature($job->getId())->getStatus());
+		self::assertSame(Http::STATUS_NOT_FOUND, $this->controller()->confirmSignature(999999)->getStatus());
+		self::assertSame(Status::Confirm, $this->mapper->find($job->getId())->getStatusEnum());
+	}
+
+	public function testAFileNoLongerReadableAnswers404(): void {
+		$job = $this->inConfirm();
+		$this->readable = false;
+
+		self::assertSame(Http::STATUS_NOT_FOUND, $this->controller()->confirmSignature($job->getId())->getStatus());
+		self::assertSame(Status::Confirm, $this->mapper->find($job->getId())->getStatusEnum());
+	}
+
+	public function testAnAnswerOutsideConfirmIs409WithTheState(): void {
+		$job = $this->inReview();
+
+		$confirm = $this->controller()->confirmSignature($job->getId());
+		$decline = $this->controller()->declineSignature($job->getId());
+
+		self::assertSame(Http::STATUS_CONFLICT, $confirm->getStatus());
+		self::assertSame(['status' => 'review'], $confirm->getData());
+		self::assertSame(Http::STATUS_CONFLICT, $decline->getStatus());
+		self::assertSame(Status::Review, $this->mapper->find($job->getId())->getStatusEnum());
+	}
 }
