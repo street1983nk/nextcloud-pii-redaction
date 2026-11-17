@@ -22,12 +22,24 @@ from tests import test_container_soffice as diag
 # -- R1: the start counter ------------------------------------------------------------------
 
 
-def fake_process(proc: Path, pid: int, name: str, start: int) -> None:
+def stat_line(pid: int, name: str, start: int, ppid: int = 1) -> str:
+    # Fields from 3 on: state, ppid (field 4), 17 more, then field 22, the start time.
+    rest = " ".join(["S", str(ppid), *[str(n) for n in range(17)], str(start), "0"])
+    return f"{pid} ({name}) {rest}\n"
+
+
+def fake_process(proc: Path, pid: int, name: str, start: int, ppid: int = 1) -> None:
     folder = proc / str(pid)
     folder.mkdir(parents=True)
-    # Fields from 3 on: state, then 18 more, the 20th of them (field 22) is the start time.
-    rest = " ".join(["S", *[str(n) for n in range(18)], str(start), "0"])
-    (folder / "stat").write_text(f"{pid} ({name}) {rest}\n", encoding="ascii")
+    (folder / "stat").write_text(stat_line(pid, name, start, ppid), encoding="ascii")
+
+
+def test_the_fake_stat_line_has_ppid_and_start_where_the_kernel_puts_them() -> None:
+    # Written out by hand from proc(5): pid (comm) state ppid ... field 22 starttime.
+    fields = stat_line(7, "x", 999, ppid=3).split()
+    assert fields[0] == "7"
+    assert fields[3] == "3"
+    assert fields[21] == "999"
 
 
 def test_the_counter_finds_soffice_bin_by_name_and_start_time(tmp_path: Path) -> None:
@@ -44,6 +56,37 @@ def test_the_counter_finds_soffice_bin_by_name_and_start_time(tmp_path: Path) ->
     assert diag.soffice_processes(proc) == {(101, 5000)}
     # Another uid is not counted.
     assert diag.soffice_processes(proc, uid=(proc / "101").stat().st_uid + 1) == set()
+
+
+def test_negative_a_soffice_bin_forked_by_soffice_bin_is_no_start(tmp_path: Path) -> None:
+    """The df2d2e5 finding: helpers forked by soffice.bin carry its name until their exec."""
+    proc = tmp_path / "proc"
+    fake_process(proc, 10, "soffice", 900)  # the shell script, exec'd into oosplash
+    fake_process(proc, 11, "oosplash", 901, ppid=10)
+    fake_process(proc, 12, "soffice.bin", 902, ppid=11)  # the start
+    fake_process(proc, 13, "soffice.bin", 903, ppid=12)  # fork of the start, before its exec
+    fake_process(proc, 14, "soffice.bin", 904, ppid=12)  # another one
+    fake_process(proc, 15, "soffice.bin", 905, ppid=13)  # a fork of a fork
+    fake_process(proc, 16, "sh", 906, ppid=12)  # a helper after its exec: not soffice.bin at all
+    assert diag.soffice_processes(proc) == {(12, 902)}
+    # A restart: oosplash starts soffice.bin again, that counts.
+    fake_process(proc, 20, "soffice.bin", 950, ppid=11)
+    assert diag.soffice_processes(proc) == {(12, 902), (20, 950)}
+    # A parent /proc does not show (gone, or another pid namespace) is no soffice.bin: counted.
+    fake_process(proc, 30, "soffice.bin", 960, ppid=4242)
+    assert (30, 960) in diag.soffice_processes(proc)
+
+
+def test_negative_the_counter_does_not_count_forks_while_it_runs(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    fake_process(proc, 11, "oosplash", 901)
+    with diag.StartCounter(proc=proc, poll_s=0.001) as counter:
+        fake_process(proc, 12, "soffice.bin", 902, ppid=11)
+        time.sleep(0.05)
+        for pid in range(13, 19):
+            fake_process(proc, pid, "soffice.bin", 900 + pid, ppid=12)
+        time.sleep(0.05)
+    assert counter.seen == {(12, 902)}
 
 
 def test_negative_a_restart_is_a_second_process_and_earlier_ones_do_not_count(tmp_path: Path) -> None:

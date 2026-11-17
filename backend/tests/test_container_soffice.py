@@ -20,7 +20,7 @@ time. The layer and variant diagnosis is evaluated and gone; what stays are
 the lasting checks:
 
     SOFFICE-LAYER product exit=<code|-> signal=<n|None> pdf=<ja|nein> ms=<ms> template=<ok|reason>
-    SOFFICE-STARTS <product|control-fresh-unjailed> n=<soffice.bin processes> [exit= pdf=]
+    SOFFICE-STARTS <product|control-fresh-unjailed> n=<soffice.bin starts, parent not soffice.bin> [exit= pdf=]
     TMP-REST product before_cleanup=<name:type,...|-> after_cleanup=<name:type,...|->
     PIPE-NAME predicted=<ja|nein> seen=<n>
     TEMPLATE-FACTS dirs=<n> files=<n> bytes=<n> owner=<uid:gid,...> writable=<n> other=<n> mentions_path=<ja|nein>
@@ -112,10 +112,19 @@ CONTROL_JOB_ID = "990003"
 # The start counter: /proc is read every POLL_S for processes of this uid whose
 # name is soffice.bin (oosplash starts soffice.bin anew for a restart, so a
 # restart is a second process id). A pid with its start time counts once.
+# Only a soffice.bin whose parent is not soffice.bin is a start: soffice.bin
+# itself forks helpers (fork, then exec), and between fork and exec the child
+# still carries the name soffice.bin. Sandbox run of df2d2e5: n=6 (amd64) and
+# n=7 (arm64) for the product and the fresh control alike, so the name alone
+# counted these children. /proc/<pid>/exe does not separate them: before the
+# exec the child still runs the image of soffice.bin. The parent does: a real
+# start comes from oosplash (or the soffice script), a helper from soffice.bin.
 PROC = Path("/proc")
 SOFFICE_BIN = "soffice.bin"
 POLL_S = 0.002
-# /proc/<pid>/stat after the ")" of the name: field 3 (state) is index 0, field 22 (starttime) index 19.
+# /proc/<pid>/stat after the ")" of the name: field 3 (state) is index 0,
+# field 4 (ppid) index 1, field 22 (starttime) index 19.
+PPID_INDEX = 1
 STARTTIME_INDEX = 19
 
 # The installation LibreOffice compares the profile with (Debian layout).
@@ -156,9 +165,19 @@ def _uid() -> int:
     return os.getuid()
 
 
-def soffice_processes(proc: Path = PROC, uid: int | None = None) -> set[tuple[int, int]]:
-    """(pid, start time) of every soffice.bin process of uid (any uid when None) that /proc shows now."""
-    found: set[tuple[int, int]] = set()
+@dataclass(frozen=True, slots=True)
+class ProcEntry:
+    """What the counter reads of one process in /proc."""
+
+    name: str
+    ppid: int
+    start: int
+    owner: int
+
+
+def read_proc(proc: Path = PROC) -> dict[int, ProcEntry]:
+    """pid -> name, parent, start time and owner of every process /proc shows now; unreadable ones are left out."""
+    found: dict[int, ProcEntry] = {}
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
@@ -169,10 +188,31 @@ def soffice_processes(proc: Path = PROC, uid: int | None = None) -> set[tuple[in
             continue
         head, closing, tail = raw.rpartition(")")
         fields = tail.split()
-        if not closing or len(fields) <= STARTTIME_INDEX or not fields[STARTTIME_INDEX].isdigit():
+        if not closing or len(fields) <= STARTTIME_INDEX:
             continue
-        if head.partition("(")[2] == SOFFICE_BIN and (uid is None or owner == uid):
-            found.add((int(entry.name), int(fields[STARTTIME_INDEX])))
+        ppid, start = fields[PPID_INDEX], fields[STARTTIME_INDEX]
+        if not (ppid.isdigit() and start.isdigit()):
+            continue
+        found[int(entry.name)] = ProcEntry(head.partition("(")[2], int(ppid), int(start), owner)
+    return found
+
+
+def soffice_processes(proc: Path = PROC, uid: int | None = None) -> set[tuple[int, int]]:
+    """(pid, start time) of every soffice.bin start of uid (any uid when None) that /proc shows now.
+
+    A soffice.bin whose parent is soffice.bin is a forked helper before its
+    exec, not a start (see PROC). A parent /proc no longer shows is no
+    soffice.bin as far as this scan knows, so that process counts.
+    """
+    table = read_proc(proc)
+    found: set[tuple[int, int]] = set()
+    for pid, entry in table.items():
+        if entry.name != SOFFICE_BIN or (uid is not None and entry.owner != uid):
+            continue
+        parent = table.get(entry.ppid)
+        if parent is not None and parent.name == SOFFICE_BIN:
+            continue
+        found.add((pid, entry.start))
     return found
 
 
