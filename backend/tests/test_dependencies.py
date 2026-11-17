@@ -166,3 +166,31 @@ def test_the_marker_rules_fire() -> None:
     assert container_filter_findings(PYTHON_YML.replace(' -m "not container"', "")) == [
         "pytest step keeps the container tests"
     ]
+
+
+SECURITY_YML = (REPO_ROOT / ".github" / "workflows" / "security.yml").read_text(encoding="utf-8")
+
+
+def audit_order_findings(workflow: str) -> list[str]:
+    """security.yml drops the +cpu tag between the export and the audit, or --strict stops on torch."""
+    steps = [
+        workflow.find("uv export"),
+        workflow.find(r"torch==\1 "),
+        workflow.find("pip-audit --strict"),
+    ]
+    if -1 in steps:
+        return ["export, +cpu strip or strict audit missing"]
+    return [] if steps == sorted(steps) else ["the +cpu strip does not sit between export and audit"]
+
+
+def test_the_audit_sees_torch_under_its_upstream_version() -> None:
+    assert audit_order_findings(SECURITY_YML) == []
+    # The sed expression of the workflow, applied to the line uv export writes.
+    line = "torch==2.15.0+cpu ; sys_platform != 'darwin' \\"
+    assert re.sub(r"^torch==([0-9.]+)\+cpu ", r"torch==\1 ", line) == "torch==2.15.0 ; sys_platform != 'darwin' \\"
+
+
+def test_the_audit_order_rule_fires() -> None:
+    assert audit_order_findings(SECURITY_YML.replace(r"torch==\1 ", "")) == [
+        "export, +cpu strip or strict audit missing"
+    ]

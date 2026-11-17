@@ -70,5 +70,12 @@ jobs:
       - name: Export the locked runtime set
         run: uv export --frozen --format requirements-txt --no-emit-project --no-dev -o "${RUNNER_TEMP}/requirements-audit.txt"
 
+      # torch comes from the PyTorch CPU index as 2.15.0+cpu; PyPI knows no local
+      # version, so --strict would stop on it as "not found". The advisories name
+      # the upstream release, so the audit asks for it without the +cpu tag
+      # (plan 02-02, tests/test_dependencies.py).
+      - name: Audit torch under its upstream version
+        run: sed -i -E 's/^torch==([0-9.]+)\+cpu /torch==\1 /' "${RUNNER_TEMP}/requirements-audit.txt"
+
       - name: Audit against the advisory databases
         run: uvx pip-audit --strict --disable-pip -r "${RUNNER_TEMP}/requirements-audit.txt"
