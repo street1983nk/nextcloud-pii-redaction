@@ -4,73 +4,47 @@ Runs only inside the test stage of the image (sandbox.yml, -m container): the
 development machine has neither LibreOffice nor Docker. The DOCX is written
 here with the standard library, so the test needs no file outside the image.
 
-HaRP run 44015648619 showed the regression: with the jail of 02-08 soffice
-ended after 249 ms and every DOCX job failed with render_failed. Sandbox runs
-of 7e3c909 and 11fb9f9 put the break on Landlock and on /tmp. Round 2 (sandbox
-run of 4ee9c31, Landlock ABI 8, amd64 and arm64 alike) named the one right:
-with grant=/tmp:REMOVE_FILE soffice converts, with write=/tmp minus REMOVE_FILE
-it does not; HOME, XDG, dconf and gsettings change nothing. Every red run left
-/tmp/OSL_PIPE_10001_SingleOfficeIPC_* behind. Round 2 is evaluated and gone.
+History: HaRP run 44015648619 showed the regression (soffice ended after 249
+ms in the jail of 02-08). Sandbox runs of 7e3c909, 11fb9f9 and 4ee9c31
+narrowed it to /tmp; sandbox run 44054386548 (a80b90b, amd64 and arm64) named
+the cause. With a fresh profile soffice restarts once (two dconf process ids
+in stderr), and the second process cannot get past the OSL_PIPE socket of the
+first, which it may not remove. With a profile made beforehand the conversion
+works in the unchanged product jail without any right on /tmp
+("warm-template-unjailed" and "warm-init-jailed/2": pdf=ja on both
+architectures). REMOVE_FILE on /tmp would also convert, but the child could
+then remove /tmp/exapp.sock (UNLINK-RISK socket-copy grant=ok: uid 10001, mode
+0666, the sticky bit does not help). Owner decision 17.11.: the image build
+makes the profile template, every job gets a fresh copy, no init run at run
+time. The layer and variant diagnosis is evaluated and gone; what stays are
+the lasting checks:
 
-Round 3 (this file, owner decision 17.11.: measure first, test only, nothing
-opened in the product) asks two questions.
+    SOFFICE-LAYER product exit=<code|-> signal=<n|None> pdf=<ja|nein> ms=<ms> template=<ok|reason>
+    TEMPLATE-FACTS dirs=<n> files=<n> bytes=<n> owner=<uid:gid,...> writable=<n> other=<n> mentions_path=<ja|nein>
+    TMP-FACTS uid=<uid> tmp=<uid>:<gid>:<mode> sticky=<ja|nein> exapp=<uid>:<gid>:<mode>:<type> access_w=...
+    UNLINK-RISK target=<socket-copy|file|file-in-subdir> jail=<none|product> result=<ok|EACCES|...> like_exapp=...
+    SOCKET-CONNECT <test-process|soffice|render>=<ok|refused <errno>|absent>
 
-1. How dangerous is REMOVE_FILE on /tmp? A stand-in made by this test (a
-   listening socket with owner and mode of the HaRP socket, a file, a file in
-   a subfolder) is removed by a child in the soffice jail, with and without
-   the right. The real HaRP socket is never named. Lines:
-
-    TMP-FACTS uid=<test uid> tmp=<uid>:<gid>:<mode> sticky=<ja|nein> exapp=<uid>:<gid>:<mode>:<type> \
-access_w=<path>:<answer in the product jail>,...
-    UNLINK-RISK target=<socket-copy|file|file-in-subdir> jail=<none|product|grant> result=<ok|EACCES|EPERM|...> \
-like_exapp=<ja|nein|->
-
-2. Can the pipe leave /tmp, so no right on /tmp is needed at all? The
-   LibreOffice sources (25.2.3.2) say: sal/osl/unx/pipe.cxx picks /tmp when
-   access(/tmp, W_OK) says writable, else /var/tmp, else the bootstrap
-   variable OSL_SOCKET_PATH; when the socket file exists and connect() fails,
-   it unlinks it before bind(). A fresh profile makes soffice.bin restart once
-   (oosplash loop, EXITHELPER_NORMAL_RESTART): the first process cannot unlink
-   its socket on exit, the second finds it, cannot unlink it and ends with a
-   pipe error. Each candidate runs in the full product jail without any extra
-   right:
-
-    SOFFICE-LAYER variant=<name>[/<step>] exit=... pdf=<ja|nein> ms=... path=<ja|nein|-> clean=...
-    SOFFICE-LAYER env=<name> exit=... pdf=<ja|nein> ms=... clean=...
-
-Other lines: LANDLOCK-ABI, SOFFICE-TAIL (cleaned stderr/stdout tail),
-SOFFICE-TMPNEW (paths new in /tmp after the run, names only) and
-SOCKET-CONNECT (connect() to the HaRP socket, a gate for soffice).
-
-Layers of test_diagnosis_soffice_layer_by_layer: 1-env-only (no jail, emptied
-environment, own process group), 2-limits (rlimits, no_new_privs), 3-landlock
-(plus Landlock), 4-seccomp (plus seccomp: the product).
-
-Every run starts on a clean /tmp: what earlier runs left there (.cache,
-.config, dconf and soffice remains, any own hidden entry new since the test
-began) is removed first. Variants and environment changes are measurements in
-the test run, never rules of the product; they bypass child.child_env on
-purpose.
+The gates: the product converts; the template is root-owned and read only;
+a child in the product jail removes nothing in /tmp; soffice reaches no
+socket. The real HaRP socket is only described, never named to a child.
 """
 
 import asyncio
 import contextlib
 import os
-import shutil
 import socket
 import stat
 import sys
 import time
 import zipfile
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pymupdf
 import pytest
 
 from pii_redaction_backend.sandbox.jail import jail_argv
-from pii_redaction_backend.sandbox.reaper import reap_group
 from pii_redaction_backend.workers import child, soffice
 from tests.conftest import record_measurement
 
@@ -97,85 +71,14 @@ PACKAGE_RELS = (
 )
 
 DRIVER = Path(__file__).with_name("jail_layers.py")
-LAYER_TIMEOUT_S = 90.0
-HYPOTHESIS_READ = ("/proc", "/dev/shm")  # noqa: S108 - read only, test only, a hypothesis
-# The jailed layers first: an unjailed run may leave files in /tmp (it may
-# write there), and none of them must be there for a jailed run.
-LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("4-seccomp", ()),
-    ("4-seccomp+proc-shm", HYPOTHESIS_READ),
-    ("3-landlock", ()),
-    ("2-limits", ()),
-    ("1-env-only", ()),
-)
-TMP = Path("/tmp")  # noqa: S108 - the folder the diagnosis cleans and lists, test only
-# What soffice, dconf and fontconfig may leave in /tmp with HOME=/tmp; removed
-# before every run (entries of this uid only).
-CLEAN_NAMES = frozenset({".cache", ".config", ".local", ".dbus", ".fontconfig", ".fonts", ".pki"})
-CLEAN_GLOBS = ("dconf*", "OSL_PIPE_*", "lo-*", "*.tmp")
-# Paths below a job profile are listed in SOFFICE-TMPNEW at most this deep.
-PROFILE_DEPTH = 3
-TMPNEW_MAX = 40
-
-# soffice.command: everything up to and including -env:UserInstallation comes
-# before this index; the extra options of a step go here, the document after.
-PROFILE_ARG_END = 7
-INIT_ONLY = "--terminate_after_init"
+TMP = Path("/tmp")  # noqa: S108 - the folder the checks describe, test only
 HARP_SOCKET = "/tmp/exapp.sock"  # noqa: S108 - the HaRP socket path, never removed by this test
+JOB_ID = "990001"
 
-
-@dataclass(frozen=True, slots=True)
-class Step:
-    """One soffice start of a round 3 candidate.
-
-    layer: "4-seccomp" (the product jail), "variant:<spec>" or "1-env-only".
-    args: extra soffice options before --convert-to; "@name" in a value is a
-    fresh 0700 folder inside the job profile. env: extra environment, "@name"
-    likewise. init_only: --terminate_after_init without a document (warms the
-    profile, converts nothing). read: more readable paths (the hypothesis
-    layer of the layer diagnosis).
-    """
-
-    layer: str
-    args: tuple[str, ...] = ()
-    env: Mapping[str, str] = field(default_factory=dict)
-    init_only: bool = False
-    read: tuple[str, ...] = ()
-
-
-PRODUCT = "4-seccomp"
-GRANT_REMOVE = "seccomp,grant=/tmp:REMOVE_FILE"
-VAR_TMP = "seccomp,read=/tmp,write=/var/tmp"
-
-# Round 3, part 2: one candidate per entry, each on a clean /tmp and with its
-# own job profile. Controls first and last. A candidate with two steps keeps
-# its job profile between them; the server removes the pipe socket after every
-# step, as the product does (soffice._remove_ipc_sockets).
-CANDIDATES: tuple[tuple[str, tuple[Step, ...]], ...] = (
-    # Control: the product, red in round 2.
-    ("variant=seccomp", (Step("variant:seccomp"),)),
-    # Control: the product plus REMOVE_FILE on /tmp, green in round 2.
-    (f"variant={GRANT_REMOVE}", (Step(f"variant:{GRANT_REMOVE}"),)),
-    # /var/tmp writable, /tmp read only: pipe.cxx asks access(/tmp, W_OK) first.
-    (f"variant={VAR_TMP}", (Step(f"variant:{VAR_TMP}"),)),
-    # OSL_SOCKET_PATH: the bootstrap fallback of pipe.cxx, as -env: option.
-    ("variant=osl-socket-path", (Step(PRODUCT, args=("-env:OSL_SOCKET_PATH=@ipc",)),)),
-    # LIBO_FLATPAK: oosplash skips the pipe, soffice.bin takes D-Bus (if built with it).
-    ("env=libo-flatpak", (Step(PRODUCT, env={"LIBO_FLATPAK": "1"}),)),
-    # The same conversion twice on one job profile: the second start has a profile.
-    ("variant=warm-jailed-twice", (Step(PRODUCT), Step(PRODUCT))),
-    # The profile warmed in the product jail without a document, then the conversion.
-    ("variant=warm-init-jailed", (Step(PRODUCT, init_only=True), Step(PRODUCT))),
-)
-# Warmed outside any jail without a document, copied into the job profile,
-# then converted in the product jail (test only: where a template could come from).
-TEMPLATE_LABEL = "variant=warm-template-unjailed"
-CONTROL_LABEL = "env=control-1-env-only"
-
-# Round 3, part 1: the stand-ins a child tries to remove, and the jails it runs in.
+# The stand-ins a child tries to remove, and the jails it runs in.
 UNLINK_PREFIX = "pii-unlink-probe"
 UNLINK_TARGETS = ("socket-copy", "file", "file-in-subdir")
-UNLINK_JAILS = ("none", "product", "grant")
+UNLINK_JAILS = ("none", "product")
 ACCESS_PATHS = ("/tmp", "/var/tmp")  # noqa: S108 - access(2) probe only, test only
 
 
@@ -191,24 +94,45 @@ def _docx(path: Path) -> Path:
     return path
 
 
-async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(tmp_path: Path) -> None:
+def layer_line(result: Mapping[str, object]) -> str:
+    """The SOFFICE-LAYER line of the product run."""
+    return (
+        f"SOFFICE-LAYER product exit={result['exit']} signal={result['signal']} "
+        f"pdf={'ja' if result['pdf'] else 'nein'} ms={result['ms']} template={result['template']}"
+    )
+
+
+async def test_a_docx_becomes_a_pdf_in_the_soffice_jail(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _docx(tmp_path / "probe.docx")
     outdir = tmp_path / "pdf"
     started = time.monotonic()
-
+    result: dict[str, object] = {"exit": "-", "signal": None, "pdf": False, "template": "ok"}
+    failure = ""
+    pdf: Path | None = None
     try:
-        pdf = await soffice.convert(source, outdir, "990001")
-    except child.ChildFailed as failure:
-        pytest.fail(
-            f"soffice failed: exit {failure.exit_code}, signal {failure.signal}, stderr {failure.stderr_tail!r}"
-        )
-    record_measurement("soffice_docx_ms", int((time.monotonic() - started) * 1000))
+        pdf = await soffice.convert(source, outdir, JOB_ID)
+        result["exit"] = 0
+    except soffice.ProfileTemplateMissing as missing:
+        result["template"] = missing.reason
+        failure = f"profile template unusable: {missing.reason}"
+    except child.ChildFailed as failed:
+        result["exit"], result["signal"] = failed.exit_code, failed.signal
+        failure = f"soffice failed: exit {failed.exit_code}, signal {failed.signal}, stderr {failed.stderr_tail!r}"
+    result["ms"] = int((time.monotonic() - started) * 1000)
+    result["pdf"] = pdf is not None
+    # Outside the capture, so the line stands in the job log of a passing run, too.
+    with capsys.disabled():
+        print(f"\n{layer_line(result)}")
+    record_measurement("soffice_product", result)
+    if pdf is None:
+        pytest.fail(failure)
+    record_measurement("soffice_docx_ms", result["ms"])
 
     with pymupdf.open(pdf) as document:
         assert document.page_count == 1
         assert MARKER in document[0].get_text()
-    # The profile with its temporary folder is gone, and no socket is left in /tmp.
-    assert _leftovers("990001") == []
+    # The profile with its copy of the template is gone, and no socket is left in /tmp.
+    assert _leftovers(JOB_ID) == []
 
 
 def _leftovers(job_id: str) -> list[str]:
@@ -217,320 +141,59 @@ def _leftovers(job_id: str) -> list[str]:
     return found + ([f"lo-{job_id}"] if (root / f"lo-{job_id}").exists() else [])
 
 
-# -- the layer diagnosis (plan 02-16) -------------------------------------------------------
+# -- the profile template of the image ------------------------------------------------------
 
 
-def _argv(layer: str, command: list[str], read: tuple[str, ...], write: tuple[str, ...]) -> list[str]:
-    """The start of one run: the product jail, a partial or variant jail of jail_layers.py, or no jail."""
-    if layer == "1-env-only":
-        return command
-    product = jail_argv("soffice", command, read=read, write=write)
-    if layer.startswith("4-seccomp"):
-        return product
-    # product[4:] is what jail.main takes: profile, paths, --, command.
-    if layer.startswith("variant:"):
-        return [sys.executable, "-I", str(DRIVER), "variant", layer.removeprefix("variant:"), *product[4:]]
-    partial = layer.split("-", 1)[1]
-    return [sys.executable, "-I", str(DRIVER), "layers", partial, *product[4:]]
+def template_facts(root: Path) -> dict[str, object]:
+    """Folders, files, bytes, owners, entries with a write bit or writable for this process, other types.
 
-
-def _own(path: Path) -> bool:
-    if sys.platform == "win32":
-        return False
-    with contextlib.suppress(OSError):
-        return path.lstat().st_uid == os.getuid()
-    return False
-
-
-def _remove(path: Path) -> None:
-    with contextlib.suppress(OSError):
-        if stat.S_ISDIR(path.lstat().st_mode):
-            shutil.rmtree(path, ignore_errors=True)
+    mentions_path: does any file name the template folder itself (a copy
+    would then point back to the read-only template)? A measurement only.
+    """
+    counts = {"dirs": 0, "files": 0, "bytes": 0, "writable": 0, "other": 0}
+    owners: set[str] = set()
+    mentions = False
+    needle = str(root).encode()
+    for path in (root, *sorted(root.rglob("*"))):
+        info = path.lstat()
+        owners.add(f"{info.st_uid}:{info.st_gid}")
+        if info.st_mode & 0o222 or os.access(path, os.W_OK, follow_symlinks=False):
+            counts["writable"] += 1
+        if stat.S_ISDIR(info.st_mode):
+            counts["dirs"] += 1
+        elif stat.S_ISREG(info.st_mode):
+            counts["files"] += 1
+            counts["bytes"] += info.st_size
+            mentions = mentions or needle in path.read_bytes()
         else:
-            path.unlink()
+            counts["other"] += 1
+    return {**counts, "owner": ",".join(sorted(owners)), "mentions_path": "ja" if mentions else "nein"}
 
 
-def cleanable(name: str, baseline: frozenset[str] | None) -> bool:
-    """An entry of /tmp a run may have left: a known name, or (with a baseline) a hidden one new since the test began.
-
-    Only hidden new entries (what a program with HOME=/tmp makes), so nothing
-    the server process of the same uid keeps in /tmp is touched.
-    """
-    if name.startswith("pytest-of-"):
-        return False
-    if name in CLEAN_NAMES or any(PurePosixPath(name).match(pattern) for pattern in CLEAN_GLOBS):
-        return True
-    return baseline is not None and name.startswith(".") and name not in baseline
-
-
-def clean_tmp(baseline: frozenset[str] | None = None) -> list[str]:
-    """Remove what earlier runs left in /tmp (own entries only) and return the removed names."""
-    removed: list[str] = []
-    if not TMP.is_dir():
-        return removed
-    for entry in sorted(TMP.iterdir()):
-        if _own(entry) and cleanable(entry.name, baseline):
-            _remove(entry)
-            removed.append(entry.name)
-    return removed
-
-
-def _baseline() -> frozenset[str]:
-    """Clean the known names once, then remember what /tmp holds: that stays (HaRP socket, pytest)."""
-    clean_tmp()
-    return frozenset(entry.name for entry in TMP.iterdir()) if TMP.is_dir() else frozenset()
-
-
-def tmp_snapshot(root: Path = TMP) -> frozenset[str]:
-    """Every path below root (names only, no symlink followed), the pytest folders left out."""
-    found: set[str] = set()
-    for folder, dirs, files in os.walk(root, onerror=lambda _error: None):
-        if folder == str(root):
-            dirs[:] = [name for name in dirs if not name.startswith("pytest-of-")]
-        found.update(f"{folder}/{name}" for name in (*dirs, *files))
-    return frozenset(found)
-
-
-def tmp_new(before: frozenset[str], after: frozenset[str], root: Path = TMP) -> list[str]:
-    """The new paths, below a job profile (lo-<id>) cut to PROFILE_DEPTH levels."""
-    shown: set[str] = set()
-    for path in after - before:
-        parts = PurePosixPath(path).relative_to(PurePosixPath(root.as_posix())).parts
-        if parts and parts[0].startswith("lo-"):
-            parts = parts[:PROFILE_DEPTH]
-        shown.add("/".join((root.as_posix(), *parts)))
-    return sorted(shown)
-
-
-def fill(profile: Path, value: str) -> str:
-    """A value of a step; "@name" (whole value or after "=") becomes a fresh 0700 folder inside the job profile."""
-    head, sep, tail = value.rpartition("=")
-    name = tail if sep else value
-    if not name.startswith("@"):
-        return value
-    folder = profile / name[1:]
-    folder.mkdir(mode=0o700, exist_ok=True)
-    return f"{head}{sep}{folder}"
-
-
-def env_for(profile: Path, changes: Mapping[str, str]) -> dict[str, str]:
-    """The values of one env change; "@name" becomes a fresh 0700 folder inside the job profile."""
-    return {key: fill(profile, value) for key, value in changes.items()}
-
-
-def step_command(step: Step, source: Path, outdir: Path, job_id: str, profile: Path) -> list[str]:
-    """The soffice command of one step: the product command with the step's options before the document part."""
-    base = soffice.command(source, outdir, job_id)
-    head, tail = base[:PROFILE_ARG_END], base[PROFILE_ARG_END:]
-    extra = [fill(profile, value) for value in step.args]
-    if step.init_only:
-        return [*head, *extra, INIT_ONLY]
-    return [*head, *extra, *tail]
-
-
-def has_pdf(outdir: Path) -> bool:
-    return any(outdir.glob("*.pdf"))
-
-
-def _drop_pdfs(outdir: Path) -> None:
-    for old in outdir.glob("*.pdf"):
-        old.unlink()
-
-
-async def _start(step: Step, source: Path, outdir: Path, job_id: str, profile: Path, env: dict[str, str]) -> dict:
-    """One soffice start of a step; the PDFs of earlier steps are removed first."""
-    _drop_pdfs(outdir)
-    command = step_command(step, source, outdir, job_id, profile)
-    argv = _argv(step.layer, command, (str(source), *step.read), (str(outdir), str(profile)))
-    full_env = child.child_env(env, profile="soffice")
-    # Test only: an env change bypasses the allowlist of child_env on purpose.
-    full_env.update(env_for(profile, step.env))
-    before = tmp_snapshot()
-    process = await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=outdir,
-        env=full_env,
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
+def template_line(facts: Mapping[str, object]) -> str:
+    return (
+        f"TEMPLATE-FACTS dirs={facts['dirs']} files={facts['files']} bytes={facts['bytes']} "
+        f"owner={facts['owner']} writable={facts['writable']} other={facts['other']} "
+        f"mentions_path={facts['mentions_path']}"
     )
-    started = time.monotonic()
-    out, err, code = b"", b"", None
-    try:
-        out, err = await asyncio.wait_for(process.communicate(), timeout=LAYER_TIMEOUT_S)
-        code = process.returncode
-    except TimeoutError:
-        child._kill_group(process.pid)
-        await process.wait()
-    finally:
-        reap_group(process.pid)
-    return {
-        "exit": "timeout" if code is None else code,
-        "signal": -code if code is not None and code < 0 else None,
-        "pdf": has_pdf(outdir),
-        "ms": int((time.monotonic() - started) * 1000),
-        "stderr": child.diagnostic_tail(err, child.SOFFICE_TAIL_LINES),
-        "stdout": child.diagnostic_tail(out, child.SOFFICE_TAIL_LINES),
-        "clean": [],
-        "tmp_new": tmp_new(before, tmp_snapshot()),
-    }
 
 
-def _fresh_job(
-    job_id: str, tmp_path: Path, baseline: frozenset[str], seed: Path | None
-) -> tuple[Path, list[str], Path, dict[str, str]]:
-    """Output folder, a clean /tmp (the removed names), the job profile (seeded) and its environment."""
-    outdir = tmp_path / f"out-{job_id}"
-    outdir.mkdir()
-    removed = clean_tmp(baseline)
-    soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
-    profile, env = soffice.prepare_profile(job_id)
-    if seed is not None:
-        shutil.copytree(seed, profile, symlinks=True, dirs_exist_ok=True)
-    return outdir, removed, profile, env
-
-
-async def _run_steps(
-    number: int,
-    steps: tuple[Step, ...],
-    source: Path,
-    tmp_path: Path,
-    *,
-    baseline: frozenset[str],
-    seed: Path | None = None,
-    export_to: Path | None = None,
-) -> list[dict]:
-    """The steps on one job profile and a clean /tmp; the server removes the pipe socket after every step.
-
-    seed is copied into the fresh job profile first; export_to receives a
-    copy of the job profile after the last step (a template, test only).
-    """
-    job_id = str(990100 + number)
-    outdir, removed, profile, env = _fresh_job(job_id, tmp_path, baseline, seed)
-    root = Path(soffice.PROFILE_ROOT)
-    results: list[dict] = []
-    try:
-        for step in steps:
-            results.append(await _start(step, source, outdir, job_id, profile, env))
-            soffice._remove_ipc_sockets(root)
-        if export_to is not None:
-            shutil.copytree(profile, export_to, symlinks=True)
-    finally:
-        shutil.rmtree(profile, ignore_errors=True)
-        soffice._remove_ipc_sockets(root)
-    results[0]["clean"] = removed
-    return results
-
-
-def tmpnew_line(label: str, new: list[str]) -> str:
-    shown = " ".join(new[:TMPNEW_MAX])
-    more = f" +{len(new) - TMPNEW_MAX} more" if len(new) > TMPNEW_MAX else ""
-    return f"SOFFICE-TMPNEW {label} n={len(new)} {shown}{more}".rstrip()
-
-
-def _print_run(label: str, result: dict, suffix: str = "") -> None:
-    removed = result["clean"]
-    new = result["tmp_new"]
-    assert isinstance(removed, list)
-    assert isinstance(new, list)
-    print(
-        f"\nSOFFICE-LAYER {label} exit={result['exit']} signal={result['signal']} "
-        f"pdf={'ja' if result['pdf'] else 'nein'} ms={result['ms']}{suffix} clean={','.join(removed) or '-'}"
-    )
-    print(f"SOFFICE-TAIL {label} stderr: {result['stderr']} || stdout: {result['stdout']}")
-    print(tmpnew_line(label, new))
-
-
-async def test_diagnosis_soffice_layer_by_layer(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    source = _docx(tmp_path / "probe.docx")
-    baseline = _baseline()
-    results: dict[str, dict] = {}
-    for number, (layer, extra_read) in enumerate(LAYERS):
-        name = f"{layer}/plain"
-        steps = (Step(layer, read=extra_read),)
-        results[name] = (await _run_steps(number, steps, source, tmp_path, baseline=baseline))[0]
-        # Outside the capture, so the lines stand in the job log of a passing run, too.
-        with capsys.disabled():
-            _print_run(name, results[name])
-    record_measurement("soffice_layers", results)
-
-    # Positive control: without any jail soffice converts the same file with
-    # the job profile environment; otherwise the diagnosis says nothing.
-    assert results["1-env-only/plain"]["pdf"], results["1-env-only/plain"]
-
-
-async def _driver(*args: str) -> str:
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        "-I",
-        str(DRIVER),
-        *args,
-        env=child.child_env(),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    out, _ = await asyncio.wait_for(process.communicate(), timeout=30)
-    return out.decode("ascii", errors="replace").strip()
-
-
-def path_state(label: str) -> str:
-    """ja or nein when the variant names paths (do they exist in the image?), - otherwise."""
-    if not label.startswith("variant="):
-        return "-"
-    spec = label.removeprefix("variant=")
-    paths = [part.split("=", 1)[1].split(":", 1)[0] for part in spec.split(",") if "=" in part]
-    if not paths:
-        return "-"
-    return "ja" if all(Path(path).exists() for path in paths) else "nein"
-
-
-def step_labels(label: str, count: int) -> list[str]:
-    """The label of each step: the label itself for one step, label/1, label/2, ... for more."""
-    return [label] if count == 1 else [f"{label}/{index}" for index in range(1, count + 1)]
-
-
-async def test_diagnosis_round_3_the_pipe_without_a_right_on_tmp(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Each candidate of CANDIDATES in the product jail without an extra right; controls first and last."""
-    source = _docx(tmp_path / "probe.docx")
-    abi_line = await _driver("abi")
-    baseline = _baseline()
+def test_the_profile_template_is_in_the_image_root_owned_and_read_only(capsys: pytest.CaptureFixture[str]) -> None:
+    root = Path(soffice.PROFILE_TEMPLATE)
+    assert root.is_dir(), "the image carries no soffice profile template"
+    assert (root / soffice.PROFILE_USER / soffice.TEMPLATE_MARKER).is_file()
+    facts = template_facts(root)
     with capsys.disabled():
-        print(f"\nLANDLOCK-ABI {abi_line or 'no-answer'}")
-    start = len(LAYERS)
-    results: dict[str, dict] = {}
-
-    def show(label: str, runs: list[dict]) -> None:
-        for name, result in zip(step_labels(label, len(runs)), runs, strict=True):
-            results[name] = result
-            with capsys.disabled():
-                _print_run(name, result, f" path={path_state(label)}" if label.startswith("variant=") else "")
-
-    for number, (label, steps) in enumerate(CANDIDATES, start=start):
-        show(label, await _run_steps(number, steps, source, tmp_path, baseline=baseline))
-
-    # The template: warmed without a jail and without a document, then copied.
-    number = start + len(CANDIDATES)
-    template = tmp_path / "template"
-    warm = (Step("1-env-only", init_only=True),)
-    made = await _run_steps(number, warm, source, tmp_path, baseline=baseline, export_to=template)
-    show(f"{TEMPLATE_LABEL}/make", made)
-    converted = await _run_steps(number + 1, (Step(PRODUCT),), source, tmp_path, baseline=baseline, seed=template)
-    show(TEMPLATE_LABEL, converted)
-
-    # Positive control on the same clean /tmp: without a jail soffice converts.
-    control = await _run_steps(number + 2, (Step("1-env-only"),), source, tmp_path, baseline=baseline)
-    show(CONTROL_LABEL, control)
-    record_measurement("soffice_round_3", {"abi": abi_line, "runs": results})
-    assert results[CONTROL_LABEL]["pdf"], results[CONTROL_LABEL]
-    # The red control of round 2 must stay red, or the round measures something else.
-    assert not results["variant=seccomp"]["pdf"], results["variant=seccomp"]
+        print(f"\n{template_line(facts)}")
+    record_measurement("soffice_template", facts)
+    assert facts["owner"] == "0:0", facts
+    assert facts["writable"] == 0, facts
+    assert facts["other"] == 0, facts
+    # Positive control: this process (uid 10001) does write where it may.
+    assert os.access(Path(soffice.PROFILE_ROOT), os.W_OK)
 
 
-# -- round 3, part 1: how far does REMOVE_FILE on /tmp reach? --------------------------------
+# -- how far would REMOVE_FILE on /tmp reach? (the reason it was refused) -------------------
 
 
 def _mode(info: os.stat_result) -> str:
@@ -554,6 +217,11 @@ def describe(path: Path) -> str:
     except OSError:
         return "absent"
     return f"{info.st_uid}:{info.st_gid}:{_mode(info)}:{_kind(info)}"
+
+
+def _remove(path: Path) -> None:
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
 def unlink_target(kind: str, root: Path, like: Path) -> tuple[Path, socket.socket | None]:
@@ -621,13 +289,11 @@ def unlink_argv(jail: str, path: Path) -> list[str]:
         return probe
     if jail == "product":
         return jail_argv("soffice", probe)
-    if jail == "grant":
-        return [sys.executable, "-I", str(DRIVER), "variant", GRANT_REMOVE, "soffice", "--", *probe]
     msg = f"unknown jail {jail!r}"
     raise ValueError(msg)
 
 
-async def test_measure_whether_remove_file_on_tmp_reaches_files_of_the_server(
+async def test_negative_a_child_in_the_soffice_jail_removes_nothing_in_tmp(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """TMP-FACTS and UNLINK-RISK; the real HaRP socket is only described, never named to a child."""
@@ -649,7 +315,8 @@ async def test_measure_whether_remove_file_on_tmp_reaches_files_of_the_server(
                     listener.close()
                 _remove(path)
                 if kind == "file-in-subdir":
-                    _remove(path.parent)
+                    with contextlib.suppress(OSError):
+                        path.parent.rmdir()
             answers[f"{kind}/{jail}"] = answer
             lines.append(f"UNLINK-RISK target={kind} jail={jail} result={answer} like_exapp={like}")
     with capsys.disabled():
@@ -666,18 +333,13 @@ async def test_measure_whether_remove_file_on_tmp_reaches_files_of_the_server(
         assert answers[f"{kind}/product"] != "ok", answers
 
 
-async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:
+async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> None:
     """SOCKET-CONNECT <who>=<ok|refused|absent>; for soffice a gate since the owner decision of 17.11.
 
-    soffice: the product jail of the soffice profile, whose seccomp filter
-    refuses connect() for every family: must answer "refused EACCES" (fix of
-    the secure-phase finding SOCKET-CONNECT). The others stay measurements.
-    render: the product jail of a profile without any socket rule and with
-    connect() open (unchanged); round 1 showed it reaches the socket, so
-    Landlock does not govern connect() of a Unix socket on this kernel.
-    variant nosock: the soffice rules without the /tmp socket rule, i.e. a
-    soffice whose own sockets would live in its job folder. variant
-    seccomp,deny-connect: the product seccomp filter plus connect() refused.
+    soffice: the product jail, whose seccomp filter refuses connect() for
+    every family: must answer "refused EACCES". render: a profile with
+    connect() open, a measurement (sandbox runs showed ok) for a later
+    decision.
     """
     path = os.environ.get("HP_EXAPP_SOCK", HARP_SOCKET)
     probe = [sys.executable, "-I", str(DRIVER), "connect", path]
@@ -685,17 +347,6 @@ async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: py
         "test-process": probe,
         "soffice": jail_argv("soffice", probe),
         "render": jail_argv("render", probe),
-        "variant=nosock": [sys.executable, "-I", str(DRIVER), "variant", "nosock", "soffice", "--", *probe],
-        "variant=seccomp,deny-connect": [
-            sys.executable,
-            "-I",
-            str(DRIVER),
-            "variant",
-            "seccomp,deny-connect",
-            "soffice",
-            "--",
-            *probe,
-        ],
     }
     answers = {who: await _probe(argv) for who, argv in runs.items()}
     with capsys.disabled():
@@ -708,7 +359,6 @@ async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: py
     assert answers["test-process"] == "ok", answers
     for who, answer in answers.items():
         assert answer == "ok" or answer.startswith("refused"), (who, answer)
-    # The fix: soffice reaches no socket, the HaRP socket of the server included.
     assert answers["soffice"] == "refused EACCES", answers
 
 
