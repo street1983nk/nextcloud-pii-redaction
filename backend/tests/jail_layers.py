@@ -22,6 +22,14 @@ A variant is a measurement in the test run, never a rule of the product:
 the product rules live in sandbox/profiles.py and sandbox/landlock.py and
 nothing here changes them.
 
+    python -I jail_layers.py deny-connect <jail arguments>
+
+is the full product jail of the profile (all layers, the code of jail.run),
+with exactly one change: Profile.deny_connect is True, so seccomp refuses
+connect() for every family as it does for soffice. Risk R2 of plan 02-16:
+does the work of render, precheck, sanitize, ocr and detect still run when
+the child can reach no socket? The profiles themselves are not touched.
+
     python -I jail_layers.py abi       prints abi=<Landlock ABI> kernel=<release>
     python -I jail_layers.py connect <socket path>
 
@@ -248,6 +256,19 @@ def variant_ops(specs: tuple[str, ...]) -> jail.Ops:
     )
 
 
+def with_deny_connect(call: jail.Call) -> jail.Call:
+    """The same call with deny_connect switched on in a copy of its profile; nothing else differs."""
+    return replace(call, profile=replace(call.profile, deny_connect=True))
+
+
+def deny_connect_main(argv: list[str], ops: jail.Ops | None = None) -> int:
+    """The product jail of argv with deny_connect, then the command."""
+    call = jail.parse(argv)
+    if call is None:
+        return jail.EXIT_USAGE
+    return jail.run(with_deny_connect(call), jail.system_ops() if ops is None else ops)
+
+
 def connect(path: str) -> int:
     """0 and "ok" when a connection to the socket at path succeeds."""
     family = getattr(socket, "AF_UNIX", None)
@@ -317,6 +338,8 @@ def main(argv: list[str]) -> int:
         return unlink(argv[1])
     if len(argv) == 2 and argv[0] == "access":
         return access(argv[1])
+    if len(argv) > 1 and argv[0] == "deny-connect":
+        return deny_connect_main(argv[1:])
     if len(argv) > 2 and argv[0] == "layers" and argv[1] in PARTIAL_LAYERS:
         call = jail.parse(argv[2:])
         if call is None:
