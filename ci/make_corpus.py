@@ -246,8 +246,12 @@ def _renamed(placeholder: str, raw: bytes) -> bytes:
 def _hidden_prefix() -> bytes:
     """A docx whose first local header belongs to a member the directory does not list."""
     data = _zip(
-        [("hidden.bin", b"hidden" * 16)]
-        + [("[Content_Types].xml", CONTENT_TYPES), ("_rels/.rels", PACKAGE_RELS), ("word/document.xml", _document())],
+        [
+            ("hidden.bin", b"hidden" * 16),
+            ("[Content_Types].xml", CONTENT_TYPES),
+            ("_rels/.rels", PACKAGE_RELS),
+            ("word/document.xml", _document()),
+        ],
         stored=frozenset({"hidden.bin"}),
     )
     centrals = _central_headers(data)
@@ -287,7 +291,10 @@ def _ext_image(canary: str) -> bytes:
 
 
 def _ext_template(canary: str) -> bytes:
-    settings = f'<?xml version="1.0"?><w:settings xmlns:w="{W_NS}" xmlns:r="{R_NS}"><w:attachedTemplate r:id="rIdT"/></w:settings>'
+    settings = (
+        f'<?xml version="1.0"?><w:settings xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
+        '<w:attachedTemplate r:id="rIdT"/></w:settings>'
+    )
     rels = _rels(
         f'<Relationship Id="rIdT" Type="{REL_TYPE}/attachedTemplate" Target="{canary}/t.dotm" TargetMode="External"/>'
     )
@@ -303,7 +310,7 @@ def _ext_template(canary: str) -> bytes:
 
 def _ext_includepicture(canary: str) -> bytes:
     # The quotes of the field code are escaped: the instruction sits in an attribute.
-    instr = f'INCLUDEPICTURE &quot;{canary}/p.png&quot; \\d'
+    instr = f"INCLUDEPICTURE &quot;{canary}/p.png&quot; \\d"
     body = f'<w:p><w:fldSimple w:instr="{instr}"><w:r><w:t>Bild</w:t></w:r></w:fldSimple></w:p>'
     return _docx(document=_document(body))
 
@@ -317,7 +324,8 @@ def _ext_altchunk(canary: str) -> bytes:
 
 def _macro_vba() -> bytes:
     rels = _rels(
-        f'<Relationship Id="rIdV" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>'
+        '<Relationship Id="rIdV" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" '
+        'Target="vbaProject.bin"/>'
     )
     members: list[tuple[str, bytes | str]] = [
         ("[Content_Types].xml", MACRO_CONTENT_TYPES),
@@ -430,8 +438,10 @@ def _huge_image() -> bytes:
         [
             b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R "
-            b"/Resources << /XObject << /Im1 5 0 R >> >> >>",
+            (
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R "
+                b"/Resources << /XObject << /Im1 5 0 R >> >> >>"
+            ),
             _stream(b"q 100 0 0 100 0 0 cm /Im1 Do Q"),
             image,
         ]
@@ -477,8 +487,10 @@ def _signed() -> bytes:
         [
             b"<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R] /SigFlags 3 >> >>",
             b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Annots [5 0 R] "
-            b"/Resources << /Font << /F1 7 0 R >> >> >>",
+            (
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Annots [5 0 R] "
+                b"/Resources << /Font << /F1 7 0 R >> >> >>"
+            ),
             _stream(TEXT_CONTENT),
             b"<< /Type /Annot /Subtype /Widget /FT /Sig /T (Signature1) /V 6 0 R /Rect [0 0 0 0] /P 3 0 R /F 132 >>",
             b"<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached "
@@ -533,8 +545,10 @@ def _encrypted_pdf(user: bytes, owner: bytes, permissions: int) -> bytes:
             b"<< /Type /Catalog /Pages 2 0 R >>",
             b"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
             _stream(content),
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 3 0 R "
-            b"/Resources << /Font << /F1 5 0 R >> >> >>",
+            (
+                b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 3 0 R "
+                b"/Resources << /Font << /F1 5 0 R >> >> >>"
+            ),
             FONT,
             encrypt,
         ],

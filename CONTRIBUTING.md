@@ -27,6 +27,8 @@ cd backend
 uv sync
 uv run ruff check .
 uv run ruff format --check .
+uv run ruff check ../scripts ../ci
+uv run ruff format --check ../scripts ../ci
 PYRIGHT_PYTHON_FORCE_VERSION=latest uv run pyright
 uv run vulture
 uv run pytest -q
