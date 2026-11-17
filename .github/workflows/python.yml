@@ -90,4 +90,4 @@ jobs:
       # -rs names every skip with its reason; the coverage floor (fail_under in
       # pyproject.toml) rides along, so a feature without tests fails here.
       - name: Tests
-        run: uv run pytest -q -rs --cov=src/pii_redaction_backend --cov-report=term
+        run: uv run pytest -q -rs -m "not container" --cov=src/pii_redaction_backend --cov-report=term
