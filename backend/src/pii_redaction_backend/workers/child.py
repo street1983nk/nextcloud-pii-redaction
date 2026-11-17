@@ -50,11 +50,12 @@ SAFE_ENV: Final[dict[str, str]] = {
 EXTRA_ALLOWED: Final = frozenset({"TESSDATA_PREFIX", "SAL_USE_VCLPLUGIN"})
 
 # Variables only the soffice child may get, and only with a folder inside its
-# job profile as value (plan 02-08, 02-16): TMPDIR for its temporary files,
-# HOME and the XDG folders for fontconfig, dconf and the VCL caches, which
-# otherwise try /tmp, where the jail grants no write. Every other child keeps
+# job profile as value (plan 02-08, 02-16): TMPDIR for its temporary files.
+# HOME and the XDG folders stay closed: sandbox run of 7e3c909 showed soffice
+# fails under Landlock with and without them alike, so nothing proves they are
+# needed (owner rule: open only what is proven). Every other child keeps
 # HOME=/tmp from SAFE_ENV and gets none of them.
-SOFFICE_ENV: Final = frozenset({"TMPDIR", "HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"})
+SOFFICE_ENV: Final = frozenset({"TMPDIR"})
 # The job profile of soffice is /tmp/lo-<job id> (workers/soffice.py,
 # PROFILE_ROOT); a value is that folder or a plain folder below it: no dots,
 # so no "..", no hidden name, nothing outside.

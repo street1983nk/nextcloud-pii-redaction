@@ -210,14 +210,12 @@ TMP = "/tmp"  # noqa: S108 - the soffice profile root under test, nothing is wri
 JOB = f"{TMP}/lo-1"
 SOFFICE_ENV_VALUES = {
     "TMPDIR": f"{JOB}/tmp",  # noqa: S108 - inside the profile under test
-    "HOME": f"{JOB}/home",
-    "XDG_CACHE_HOME": f"{JOB}/cache",
-    "XDG_CONFIG_HOME": f"{JOB}/config",
-    "XDG_RUNTIME_DIR": f"{JOB}/runtime",
 }
+# Opened in 7e3c909 without proof, closed again (owner rule: open only what is proven).
+CLOSED_AGAIN = ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR")
 
 
-def test_the_soffice_variables_are_exactly_tmpdir_home_and_three_xdg_folders() -> None:
+def test_the_soffice_variables_are_exactly_tmpdir() -> None:
     assert set(SOFFICE_ENV_VALUES) == child.SOFFICE_ENV
     assert {"TESSDATA_PREFIX", "SAL_USE_VCLPLUGIN"} == child.EXTRA_ALLOWED
 
@@ -227,7 +225,15 @@ def test_soffice_gets_its_variables_inside_its_job_profile() -> None:
     for key, value in SOFFICE_ENV_VALUES.items():
         assert env[key] == value
     # The profile folder itself is allowed, too.
-    assert child.child_env({"HOME": JOB}, profile="soffice")["HOME"] == JOB
+    assert child.child_env({"TMPDIR": JOB}, profile="soffice")["TMPDIR"] == JOB
+    # HOME stays the throwaway of SAFE_ENV.
+    assert env["HOME"] == TMP
+
+
+@pytest.mark.parametrize("key", CLOSED_AGAIN)
+def test_negative_soffice_gets_no_home_or_xdg_even_inside_its_profile(key: str) -> None:
+    with pytest.raises(ValueError, match="not allowed"):
+        child.child_env({key: f"{JOB}/home"}, profile="soffice")
 
 
 @pytest.mark.parametrize("profile", [None, "render", "precheck", "sanitize", "ocr", "detect"])

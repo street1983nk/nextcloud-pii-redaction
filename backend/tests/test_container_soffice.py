@@ -9,8 +9,10 @@ ended after 249 ms and every DOCX job failed with render_failed. Sandbox run
 44021006501 showed exit 1 without a signal, after fontconfig ("No writable
 cache directories") and dconf ("unable to create directory") warnings; the
 cause is not proven. The diagnosis below runs the same soffice call layer by
-layer and with and without HOME/XDG in the job profile, so that one CI run
-names the layer that breaks it. Its result lines in the job log:
+layer, so that one CI run names the layer that breaks it. Sandbox run of
+7e3c909 showed: layers 1 and 2 convert, from layer 3 (Landlock) on exit 1
+after about 300 ms on amd64 and arm64, with and without HOME/XDG in the job
+profile alike; so HOME/XDG are closed again. Its result lines in the job log:
 
     SOFFICE-LAYER <layer>/<env> exit=<n> signal=<s> pdf=<ja|nein>
     SOFFICE-TAIL  <layer>/<env> stderr: ... || stdout: ...
@@ -18,9 +20,8 @@ names the layer that breaks it. Its result lines in the job log:
 
 Layers: 1-env-only (no jail, emptied environment, own process group),
 2-limits (rlimits, no_new_privs), 3-landlock (plus Landlock), 4-seccomp (plus
-seccomp: the product). Env: plain (only TMPDIR in the job profile, the state
-of ba141fa), home (TMPDIR, HOME, XDG_CACHE_HOME, XDG_CONFIG_HOME,
-XDG_RUNTIME_DIR in the job profile: the product now). One hypothesis variant,
+seccomp: the product). Env: plain (only TMPDIR in the job profile, the
+product). One hypothesis variant,
 test only: 4-seccomp+proc-shm also reads /proc and /dev/shm. The LibreOffice
 25.2 source does not prove that headless conversion needs them (oosplash only
 stat()s /proc/version, which Landlock does not govern; sal reads
@@ -71,14 +72,10 @@ HYPOTHESIS_READ = ("/proc", "/dev/shm")  # noqa: S108 - read only, test only, a 
 # The jailed layers first: an unjailed run may leave files in /tmp (it may
 # write there), and none of them must be there for a jailed run.
 VARIANTS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
-    ("4-seccomp", "home", ()),
     ("4-seccomp", "plain", ()),
-    ("4-seccomp+proc-shm", "home", HYPOTHESIS_READ),
-    ("3-landlock", "home", ()),
+    ("4-seccomp+proc-shm", "plain", HYPOTHESIS_READ),
     ("3-landlock", "plain", ()),
-    ("2-limits", "home", ()),
     ("2-limits", "plain", ()),
-    ("1-env-only", "home", ()),
     ("1-env-only", "plain", ()),
 )
 
@@ -143,7 +140,7 @@ async def _run_variant(
     outdir = tmp_path / f"out-{job_id}"
     outdir.mkdir()
     profile, full_env = soffice.prepare_profile(job_id)
-    extra = full_env if env_name == "home" else {"TMPDIR": full_env["TMPDIR"]}
+    extra = full_env
     command = soffice.command(source, outdir, job_id)
     argv = _argv(layer, command, (str(source), *extra_read), (str(outdir), str(profile)))
     soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
@@ -196,7 +193,7 @@ async def test_diagnosis_soffice_layer_by_layer(tmp_path: Path, capsys: pytest.C
 
     # Positive control: without any jail soffice converts the same file with
     # the job profile environment; otherwise the diagnosis says nothing.
-    assert results["1-env-only/home"]["pdf"], results["1-env-only/home"]
+    assert results["1-env-only/plain"]["pdf"], results["1-env-only/plain"]
 
 
 async def test_measure_whether_a_soffice_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:

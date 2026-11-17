@@ -91,6 +91,7 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
     async def fake_run_child(args: list[str], **kwargs: object) -> None:
         seen.update(kwargs)
         seen["profile_existed"] = (tmp_path / "lo-5" / "tmp").is_dir()
+        seen["profile_folders"] = sorted(path.name for path in (tmp_path / "lo-5").iterdir())
         (tmp_path / "out" / "in.pdf").write_bytes(b"%PDF-1.7\n")
 
     monkeypatch.setattr(soffice, "PROFILE_ROOT", str(tmp_path))
@@ -101,13 +102,9 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
     assert pdf == tmp_path / "out" / "in.pdf"
     assert seen["profile"] == "soffice"
     profile = tmp_path / "lo-5"
-    assert seen["extra_env"] == {
-        "TMPDIR": str(profile / "tmp"),
-        "HOME": str(profile / "home"),
-        "XDG_CACHE_HOME": str(profile / "cache"),
-        "XDG_CONFIG_HOME": str(profile / "config"),
-        "XDG_RUNTIME_DIR": str(profile / "runtime"),
-    }
+    # Only TMPDIR: HOME and XDG stay closed until a run proves them needed.
+    assert seen["extra_env"] == {"TMPDIR": str(profile / "tmp")}
+    assert seen["profile_folders"] == ["tmp"]
     assert seen["write"] == (str(tmp_path / "out"), str(profile))
     assert seen["diagnose"] is True
     assert seen["tail_lines"] == child.SOFFICE_TAIL_LINES

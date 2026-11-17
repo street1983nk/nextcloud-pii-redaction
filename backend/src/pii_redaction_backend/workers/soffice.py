@@ -5,7 +5,7 @@ profile block each other and keep state between jobs) and is deleted after
 the run. The call goes through run_child: empty environment, own process
 group, time limit, nothing read from stdout, inside the jail of the "soffice"
 profile: it may read the source, write only the output folder and its own
-profile folder (TMPDIR, HOME and the XDG folders point into it) and create
+profile folder (TMPDIR points into it) and create
 its single-instance socket in /tmp. stderr is kept only for the diagnosis of
 a failure (child.py, diagnostic_tail, 12 lines). No SAL_USE_VCLPLUGIN: with
 --headless and no plugin named, LibreOffice 25.2 picks the headless "svp"
@@ -31,13 +31,9 @@ SOFFICE: Final = "/usr/bin/soffice"
 # sal/osl/unx/pipe.cxx: OSL_PIPE_<user ident>_<pipe name>, pipe name SingleOfficeIPC_<md5>.
 IPC_SOCKET_GLOB: Final = "OSL_PIPE_*_SingleOfficeIPC_*"
 # Each variable of the soffice environment and the folder inside the job profile it names.
-PROFILE_FOLDERS: Final = {
-    "TMPDIR": "tmp",
-    "HOME": "home",
-    "XDG_CACHE_HOME": "cache",
-    "XDG_CONFIG_HOME": "config",
-    "XDG_RUNTIME_DIR": "runtime",
-}
+# Only TMPDIR: HOME and XDG made no difference in the sandbox run of 7e3c909
+# (exit 1 under Landlock with and without them), so they stay closed.
+PROFILE_FOLDERS: Final = {"TMPDIR": "tmp"}
 
 
 class ConversionFailed(Exception):
@@ -107,12 +103,10 @@ def prepare_profile(job_id: str) -> tuple[Path, dict[str, str]]:
     """Make the job profile with its folders (0700) and return it with the environment that points into it.
 
     Landlock grants paths that exist, so the profile folder is made here and
-    the jail hands it to LibreOffice as writable. Everything LibreOffice and
-    its libraries would put below /tmp or $HOME goes into it instead, where
-    the child may write: temporary files (TMPDIR), the fontconfig cache
-    (XDG_CACHE_HOME), dconf and other settings (XDG_CONFIG_HOME,
-    XDG_RUNTIME_DIR) and anything else below HOME. The values pass the
-    allowlist of child.child_env only for the soffice profile.
+    the jail hands it to LibreOffice as writable. Its temporary files go to
+    a folder inside it (TMPDIR), not to /tmp, where the child may not write.
+    The value passes the allowlist of child.child_env only for the soffice
+    profile.
     """
     profile = job_profile(job_id)
     profile.mkdir(mode=0o700, exist_ok=True)
