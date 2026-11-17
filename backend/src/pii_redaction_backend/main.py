@@ -15,6 +15,12 @@ APP_ID, requires EX-APP-VERSION and compares the secret inside
 AUTHORIZATION-APP-API with APP_SECRET, and answers 401 otherwise. The user id
 comes from that header alone and never from a request body.
 
+Process hardening (RESEARCH Pitfall 1): before anything else main() makes
+the server not dumpable, so a child with the same uid cannot read
+/proc/<server>/environ (APP_SECRET), and makes it the subreaper of orphaned
+grandchildren. The lifespan then probes the sandbox (sandbox/probe.py) before
+the runner takes any work.
+
 Graceful shutdown: uvicorn turns SIGTERM into the end of the lifespan. The
 ``finally`` block below cancels the background tasks with a deadline below the
 ten seconds Docker waits before SIGKILL.
@@ -23,6 +29,7 @@ ten seconds Docker waits before SIGKILL.
 import asyncio
 import contextlib
 import logging
+import sys
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any, Final
@@ -33,6 +40,7 @@ from pii_redaction_backend import APP_ID, companion, config, logs, settings
 from pii_redaction_backend.api import build_router
 from pii_redaction_backend.nc import AppAPIAuthMiddleware, AsyncNextcloudApp, run_app, set_handlers
 from pii_redaction_backend.runner.runner import Runner
+from pii_redaction_backend.sandbox import probe, reaper
 
 LOGGER = logging.getLogger(APP_ID)
 
@@ -41,6 +49,8 @@ ENABLE_FAILED: Final = "PII Redaction could not remove its old settings page. De
 
 # How long the shutdown waits for background tasks before it cancels them.
 TASK_STOP_SECONDS: Final = 5.0
+
+PR_SET_DUMPABLE: Final = 4
 
 # Strong references to background tasks, otherwise the event loop may drop them.
 _TASKS: set[asyncio.Task[None]] = set()
@@ -64,6 +74,22 @@ async def stop_background(deadline: float = TASK_STOP_SECONDS) -> int:
         task.cancel()
     await asyncio.gather(*still_running, return_exceptions=True)
     return len(still_running)
+
+
+def harden_process() -> None:
+    """Not dumpable and subreaper; a failure is logged and the start goes on (Landlock is the main wall)."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), "prctl PR_SET_DUMPABLE failed")
+        if not reaper.become_subreaper():
+            raise OSError(ctypes.get_errno(), "prctl PR_SET_CHILD_SUBREAPER failed")
+    except OSError as exc:
+        LOGGER.warning("process hardening failed", extra={"exc_type": type(exc).__name__})
 
 
 async def enabled_handler(enabled: bool, nc: AsyncNextcloudApp) -> str:
@@ -90,6 +116,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Is the PHP app there? Asked now and every five minutes (companion.py);
     # the runner claims work only while the answer is ok.
     checker = start_background(companion.run_periodic(), "companion")
+    # A missing layer does not stop the start (D-02-05, D-02-11); it shows in
+    # /status and in this line.
+    state = await probe.run()
+    LOGGER.info(
+        "sandbox probed",
+        extra={
+            "seccomp": state.seccomp,
+            "landlock": state.landlock,
+            "landlock_abi": state.landlock_abi,
+            "jail": state.jail,
+        },
+    )
     stop = asyncio.Event()
     worker = Runner()
     app.state.runner = worker
@@ -114,6 +152,7 @@ APP.include_router(build_router())
 
 def main() -> None:
     """Start uvicorn the way AppAPI expects: unix socket behind HaRP, TCP otherwise."""
+    harden_process()
     unusable = config.unusable_startup_variables()
     if unusable:
         raise SystemExit(f"{APP_ID}: cannot start, missing or not a number: {', '.join(unusable)}")

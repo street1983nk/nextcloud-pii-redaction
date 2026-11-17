@@ -49,6 +49,10 @@ ALLOWED_EXTRA: Final[frozenset[str]] = frozenset(
         "enabled",
         "companion",
         "cancelled_tasks",
+        "seccomp",
+        "landlock",
+        "landlock_abi",
+        "jail",
     }
 )
 

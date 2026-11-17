@@ -1,4 +1,4 @@
-"""GET /status: version, readiness, the companion state and the last child.
+"""GET /status: version, readiness, the companion state, the last child and the sandbox.
 
 No route in info.xml points here; ExAppService::status() calls it signed
 (01-SKELETON.md "Signierte Container-Endpunkte"). The answer carries no name,
@@ -14,21 +14,32 @@ from fastapi import APIRouter, Request
 
 from pii_redaction_backend import companion, config
 from pii_redaction_backend.runner.runner import Runner, last_child
+from pii_redaction_backend.sandbox import probe
 
 router = APIRouter()
 
 
 @router.get("/status")
 async def status(request: Request) -> dict[str, object]:
-    """``{version, ready, companion, busy, lastChild}`` with numbers and words only."""
+    """``{version, ready, companion, busy, lastChild, sandbox}`` with numbers and words only."""
     worker = getattr(request.app.state, "runner", None)
     ready = isinstance(worker, Runner)
     last = last_child()
     state = await companion.refresh_if_stale()
+    sandbox = probe.current()
     return {
         "version": config.app_version(),
         "ready": ready,
         "companion": state.state,
         "busy": worker.busy if isinstance(worker, Runner) else False,
         "lastChild": None if last is None else {"kind": last.kind, "rssKb": last.rss_kb, "ms": last.ms},
+        # Fixed words and the Landlock ABI only (D-02-11); null before the probe.
+        "sandbox": None
+        if sandbox is None
+        else {
+            "seccomp": sandbox.seccomp,
+            "landlock": sandbox.landlock,
+            "landlockAbi": sandbox.landlock_abi,
+            "jail": sandbox.jail,
+        },
     }
