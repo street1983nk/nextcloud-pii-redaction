@@ -45,6 +45,10 @@ ALLOWED_EXTRA = frozenset(
         "enabled",
         "companion",
         "cancelled_tasks",
+        "seccomp",
+        "landlock",
+        "landlock_abi",
+        "jail",
     }
 )
 

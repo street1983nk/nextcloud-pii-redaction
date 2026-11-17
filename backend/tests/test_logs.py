@@ -40,6 +40,11 @@ SKELETON_EXTRA = frozenset(
         "enabled",
         "companion",
         "cancelled_tasks",
+        # Phase 2 (plan 02-14): the sandbox state, fixed words and one number.
+        "seccomp",
+        "landlock",
+        "landlock_abi",
+        "jail",
     }
 )
 

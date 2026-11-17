@@ -61,7 +61,7 @@ def test_a_signed_status_request_answers_with_codes_and_numbers(client: TestClie
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"version", "ready", "companion", "busy", "lastChild"}
+    assert set(body) == {"version", "ready", "companion", "busy", "lastChild", "sandbox"}
     assert body["version"] == "0.1.0"
     assert body["ready"] is True
     assert body["companion"] in {"ok", "missing", "unknown"}
@@ -184,3 +184,19 @@ def test_main_hands_uvicorn_the_graceful_shutdown_deadline(monkeypatch: pytest.M
 def test_the_application_publishes_no_api_description(client: TestClient) -> None:
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path, headers=signed_headers()).status_code == 404
+
+
+def test_status_carries_the_sandbox_state_after_the_probe(client: TestClient) -> None:
+    sandbox = client.get("/status", headers=signed_headers()).json()["sandbox"]
+    assert set(sandbox) == {"seccomp", "landlock", "landlockAbi", "jail"}
+    assert sandbox["seccomp"] in {"active", "unavailable"}
+    assert sandbox["landlock"] in {"active", "unavailable"}
+    assert isinstance(sandbox["landlockAbi"], int)
+    assert sandbox["jail"] in {"ok", "failed"}
+
+
+def test_status_shows_a_jail_that_failed_later(client: TestClient) -> None:
+    from pii_redaction_backend.sandbox import probe
+
+    probe.mark_jail_failed()
+    assert client.get("/status", headers=signed_headers()).json()["sandbox"]["jail"] == "failed"
