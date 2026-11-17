@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import io
 import json
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -123,8 +124,20 @@ class Fake:
         digest = hashlib.sha256(self.source).hexdigest()
         return nc.FetchResult(ok=True, stale=False, sha256=digest, size=len(self.source), etag=ETAG, http_status=200)
 
-    async def run_child(self, args: list[str], *, timeout_s: float, cwd: Path) -> None:
-        assert timeout_s > 0
+    async def run_child(
+        self,
+        args: list[str],
+        *,
+        profile: str,
+        cwd: Path,
+        read: tuple[str, ...] = (),
+        write: tuple[str, ...] = (),
+        timeout_s: float | None = None,
+    ) -> None:
+        assert timeout_s is None or timeout_s > 0
+        assert profile == "render"
+        assert write == (str(cwd),)
+        assert all(Path(path).is_relative_to(cwd) for path in read)
         self.events.append(("child", args[3].rsplit(".", 1)[-1]))
         if self.child_gate is not None:
             await self.child_gate.wait()
@@ -435,6 +448,8 @@ async def test_purge_removes_folder_and_row(fake: Fake) -> None:
 # -- the real child ------------------------------------------------------------------
 
 
+@pytest.mark.linux
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the jail needs Linux")
 async def test_analyze_through_the_real_render_child(fake: Fake) -> None:
     fake.claims = [_claim(job_id=9)]
     await fake.runner(run_child=child.run_child).run_once()

@@ -58,7 +58,7 @@ def test_the_soffice_command_is_exactly_the_documented_one(tmp_path: Path) -> No
     outdir = tmp_path / "out"
 
     assert soffice.command(source, outdir, "17") == [
-        "soffice",
+        "/usr/bin/soffice",
         "--headless",
         "--norestore",
         "--nolockcheck",
