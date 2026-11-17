@@ -27,6 +27,16 @@ nothing here changes them.
 
 tries to connect a Unix stream socket (secure-phase measurement: may a child
 reach the HaRP socket of the server?) and prints ok, refused <errno> or absent.
+
+    python -I jail_layers.py unlink <path>
+    python -I jail_layers.py access <path>
+
+unlink removes one path and prints ok, the errno name (EACCES, EPERM, ...) or
+absent (round 3: may a soffice child with REMOVE_FILE on /tmp remove a file of
+the server?). The test only ever names a stand-in it made itself, never the
+HaRP socket. access asks access(path, W_OK) and prints ok or the errno name
+(round 3: does Landlock answer access(2)? sal/osl/unx/pipe.cxx picks the pipe
+folder by it).
 """
 
 import ctypes
@@ -257,6 +267,41 @@ def connect(path: str) -> int:
     return 0
 
 
+def _errno_name(exc: OSError) -> str:
+    return errno.errorcode.get(exc.errno or 0, str(exc.errno))
+
+
+def unlink(path: str) -> int:
+    """0 and "ok" when path could be removed; otherwise the errno name, or "absent"."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        print("absent")
+        return 3
+    except OSError as exc:
+        print(_errno_name(exc))
+        return 1
+    print("ok")
+    return 0
+
+
+def access(path: str) -> int:
+    """0 and "ok" when access(path, W_OK) says writable; otherwise the errno name.
+
+    The libc call itself, as LibreOffice makes it (os.access hides errno).
+    """
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+    except (OSError, TypeError):
+        print("no-libc")
+        return 1
+    if libc.access(os.fsencode(path), os.W_OK) == 0:
+        print("ok")
+        return 0
+    print(errno.errorcode.get(ctypes.get_errno(), str(ctypes.get_errno())))
+    return 1
+
+
 def abi() -> int:
     """Prints the Landlock ABI of this kernel and the kernel release."""
     print(f"abi={landlock.abi_version()} kernel={platform.release() or 'none'}")
@@ -268,6 +313,10 @@ def main(argv: list[str]) -> int:
         return abi()
     if len(argv) == 2 and argv[0] == "connect":
         return connect(argv[1])
+    if len(argv) == 2 and argv[0] == "unlink":
+        return unlink(argv[1])
+    if len(argv) == 2 and argv[0] == "access":
+        return access(argv[1])
     if len(argv) > 2 and argv[0] == "layers" and argv[1] in PARTIAL_LAYERS:
         call = jail.parse(argv[2:])
         if call is None:

@@ -1,7 +1,8 @@
-"""The helpers of the soffice diagnosis round 2 (tests/test_container_soffice.py, plan 02-16).
+"""The helpers of the soffice diagnosis round 3 (tests/test_container_soffice.py, plan 02-16).
 
 The container runs need LibreOffice and run only in sandbox.yml; what they
-print and clean is decided by these helpers, which run everywhere. Test only.
+start, print and clean is decided by these helpers, which run everywhere.
+Test only.
 """
 
 import os
@@ -10,57 +11,145 @@ from pathlib import Path
 
 import pytest
 
-from pii_redaction_backend.workers import child
+from pii_redaction_backend.sandbox import profiles
+from pii_redaction_backend.workers import child, soffice
 from tests import jail_layers
 from tests import test_container_soffice as diag
 
-
-def test_every_landlock_variant_of_round_2_parses() -> None:
-    for spec in diag.LANDLOCK_VARIANTS:
-        assert jail_layers.parse_specs(spec) is not None, spec
-    assert len(set(diag.LANDLOCK_VARIANTS)) == len(diag.LANDLOCK_VARIANTS)
+SOURCE = Path("/work/probe.docx")
+OUTDIR = Path("/work/out")
+PROFILE = Path("/tmp/lo-7")  # noqa: S108 - a name only, nothing is made there
 
 
-def test_write_tmp_is_split_into_single_rights_and_leave_one_out() -> None:
-    grants = [spec.removeprefix(diag.GRANT) for spec in diag.LANDLOCK_VARIANTS if spec.startswith(diag.GRANT)]
-    for right in ("MAKE_DIR", "MAKE_REG", "WRITE_FILE", "TRUNCATE", "REMOVE_FILE", "REMOVE_DIR", "MAKE_SOCK"):
-        assert right in grants
-    assert "MAKE_DIR+MAKE_REG+WRITE_FILE" in grants
-    # Leave-one-out: write=/tmp without exactly one right, for every right of write=/tmp.
-    full = set(diag.WRITE_RIGHTS)
-    left_out = {
-        next(iter(full - set(grant.split("+")))) for grant in grants if len(set(grant.split("+"))) == len(full) - 1
-    }
-    assert left_out == full
-    # The split together is write=/tmp.
-    total = 0
-    for name in diag.WRITE_RIGHTS:
-        total |= jail_layers.GRANT_RIGHTS[name]
-    assert total == jail_layers.landlock.WRITE_ACCESS
-    # The controls: the driver without Landlock first, write=/tmp last.
-    assert diag.LANDLOCK_VARIANTS[0] == "no-landlock"
-    assert diag.LANDLOCK_VARIANTS[-1] == "write=/tmp"
+def test_every_variant_of_round_3_parses_and_labels_are_unique() -> None:
+    labels = [label for label, _steps in diag.CANDIDATES]
+    assert len(set(labels)) == len(labels)
+    assert diag.TEMPLATE_LABEL not in labels
+    assert diag.CONTROL_LABEL not in labels
+    for _label, steps in diag.CANDIDATES:
+        assert steps
+        for step in steps:
+            if step.layer.startswith("variant:"):
+                assert jail_layers.parse_specs(step.layer.removeprefix("variant:")) is not None, step
 
 
-def test_the_env_variants_change_only_home_xdg_and_dconf() -> None:
-    allowed = {"HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "GSETTINGS_BACKEND", "DCONF_PROFILE"}
-    names = [name for name, _changes in diag.ENV_VARIANTS]
-    assert names[0] == "product"
-    assert diag.ENV_VARIANTS[0][1] == {}
-    for _name, changes in diag.ENV_VARIANTS:
-        assert set(changes) <= allowed
-        # A folder value always lies inside the job profile ("@name").
-        for key in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"):
-            if key in changes:
-                assert changes[key].startswith("@"), (key, changes)
-    assert len(set(names)) == len(names)
+def test_round_3_controls_are_the_product_and_the_grant_of_round_2() -> None:
+    assert diag.CANDIDATES[0] == ("variant=seccomp", (diag.Step("variant:seccomp"),))
+    assert diag.CANDIDATES[1][1] == (diag.Step("variant:seccomp,grant=/tmp:REMOVE_FILE"),)
 
 
-def test_negative_the_product_allowlist_still_refuses_the_env_variants() -> None:
-    # The variants bypass child_env in the test; the product keeps refusing them.
-    for key in ("HOME", "XDG_CACHE_HOME", "GSETTINGS_BACKEND", "DCONF_PROFILE"):
+def test_negative_no_candidate_after_the_controls_grants_an_extra_right_on_tmp() -> None:
+    # Part 2 asks for a way without any right on /tmp: past the two controls
+    # only the product jail, or /tmp read only with /var/tmp writable.
+    for _label, steps in diag.CANDIDATES[2:]:
+        for step in steps:
+            spec = step.layer.removeprefix("variant:")
+            assert "grant=" not in spec, step
+            assert "write=/tmp" not in spec.split(","), step
+            assert "fs-all" not in spec, step
+            assert "no-landlock" not in spec, step
+            assert step.layer == diag.PRODUCT or "seccomp" in spec.split(","), step
+
+
+def test_the_profile_option_index_matches_the_product_command() -> None:
+    command = soffice.command(SOURCE, OUTDIR, "7")
+    assert command[diag.PROFILE_ARG_END - 1].startswith("-env:UserInstallation=")
+    assert command[diag.PROFILE_ARG_END] == "--convert-to"
+
+
+def test_step_command_puts_options_before_the_document_and_init_drops_it(tmp_path: Path) -> None:
+    profile = tmp_path / "lo-7"
+    profile.mkdir()
+    product = soffice.command(SOURCE, OUTDIR, "7")
+    assert diag.step_command(diag.Step(diag.PRODUCT), SOURCE, OUTDIR, "7", profile) == product
+    with_env = diag.step_command(
+        diag.Step(diag.PRODUCT, args=("-env:OSL_SOCKET_PATH=@ipc",)), SOURCE, OUTDIR, "7", profile
+    )
+    assert with_env == [*product[:7], f"-env:OSL_SOCKET_PATH={profile / 'ipc'}", *product[7:]]
+    assert (profile / "ipc").is_dir()
+    init = diag.step_command(diag.Step(diag.PRODUCT, init_only=True), SOURCE, OUTDIR, "7", profile)
+    assert init == [*product[:7], diag.INIT_ONLY]
+    assert str(SOURCE) not in init
+
+
+def test_fill_keeps_plain_values_and_makes_private_folders(tmp_path: Path) -> None:
+    assert diag.fill(tmp_path, "1") == "1"
+    assert diag.fill(tmp_path, "-env:A=b") == "-env:A=b"
+    assert diag.fill(tmp_path, "@home") == str(tmp_path / "home")
+    if sys.platform != "win32":
+        assert (tmp_path / "home").stat().st_mode & 0o777 == 0o700
+
+
+def test_step_labels_number_only_sequences() -> None:
+    assert diag.step_labels("variant=x", 1) == ["variant=x"]
+    assert diag.step_labels("variant=x", 2) == ["variant=x/1", "variant=x/2"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix paths: a drive colon reads as a grant separator")
+def test_path_state_names_existing_and_missing_paths(tmp_path: Path) -> None:
+    assert diag.path_state("env=libo-flatpak") == "-"
+    assert diag.path_state("variant=warm-jailed-twice") == "-"
+    assert diag.path_state(f"variant=seccomp,read={tmp_path.as_posix()}") == "ja"
+    assert diag.path_state(f"variant=seccomp,write={tmp_path.as_posix()}/missing") == "nein"
+
+
+def test_negative_the_product_allowlist_still_refuses_the_env_changes() -> None:
+    # The candidates bypass child_env in the test; the product keeps refusing them.
+    for key in ("LIBO_FLATPAK", "HOME", "XDG_CACHE_HOME"):
         with pytest.raises(ValueError, match="not allowed"):
-            child.child_env({key: "/srv/lo-1/home"}, profile="soffice")
+            child.child_env({key: "1"}, profile="soffice")
+
+
+def test_the_product_still_grants_no_removal_on_tmp() -> None:
+    # Round 3 measures only; the soffice profile keeps socket creation as its one /tmp rule.
+    assert profiles.profile_for("soffice").socket_paths == ("/tmp",)  # noqa: S108 - the rule as it stands
+    assert profiles.profile_for("soffice").write_paths == ()
+    assert jail_layers.landlock.SOCKET_ACCESS & jail_layers.landlock.ACCESS_FS_REMOVE_FILE == 0
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix sockets and uids")
+@pytest.mark.parametrize("kind", diag.UNLINK_TARGETS)
+def test_unlink_targets_are_own_stand_ins_and_never_the_harp_socket(tmp_path: Path, kind: str) -> None:
+    like = tmp_path / "exapp.sock"
+    like.write_bytes(b"")
+    like.chmod(0o640)
+    path, listener = diag.unlink_target(kind, tmp_path, like)
+    try:
+        assert path.exists()
+        assert path.name != "exapp.sock"
+        assert diag.UNLINK_PREFIX in path.as_posix()
+        if kind == "socket-copy":
+            assert listener is not None
+            assert diag.describe(path).endswith(":0640:sock")
+            assert diag.like_exapp(path, like) == "ja"
+        else:
+            assert listener is None
+            assert diag.describe(path).endswith(":0600:file")
+    finally:
+        if listener is not None:
+            listener.close()
+
+
+def test_negative_an_unknown_unlink_target_or_jail_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown unlink target"):
+        diag.unlink_target("exapp", tmp_path, tmp_path / "exapp.sock")
+    with pytest.raises(ValueError, match="unknown jail"):
+        diag.unlink_argv("bogus", tmp_path / "x")
+
+
+def test_unlink_argv_runs_the_probe_bare_in_the_product_jail_and_with_the_grant(tmp_path: Path) -> None:
+    target = tmp_path / "pii-unlink-probe.file"
+    bare = diag.unlink_argv("none", target)
+    assert bare[-2:] == ["unlink", str(target)]
+    assert diag.unlink_argv("product", target)[-len(bare) :] == bare
+    grant = diag.unlink_argv("grant", target)
+    assert grant[3:7] == ["variant", diag.GRANT_REMOVE, "soffice", "--"]
+    assert grant[-len(bare) :] == bare
+
+
+def test_describe_says_absent_for_a_missing_path(tmp_path: Path) -> None:
+    assert diag.describe(tmp_path / "missing") == "absent"
+    assert diag.like_exapp(tmp_path / "missing", tmp_path / "missing") == "-"
 
 
 def test_env_for_makes_private_folders_inside_the_profile(tmp_path: Path) -> None:

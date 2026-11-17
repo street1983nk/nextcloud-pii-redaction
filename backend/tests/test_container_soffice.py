@@ -5,63 +5,65 @@ development machine has neither LibreOffice nor Docker. The DOCX is written
 here with the standard library, so the test needs no file outside the image.
 
 HaRP run 44015648619 showed the regression: with the jail of 02-08 soffice
-ended after 249 ms and every DOCX job failed with render_failed. Sandbox run
-44021006501 showed exit 1 without a signal. Sandbox run of 7e3c909 showed:
-layers 1 and 2 convert, from layer 3 (Landlock) on exit 1 after about 300 ms
-on amd64 and arm64, with and without HOME/XDG in the job profile alike (so
-HOME/XDG are closed again), with and without seccomp alike, and reading
-/proc and /dev/shm does not help. Sandbox run of 11fb9f9 (Landlock ABI 8,
-amd64 and arm64 alike): fs-all and write=/tmp convert, every other single
-change does not; the stderr names dconf ("unable to create directory"). The
-Landlock audit said nothing (audit_enabled=0), so that run is gone.
+ended after 249 ms and every DOCX job failed with render_failed. Sandbox runs
+of 7e3c909 and 11fb9f9 put the break on Landlock and on /tmp. Round 2 (sandbox
+run of 4ee9c31, Landlock ABI 8, amd64 and arm64 alike) named the one right:
+with grant=/tmp:REMOVE_FILE soffice converts, with write=/tmp minus REMOVE_FILE
+it does not; HOME, XDG, dconf and gsettings change nothing. Every red run left
+/tmp/OSL_PIPE_10001_SingleOfficeIPC_* behind. Round 2 is evaluated and gone.
 
-Round 2 (this file) names the one right and the one path. Every run starts
-from a clean /tmp: what earlier runs left there (.cache, .config, dconf and
-soffice remains, any own hidden entry new since the test began) is removed
-first, so an unjailed run can no longer make a later jailed run look better
-or worse. Its result lines in the job log:
+Round 3 (this file, owner decision 17.11.: measure first, test only, nothing
+opened in the product) asks two questions.
 
-    LANDLOCK-ABI abi=<n> kernel=<release>
-    SOFFICE-LAYER <layer>/plain exit=<n> signal=<s> pdf=<ja|nein> ms=<n> clean=<removed|->
-    SOFFICE-LAYER variant=<spec> exit=... pdf=... ms=... path=<ja|nein|-> clean=<removed|->
-    SOFFICE-LAYER env=<name> exit=... pdf=... ms=... clean=<removed|->
-    SOFFICE-TAIL  <name> stderr: ... || stdout: ...
-    SOFFICE-TMPNEW <name> n=<count> <path> <path> ...
-    SOCKET-CONNECT <who>=<ok|refused ...|absent>
+1. How dangerous is REMOVE_FILE on /tmp? A stand-in made by this test (a
+   listening socket with owner and mode of the HaRP socket, a file, a file in
+   a subfolder) is removed by a child in the soffice jail, with and without
+   the right. The real HaRP socket is never named. Lines:
 
-clean= lists the names removed from /tmp before the run (- for none).
-SOFFICE-TMPNEW lists the paths that were new in /tmp after the run, names
-only, no content (below the job profile /tmp/lo-<id> at most three levels).
+    TMP-FACTS uid=<test uid> tmp=<uid>:<gid>:<mode> sticky=<ja|nein> exapp=<uid>:<gid>:<mode>:<type> \
+access_w=<path>:<answer in the product jail>,...
+    UNLINK-RISK target=<socket-copy|file|file-in-subdir> jail=<none|product|grant> result=<ok|EACCES|EPERM|...> \
+like_exapp=<ja|nein|->
 
-Layers: 1-env-only (no jail, emptied environment, own process group),
-2-limits (rlimits, no_new_privs), 3-landlock (plus Landlock), 4-seccomp (plus
-seccomp: the product). Env: only TMPDIR in the job profile (the product).
+2. Can the pipe leave /tmp, so no right on /tmp is needed at all? The
+   LibreOffice sources (25.2.3.2) say: sal/osl/unx/pipe.cxx picks /tmp when
+   access(/tmp, W_OK) says writable, else /var/tmp, else the bootstrap
+   variable OSL_SOCKET_PATH; when the socket file exists and connect() fails,
+   it unlinks it before bind(). A fresh profile makes soffice.bin restart once
+   (oosplash loop, EXITHELPER_NORMAL_RESTART): the first process cannot unlink
+   its socket on exit, the second finds it, cannot unlink it and ends with a
+   pipe error. Each candidate runs in the full product jail without any extra
+   right:
 
-Variants (tests/jail_layers.py, VARIANT_SPECS): rlimits, no_new_privs and
-the Landlock rules of the product with exactly one change: one more
-readable path, one more writable path, one more right, or one handled class
-less. They are measurements in the test run, never rules of the product.
-path= tells whether the named path exists in the image (Landlock skips a
-missing one, so path=nein means the run equals the product).
+    SOFFICE-LAYER variant=<name>[/<step>] exit=... pdf=<ja|nein> ms=... path=<ja|nein|-> clean=...
+    SOFFICE-LAYER env=<name> exit=... pdf=<ja|nein> ms=... clean=...
 
-grant=/tmp:<rights> grants exactly these Landlock rights on /tmp on top of the
-product rules (write=/tmp split up): each right alone, the pairs and chains a
-cache folder needs, and write=/tmp minus one right each. env=<name> runs the
-product jail (all layers, seccomp with connect() refused) with one change of
-the environment: HOME and/or the XDG folders inside the job profile, or dconf
-kept in memory (GSETTINGS_BACKEND=memory, DCONF_PROFILE=/dev/null). The
-environment of these runs is set here and bypasses child.child_env on
-purpose: a measurement, not a rule of the product.
+Other lines: LANDLOCK-ABI, SOFFICE-TAIL (cleaned stderr/stdout tail),
+SOFFICE-TMPNEW (paths new in /tmp after the run, names only) and
+SOCKET-CONNECT (connect() to the HaRP socket, a gate for soffice).
+
+Layers of test_diagnosis_soffice_layer_by_layer: 1-env-only (no jail, emptied
+environment, own process group), 2-limits (rlimits, no_new_privs), 3-landlock
+(plus Landlock), 4-seccomp (plus seccomp: the product).
+
+Every run starts on a clean /tmp: what earlier runs left there (.cache,
+.config, dconf and soffice remains, any own hidden entry new since the test
+began) is removed first. Variants and environment changes are measurements in
+the test run, never rules of the product; they bypass child.child_env on
+purpose.
 """
 
 import asyncio
 import contextlib
 import os
 import shutil
+import socket
 import stat
 import sys
 import time
 import zipfile
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 import pymupdf
@@ -115,85 +117,66 @@ CLEAN_GLOBS = ("dconf*", "OSL_PIPE_*", "lo-*", "*.tmp")
 PROFILE_DEPTH = 3
 TMPNEW_MAX = 40
 
-GRANT = "grant=/tmp:"
-# write=/tmp, split into its rights (jail_layers.GRANT_RIGHTS).
-WRITE_RIGHTS = (
-    "READ_FILE",
-    "READ_DIR",
-    "EXECUTE",
-    "WRITE_FILE",
-    "TRUNCATE",
-    "MAKE_DIR",
-    "MAKE_REG",
-    "MAKE_SOCK",
-    "MAKE_FIFO",
-    "MAKE_SYM",
-    "REMOVE_FILE",
-    "REMOVE_DIR",
-)
-SINGLE_RIGHTS = (
-    "READ",
-    "MAKE_DIR",
-    "MAKE_REG",
-    "WRITE_FILE",
-    "TRUNCATE",
-    "REMOVE_FILE",
-    "REMOVE_DIR",
-    "MAKE_SOCK",
-    "MAKE_SYM",
-    "MAKE_FIFO",
-)
-RIGHT_SETS = (
-    "MAKE_DIR+MAKE_REG",
-    "MAKE_DIR+MAKE_REG+WRITE_FILE",
-    "READ+MAKE_DIR",
-    "READ+MAKE_DIR+MAKE_REG",
-    "READ+MAKE_DIR+MAKE_REG+WRITE_FILE",
-    "READ+MAKE_DIR+MAKE_REG+WRITE_FILE+TRUNCATE",
-    "READ+MAKE_DIR+MAKE_REG+WRITE_FILE+TRUNCATE+REMOVE_FILE",
-    "READ+MAKE_DIR+MAKE_REG+WRITE_FILE+TRUNCATE+REMOVE_FILE+REMOVE_DIR",
-)
+# soffice.command: everything up to and including -env:UserInstallation comes
+# before this index; the extra options of a step go here, the document after.
+PROFILE_ARG_END = 7
+INIT_ONLY = "--terminate_after_init"
+HARP_SOCKET = "/tmp/exapp.sock"  # noqa: S108 - the HaRP socket path, never removed by this test
 
 
-def _minus(right: str) -> str:
-    return "+".join(name for name in WRITE_RIGHTS if name != right)
+@dataclass(frozen=True, slots=True)
+class Step:
+    """One soffice start of a round 3 candidate.
+
+    layer: "4-seccomp" (the product jail), "variant:<spec>" or "1-env-only".
+    args: extra soffice options before --convert-to; "@name" in a value is a
+    fresh 0700 folder inside the job profile. env: extra environment, "@name"
+    likewise. init_only: --terminate_after_init without a document (warms the
+    profile, converts nothing). read: more readable paths (the hypothesis
+    layer of the layer diagnosis).
+    """
+
+    layer: str
+    args: tuple[str, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    init_only: bool = False
+    read: tuple[str, ...] = ()
 
 
-# One run per entry, each on a clean /tmp; controls first, write=/tmp last.
-LANDLOCK_VARIANTS: tuple[str, ...] = (
-    # Positive control of the driver: no Landlock = layer 2, must convert.
-    "no-landlock",
-    # The product (Landlock, seccomp with connect() refused) as a variant: control.
-    "seccomp",
-    # Each right of write=/tmp alone on /tmp.
-    *(f"{GRANT}{right}" for right in SINGLE_RIGHTS),
-    # The pairs and chains a cache folder needs.
-    *(f"{GRANT}{rights}" for rights in RIGHT_SETS),
-    # write=/tmp minus one right each: which right cannot be missed.
-    *(f"{GRANT}{_minus(right)}" for right in WRITE_RIGHTS),
-    # Controls of round 1: converted there.
-    "fs-all",
-    "write=/tmp",
+PRODUCT = "4-seccomp"
+GRANT_REMOVE = "seccomp,grant=/tmp:REMOVE_FILE"
+VAR_TMP = "seccomp,read=/tmp,write=/var/tmp"
+
+# Round 3, part 2: one candidate per entry, each on a clean /tmp and with its
+# own job profile. Controls first and last. A candidate with two steps keeps
+# its job profile between them; the server removes the pipe socket after every
+# step, as the product does (soffice._remove_ipc_sockets).
+CANDIDATES: tuple[tuple[str, tuple[Step, ...]], ...] = (
+    # Control: the product, red in round 2.
+    ("variant=seccomp", (Step("variant:seccomp"),)),
+    # Control: the product plus REMOVE_FILE on /tmp, green in round 2.
+    (f"variant={GRANT_REMOVE}", (Step(f"variant:{GRANT_REMOVE}"),)),
+    # /var/tmp writable, /tmp read only: pipe.cxx asks access(/tmp, W_OK) first.
+    (f"variant={VAR_TMP}", (Step(f"variant:{VAR_TMP}"),)),
+    # OSL_SOCKET_PATH: the bootstrap fallback of pipe.cxx, as -env: option.
+    ("variant=osl-socket-path", (Step(PRODUCT, args=("-env:OSL_SOCKET_PATH=@ipc",)),)),
+    # LIBO_FLATPAK: oosplash skips the pipe, soffice.bin takes D-Bus (if built with it).
+    ("env=libo-flatpak", (Step(PRODUCT, env={"LIBO_FLATPAK": "1"}),)),
+    # The same conversion twice on one job profile: the second start has a profile.
+    ("variant=warm-jailed-twice", (Step(PRODUCT), Step(PRODUCT))),
+    # The profile warmed in the product jail without a document, then the conversion.
+    ("variant=warm-init-jailed", (Step(PRODUCT, init_only=True), Step(PRODUCT))),
 )
+# Warmed outside any jail without a document, copied into the job profile,
+# then converted in the product jail (test only: where a template could come from).
+TEMPLATE_LABEL = "variant=warm-template-unjailed"
+CONTROL_LABEL = "env=control-1-env-only"
 
-# One change of the environment per run, in the product jail. "@name" is a
-# folder inside the job profile, made 0700 before the run (Landlock grants
-# the job profile already, so no rule changes).
-HOME_JOB = {"HOME": "@home"}
-XDG_JOB = {"XDG_CACHE_HOME": "@cache", "XDG_CONFIG_HOME": "@config", "XDG_RUNTIME_DIR": "@run"}
-GSETTINGS_MEMORY = {"GSETTINGS_BACKEND": "memory"}
-DCONF_NULL = {"DCONF_PROFILE": "/dev/null"}
-ENV_VARIANTS: tuple[tuple[str, dict[str, str]], ...] = (
-    ("product", {}),
-    ("home-job", HOME_JOB),
-    ("home-job+xdg-job", {**HOME_JOB, **XDG_JOB}),
-    ("xdg-job", XDG_JOB),
-    ("gsettings-memory", GSETTINGS_MEMORY),
-    ("dconf-profile-null", DCONF_NULL),
-    ("gsettings-memory+dconf-profile-null", {**GSETTINGS_MEMORY, **DCONF_NULL}),
-    ("home-job+gsettings-memory", {**HOME_JOB, **GSETTINGS_MEMORY}),
-    ("xdg-job+gsettings-memory", {**XDG_JOB, **GSETTINGS_MEMORY}),
-)
+# Round 3, part 1: the stand-ins a child tries to remove, and the jails it runs in.
+UNLINK_PREFIX = "pii-unlink-probe"
+UNLINK_TARGETS = ("socket-copy", "file", "file-in-subdir")
+UNLINK_JAILS = ("none", "product", "grant")
+ACCESS_PATHS = ("/tmp", "/var/tmp")  # noqa: S108 - access(2) probe only, test only
 
 
 def _docx(path: Path) -> Path:
@@ -319,40 +302,49 @@ def tmp_new(before: frozenset[str], after: frozenset[str], root: Path = TMP) -> 
     return sorted(shown)
 
 
-def env_for(profile: Path, changes: dict[str, str]) -> dict[str, str]:
-    """The values of one env variant; "@name" becomes a fresh 0700 folder inside the job profile."""
-    values: dict[str, str] = {}
-    for key, value in changes.items():
-        if value.startswith("@"):
-            folder = profile / value[1:]
-            folder.mkdir(mode=0o700, exist_ok=True)
-            values[key] = str(folder)
-        else:
-            values[key] = value
-    return values
+def fill(profile: Path, value: str) -> str:
+    """A value of a step; "@name" (whole value or after "=") becomes a fresh 0700 folder inside the job profile."""
+    head, sep, tail = value.rpartition("=")
+    name = tail if sep else value
+    if not name.startswith("@"):
+        return value
+    folder = profile / name[1:]
+    folder.mkdir(mode=0o700, exist_ok=True)
+    return f"{head}{sep}{folder}"
 
 
-async def _run(
-    number: int,
-    layer: str,
-    extra_read: tuple[str, ...],
-    source: Path,
-    tmp_path: Path,
-    *,
-    baseline: frozenset[str],
-    env_changes: dict[str, str] | None = None,
-) -> dict[str, object]:
-    job_id = str(990100 + number)
-    outdir = tmp_path / f"out-{job_id}"
-    outdir.mkdir()
-    removed = clean_tmp(baseline)
-    soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
-    profile, env = soffice.prepare_profile(job_id)
-    command = soffice.command(source, outdir, job_id)
-    argv = _argv(layer, command, (str(source), *extra_read), (str(outdir), str(profile)))
+def env_for(profile: Path, changes: Mapping[str, str]) -> dict[str, str]:
+    """The values of one env change; "@name" becomes a fresh 0700 folder inside the job profile."""
+    return {key: fill(profile, value) for key, value in changes.items()}
+
+
+def step_command(step: Step, source: Path, outdir: Path, job_id: str, profile: Path) -> list[str]:
+    """The soffice command of one step: the product command with the step's options before the document part."""
+    base = soffice.command(source, outdir, job_id)
+    head, tail = base[:PROFILE_ARG_END], base[PROFILE_ARG_END:]
+    extra = [fill(profile, value) for value in step.args]
+    if step.init_only:
+        return [*head, *extra, INIT_ONLY]
+    return [*head, *extra, *tail]
+
+
+def has_pdf(outdir: Path) -> bool:
+    return any(outdir.glob("*.pdf"))
+
+
+def _drop_pdfs(outdir: Path) -> None:
+    for old in outdir.glob("*.pdf"):
+        old.unlink()
+
+
+async def _start(step: Step, source: Path, outdir: Path, job_id: str, profile: Path, env: dict[str, str]) -> dict:
+    """One soffice start of a step; the PDFs of earlier steps are removed first."""
+    _drop_pdfs(outdir)
+    command = step_command(step, source, outdir, job_id, profile)
+    argv = _argv(step.layer, command, (str(source), *step.read), (str(outdir), str(profile)))
     full_env = child.child_env(env, profile="soffice")
-    # Test only: an env variant bypasses the allowlist of child_env on purpose.
-    full_env.update(env_for(profile, env_changes or {}))
+    # Test only: an env change bypasses the allowlist of child_env on purpose.
+    full_env.update(env_for(profile, step.env))
     before = tmp_snapshot()
     process = await asyncio.create_subprocess_exec(
         *argv,
@@ -373,19 +365,62 @@ async def _run(
         await process.wait()
     finally:
         reap_group(process.pid)
-        new = tmp_new(before, tmp_snapshot())
-        shutil.rmtree(profile, ignore_errors=True)
-        soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
     return {
         "exit": "timeout" if code is None else code,
         "signal": -code if code is not None and code < 0 else None,
-        "pdf": any(outdir.glob("*.pdf")),
+        "pdf": has_pdf(outdir),
         "ms": int((time.monotonic() - started) * 1000),
         "stderr": child.diagnostic_tail(err, child.SOFFICE_TAIL_LINES),
         "stdout": child.diagnostic_tail(out, child.SOFFICE_TAIL_LINES),
-        "clean": removed,
-        "tmp_new": new,
+        "clean": [],
+        "tmp_new": tmp_new(before, tmp_snapshot()),
     }
+
+
+def _fresh_job(
+    job_id: str, tmp_path: Path, baseline: frozenset[str], seed: Path | None
+) -> tuple[Path, list[str], Path, dict[str, str]]:
+    """Output folder, a clean /tmp (the removed names), the job profile (seeded) and its environment."""
+    outdir = tmp_path / f"out-{job_id}"
+    outdir.mkdir()
+    removed = clean_tmp(baseline)
+    soffice._remove_ipc_sockets(Path(soffice.PROFILE_ROOT))
+    profile, env = soffice.prepare_profile(job_id)
+    if seed is not None:
+        shutil.copytree(seed, profile, symlinks=True, dirs_exist_ok=True)
+    return outdir, removed, profile, env
+
+
+async def _run_steps(
+    number: int,
+    steps: tuple[Step, ...],
+    source: Path,
+    tmp_path: Path,
+    *,
+    baseline: frozenset[str],
+    seed: Path | None = None,
+    export_to: Path | None = None,
+) -> list[dict]:
+    """The steps on one job profile and a clean /tmp; the server removes the pipe socket after every step.
+
+    seed is copied into the fresh job profile first; export_to receives a
+    copy of the job profile after the last step (a template, test only).
+    """
+    job_id = str(990100 + number)
+    outdir, removed, profile, env = _fresh_job(job_id, tmp_path, baseline, seed)
+    root = Path(soffice.PROFILE_ROOT)
+    results: list[dict] = []
+    try:
+        for step in steps:
+            results.append(await _start(step, source, outdir, job_id, profile, env))
+            soffice._remove_ipc_sockets(root)
+        if export_to is not None:
+            shutil.copytree(profile, export_to, symlinks=True)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
+        soffice._remove_ipc_sockets(root)
+    results[0]["clean"] = removed
+    return results
 
 
 def tmpnew_line(label: str, new: list[str]) -> str:
@@ -394,7 +429,7 @@ def tmpnew_line(label: str, new: list[str]) -> str:
     return f"SOFFICE-TMPNEW {label} n={len(new)} {shown}{more}".rstrip()
 
 
-def _print_run(label: str, result: dict[str, object], suffix: str = "") -> None:
+def _print_run(label: str, result: dict, suffix: str = "") -> None:
     removed = result["clean"]
     new = result["tmp_new"]
     assert isinstance(removed, list)
@@ -410,10 +445,11 @@ def _print_run(label: str, result: dict[str, object], suffix: str = "") -> None:
 async def test_diagnosis_soffice_layer_by_layer(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = _docx(tmp_path / "probe.docx")
     baseline = _baseline()
-    results: dict[str, dict[str, object]] = {}
+    results: dict[str, dict] = {}
     for number, (layer, extra_read) in enumerate(LAYERS):
         name = f"{layer}/plain"
-        results[name] = await _run(number, layer, extra_read, source, tmp_path, baseline=baseline)
+        steps = (Step(layer, read=extra_read),)
+        results[name] = (await _run_steps(number, steps, source, tmp_path, baseline=baseline))[0]
         # Outside the capture, so the lines stand in the job log of a passing run, too.
         with capsys.disabled():
             _print_run(name, results[name])
@@ -439,51 +475,195 @@ async def _driver(*args: str) -> str:
     return out.decode("ascii", errors="replace").strip()
 
 
-def _path_state(spec: str) -> str:
-    """ja or nein for a spec that names a path, - for a flag spec."""
+def path_state(label: str) -> str:
+    """ja or nein when the variant names paths (do they exist in the image?), - otherwise."""
+    if not label.startswith("variant="):
+        return "-"
+    spec = label.removeprefix("variant=")
     paths = [part.split("=", 1)[1].split(":", 1)[0] for part in spec.split(",") if "=" in part]
     if not paths:
         return "-"
     return "ja" if all(Path(path).exists() for path in paths) else "nein"
 
 
-async def test_diagnosis_soffice_landlock_one_change_at_a_time(
+def step_labels(label: str, count: int) -> list[str]:
+    """The label of each step: the label itself for one step, label/1, label/2, ... for more."""
+    return [label] if count == 1 else [f"{label}/{index}" for index in range(1, count + 1)]
+
+
+async def test_diagnosis_round_3_the_pipe_without_a_right_on_tmp(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Each candidate of CANDIDATES in the product jail without an extra right; controls first and last."""
     source = _docx(tmp_path / "probe.docx")
     abi_line = await _driver("abi")
     baseline = _baseline()
     with capsys.disabled():
         print(f"\nLANDLOCK-ABI {abi_line or 'no-answer'}")
-    results: dict[str, dict[str, object]] = {}
-    for number, spec in enumerate(LANDLOCK_VARIANTS, start=len(LAYERS)):
-        results[spec] = await _run(number, f"variant:{spec}", (), source, tmp_path, baseline=baseline)
-        with capsys.disabled():
-            _print_run(f"variant={spec}", results[spec], f" path={_path_state(spec)}")
-    record_measurement("soffice_landlock_variants", {"abi": abi_line, "runs": results})
+    start = len(LAYERS)
+    results: dict[str, dict] = {}
 
-    # Positive control of the driver: without Landlock it is layer 2, which converts.
-    assert results["no-landlock"]["pdf"], results["no-landlock"]
+    def show(label: str, runs: list[dict]) -> None:
+        for name, result in zip(step_labels(label, len(runs)), runs, strict=True):
+            results[name] = result
+            with capsys.disabled():
+                _print_run(name, result, f" path={path_state(label)}" if label.startswith("variant=") else "")
 
+    for number, (label, steps) in enumerate(CANDIDATES, start=start):
+        show(label, await _run_steps(number, steps, source, tmp_path, baseline=baseline))
 
-async def test_diagnosis_soffice_environment_in_the_product_jail(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The product jail with one change of the environment per run; no rule of the product changes."""
-    source = _docx(tmp_path / "probe.docx")
-    baseline = _baseline()
-    start = len(LAYERS) + len(LANDLOCK_VARIANTS)
-    results: dict[str, dict[str, object]] = {}
-    for number, (name, changes) in enumerate(ENV_VARIANTS, start=start):
-        results[name] = await _run(number, "4-seccomp", (), source, tmp_path, baseline=baseline, env_changes=changes)
-        with capsys.disabled():
-            _print_run(f"env={name}", results[name])
+    # The template: warmed without a jail and without a document, then copied.
+    number = start + len(CANDIDATES)
+    template = tmp_path / "template"
+    warm = (Step("1-env-only", init_only=True),)
+    made = await _run_steps(number, warm, source, tmp_path, baseline=baseline, export_to=template)
+    show(f"{TEMPLATE_LABEL}/make", made)
+    converted = await _run_steps(number + 1, (Step(PRODUCT),), source, tmp_path, baseline=baseline, seed=template)
+    show(TEMPLATE_LABEL, converted)
+
     # Positive control on the same clean /tmp: without a jail soffice converts.
-    control = await _run(start + len(ENV_VARIANTS), "1-env-only", (), source, tmp_path, baseline=baseline)
+    control = await _run_steps(number + 2, (Step("1-env-only"),), source, tmp_path, baseline=baseline)
+    show(CONTROL_LABEL, control)
+    record_measurement("soffice_round_3", {"abi": abi_line, "runs": results})
+    assert results[CONTROL_LABEL]["pdf"], results[CONTROL_LABEL]
+    # The red control of round 2 must stay red, or the round measures something else.
+    assert not results["variant=seccomp"]["pdf"], results["variant=seccomp"]
+
+
+# -- round 3, part 1: how far does REMOVE_FILE on /tmp reach? --------------------------------
+
+
+def _mode(info: os.stat_result) -> str:
+    return f"{stat.S_IMODE(info.st_mode):04o}"
+
+
+def _kind(info: os.stat_result) -> str:
+    if stat.S_ISSOCK(info.st_mode):
+        return "sock"
+    if stat.S_ISREG(info.st_mode):
+        return "file"
+    if stat.S_ISDIR(info.st_mode):
+        return "dir"
+    return "other"
+
+
+def describe(path: Path) -> str:
+    """uid:gid:mode:type of a path without following a symlink, or absent."""
+    try:
+        info = path.lstat()
+    except OSError:
+        return "absent"
+    return f"{info.st_uid}:{info.st_gid}:{_mode(info)}:{_kind(info)}"
+
+
+def unlink_target(kind: str, root: Path, like: Path) -> tuple[Path, socket.socket | None]:
+    """A stand-in below root that a child tries to remove; never the HaRP socket.
+
+    socket-copy listens like the HaRP socket and gets its mode (owner is this
+    process, the line says whether it matches); file and file-in-subdir are
+    plain files of this uid, 0600.
+    """
+    if kind not in UNLINK_TARGETS:
+        msg = f"unknown unlink target {kind!r}"
+        raise ValueError(msg)
+    if kind == "file-in-subdir":
+        folder = root / f"{UNLINK_PREFIX}.d"
+        folder.mkdir(mode=0o700, exist_ok=True)
+        path = folder / "file"
+    else:
+        path = root / f"{UNLINK_PREFIX}.{'sock' if kind == 'socket-copy' else 'file'}"
+    if path.as_posix() == HARP_SOCKET or path.name == Path(HARP_SOCKET).name:
+        msg = "the HaRP socket is never a target"
+        raise ValueError(msg)
+    _remove(path)
+    listener: socket.socket | None = None
+    if kind == "socket-copy":
+        family = getattr(socket, "AF_UNIX", None)
+        if family is None:
+            msg = "a socket stand-in needs AF_UNIX"
+            raise OSError(msg)
+        listener = socket.socket(family, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        with contextlib.suppress(OSError):
+            path.chmod(stat.S_IMODE(like.lstat().st_mode))
+    else:
+        path.write_bytes(b"stand-in\n")
+        path.chmod(0o600)
+    return path, listener
+
+
+def like_exapp(path: Path, like: Path) -> str:
+    """ja when owner, group and mode equal those of the HaRP socket, nein when not, - when it is absent."""
+    mine, theirs = describe(path), describe(like)
+    if theirs == "absent" or mine == "absent":
+        return "-"
+    return "ja" if mine.split(":")[:3] == theirs.split(":")[:3] else "nein"
+
+
+def tmp_facts(harp: Path, access: Mapping[str, str], root: Path = TMP) -> str:
+    """The TMP-FACTS line: this uid, owner/mode/sticky of root, the HaRP socket, access(W_OK) in the product jail."""
+    info = root.lstat()
+    sticky = "ja" if info.st_mode & stat.S_ISVTX else "nein"
+    answers = ",".join(f"{path}:{answer}" for path, answer in access.items())
+    uid = "-"
+    if sys.platform != "win32":
+        uid = str(os.getuid())
+    return (
+        f"TMP-FACTS uid={uid} tmp={info.st_uid}:{info.st_gid}:{_mode(info)} sticky={sticky} "
+        f"exapp={describe(harp)} access_w={answers}"
+    )
+
+
+def unlink_argv(jail: str, path: Path) -> list[str]:
+    probe = [sys.executable, "-I", str(DRIVER), "unlink", str(path)]
+    if jail == "none":
+        return probe
+    if jail == "product":
+        return jail_argv("soffice", probe)
+    if jail == "grant":
+        return [sys.executable, "-I", str(DRIVER), "variant", GRANT_REMOVE, "soffice", "--", *probe]
+    msg = f"unknown jail {jail!r}"
+    raise ValueError(msg)
+
+
+async def test_measure_whether_remove_file_on_tmp_reaches_files_of_the_server(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """TMP-FACTS and UNLINK-RISK; the real HaRP socket is only described, never named to a child."""
+    harp = Path(os.environ.get("HP_EXAPP_SOCK", HARP_SOCKET))
+    access: dict[str, str] = {}
+    for path in ACCESS_PATHS:
+        access[path] = await _probe(jail_argv("soffice", [sys.executable, "-I", str(DRIVER), "access", path]))
+    facts = tmp_facts(harp, access)
+    lines = [facts]
+    answers: dict[str, str] = {}
+    for kind in UNLINK_TARGETS:
+        for jail in UNLINK_JAILS:
+            path, listener = unlink_target(kind, TMP, harp)
+            try:
+                like = like_exapp(path, harp) if kind == "socket-copy" else "-"
+                answer = await _probe(unlink_argv(jail, path))
+            finally:
+                if listener is not None:
+                    listener.close()
+                _remove(path)
+                if kind == "file-in-subdir":
+                    _remove(path.parent)
+            answers[f"{kind}/{jail}"] = answer
+            lines.append(f"UNLINK-RISK target={kind} jail={jail} result={answer} like_exapp={like}")
     with capsys.disabled():
-        _print_run("env=control-1-env-only", control)
-    record_measurement("soffice_env_variants", {**results, "control-1-env-only": control})
-    assert control["pdf"], control
+        print()
+        for line in lines:
+            print(line)
+    record_measurement("unlink_risk", {"facts": facts, "answers": answers})
+    # The HaRP socket is untouched.
+    assert describe(harp) != "absent" or "HP_EXAPP_SOCK" not in os.environ
+    for kind in UNLINK_TARGETS:
+        # Positive control: an unjailed process of this uid removes the stand-in.
+        assert answers[f"{kind}/none"] == "ok", answers
+        # The product jail grants no removal in /tmp.
+        assert answers[f"{kind}/product"] != "ok", answers
 
 
 async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: pytest.CaptureFixture[str]) -> None:
@@ -499,7 +679,7 @@ async def test_measure_whether_a_jailed_child_reaches_the_harp_socket(capsys: py
     soffice whose own sockets would live in its job folder. variant
     seccomp,deny-connect: the product seccomp filter plus connect() refused.
     """
-    path = os.environ.get("HP_EXAPP_SOCK", "/tmp/exapp.sock")  # noqa: S108 - the HaRP socket path
+    path = os.environ.get("HP_EXAPP_SOCK", HARP_SOCKET)
     probe = [sys.executable, "-I", str(DRIVER), "connect", path]
     runs = {
         "test-process": probe,

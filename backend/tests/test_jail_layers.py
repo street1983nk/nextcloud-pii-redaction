@@ -282,3 +282,33 @@ def test_parse_grant_names_path_and_rights() -> None:
     )
     assert jail_layers.parse_grant("/srv/data") is None
     assert jail_layers.parse_grant("/srv/data:NOPE") is None
+
+
+def test_unlink_removes_and_answers_ok_absent_or_the_errno(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "pii-unlink-probe.file"
+    target.write_bytes(b"x")
+    assert jail_layers.main(["unlink", str(target)]) == 0
+    assert not target.exists()
+    assert jail_layers.main(["unlink", str(target)]) == 3
+    assert capsys.readouterr().out.split() == ["ok", "absent"]
+
+    def refuse(_path: str) -> None:
+        raise PermissionError(errno.EACCES, "Landlock")
+
+    monkeypatch.setattr(jail_layers.os, "unlink", refuse)
+    assert jail_layers.main(["unlink", str(target)]) == 1
+    assert capsys.readouterr().out.strip() == "EACCES"
+
+
+@pytest.mark.skipif(not ON_LINUX, reason="libc access(2)")
+def test_access_asks_libc_and_names_the_errno(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert jail_layers.main(["access", str(tmp_path)]) == 0
+    assert jail_layers.main(["access", str(tmp_path / "missing")]) == 1
+    assert capsys.readouterr().out.split() == ["ok", "ENOENT"]
+
+
+def test_negative_unlink_and_access_take_exactly_one_path() -> None:
+    assert jail_layers.main(["unlink"]) == jail.EXIT_USAGE
+    assert jail_layers.main(["access", "/a", "/b"]) == jail.EXIT_USAGE
