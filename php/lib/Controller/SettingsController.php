@@ -45,7 +45,8 @@ final class SettingsController extends Controller {
 	 * The state of the other half, determined anew: the same shape the admin
 	 * section rendered, plus the last child of the container (kind, peak
 	 * memory, duration; plan 17 reads it for the measurement), the address of
-	 * the app management and the formatted time of the check.
+	 * the app management, the formatted time of the check and the protection
+	 * layers the container reports as missing (plan 02-20, D-02-11).
 	 */
 	#[\OCP\AppFramework\Http\Attribute\FrontpageRoute(verb: 'GET', url: '/admin/state')]
 	public function state(): DataResponse {
@@ -64,6 +65,9 @@ final class SettingsController extends Controller {
 				'checkedAtText' => $this->dateTimeFormatter->formatTime($state['checkedAt'], 'medium'),
 				'companion' => $state['companion'],
 				'lastChild' => $lastChild,
+				// Fixed words out of ExAppService::SANDBOX_LAYERS, [] for full
+				// isolation, null when unknown; fresh with every recheck.
+				'sandboxDegraded' => $state['sandboxDegraded'] ?? null,
 				'appsUrl' => $this->appsUrl(),
 			]);
 		} catch (\Throwable $e) {

@@ -43,6 +43,7 @@ final class Admin implements ISettings {
 			'backendVersion' => $state['backendVersion'],
 			'checkedAtText' => $this->dateTimeFormatter->formatTime($state['checkedAt'], 'medium'),
 			'checkedAtIso' => gmdate('Y-m-d\TH:i:s\Z', $state['checkedAt']),
+			'sandboxDegraded' => $state['sandboxDegraded'],
 			'urlGenerator' => $this->urlGenerator,
 		], TemplateResponse::RENDER_AS_BLANK);
 	}
@@ -61,7 +62,7 @@ final class Admin implements ISettings {
 	 * code of its own; should it throw all the same, the page still renders
 	 * and names the backend as unreachable.
 	 *
-	 * @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int}
+	 * @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,sandboxDegraded:?list<string>}
 	 */
 	private function state(): array {
 		try {
@@ -71,6 +72,8 @@ final class Admin implements ISettings {
 				'ownVersion' => $state['ownVersion'],
 				'backendVersion' => $state['backendVersion'],
 				'checkedAt' => $state['checkedAt'],
+				// The protection layers the container reports as missing (D-02-11).
+				'sandboxDegraded' => $state['sandboxDegraded'] ?? null,
 			];
 		} catch (\Throwable $e) {
 			$this->logger->error('PII Redaction: backend state not readable for the admin page', ['class' => $e::class]);
@@ -79,6 +82,7 @@ final class Admin implements ISettings {
 				'ownVersion' => $this->exAppService->ownVersion(),
 				'backendVersion' => null,
 				'checkedAt' => $this->timeFactory->getTime(),
+				'sandboxDegraded' => null,
 			];
 		}
 	}

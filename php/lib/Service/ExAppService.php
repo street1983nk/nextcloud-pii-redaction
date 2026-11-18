@@ -30,7 +30,7 @@ use Psr\Log\LoggerInterface;
  * nothing the container says reaches a log: only status codes and class names.
  *
  * The contract, as the container implements it (01-SKELETON.md):
- *   GET /status                 -> {version, ready, companion, busy, lastChild}
+ *   GET /status                 -> {version, ready, companion, busy, lastChild, sandbox}
  *   GET /jobs/{id}/pages/{n}.png -> PNG or 404
  *   GET /jobs/{id}/output        -> PDF stream or 404
  *
@@ -89,7 +89,16 @@ class ExAppService {
 	/** What GET /status may say about the PHP half, seen from the container. */
 	public const COMPANION_VALUES = ['ok', 'missing', 'unknown'];
 	/** The kinds of child process the container reports in lastChild. */
-	private const CHILD_KINDS = ['render', 'soffice', 'placeholder'];
+	private const CHILD_KINDS = ['render', 'soffice', 'placeholder', 'precheck', 'sanitize'];
+
+	/** The words of /status sandbox for seccomp and Landlock (plan 02-14). */
+	public const SANDBOX_LAYER_VALUES = ['active', 'unavailable'];
+	/** The words of /status sandbox for the jail of the child processes. */
+	public const SANDBOX_JAIL_VALUES = ['ok', 'failed'];
+	/** The layers the admin section can name as missing, in display order. */
+	public const SANDBOX_LAYERS = ['seccomp', 'landlock', 'jail'];
+	/** The highest Landlock ABI that is still taken for a number of the contract. */
+	private const MAX_LANDLOCK_ABI = 64;
 
 	/**
 	 * What a version has to look like before it is compared or stored: major
@@ -113,7 +122,7 @@ class ExAppService {
 	 * GET /status, field by field, or null when the container gives no
 	 * usable answer.
 	 *
-	 * @return array{version:?string,ready:bool,companion:?string,busy:bool,lastChild:?array{kind:string,rssKb:int,ms:int}}|null
+	 * @return array{version:?string,ready:bool,companion:?string,busy:bool,lastChild:?array{kind:string,rssKb:int,ms:int},sandbox:?array{seccomp:string,landlock:string,landlockAbi:int,jail:string}}|null
 	 */
 	public function status(?string $uid = null): ?array {
 		$uid ??= $this->firstAdmin();
@@ -134,7 +143,34 @@ class ExAppService {
 			'companion' => is_string($companion) && in_array($companion, self::COMPANION_VALUES, true) ? $companion : null,
 			'busy' => ($raw['busy'] ?? null) === true,
 			'lastChild' => self::lastChild($raw['lastChild'] ?? null),
+			'sandbox' => self::sandbox($raw['sandbox'] ?? null),
 		];
+	}
+
+	/**
+	 * The layers that are missing, as fixed words out of SANDBOX_LAYERS: an
+	 * empty list for full isolation, null when the protection state is unknown.
+	 *
+	 * @param array{seccomp:string,landlock:string,landlockAbi:int,jail:string}|null $sandbox
+	 * @return list<string>|null
+	 */
+	public static function degradedLayers(?array $sandbox): ?array {
+		if ($sandbox === null) {
+			return null;
+		}
+
+		$missing = [];
+		if ($sandbox['seccomp'] !== 'active') {
+			$missing[] = 'seccomp';
+		}
+		if ($sandbox['landlock'] !== 'active') {
+			$missing[] = 'landlock';
+		}
+		if ($sandbox['jail'] !== 'ok') {
+			$missing[] = 'jail';
+		}
+
+		return $missing;
 	}
 
 	/**
@@ -211,7 +247,7 @@ class ExAppService {
 	 * reused unless $fresh; otherwise it is determined under the first enabled
 	 * admin (the answer is the same for every user) and remembered.
 	 *
-	 * @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string}
+	 * @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string,sandboxDegraded:?list<string>}
 	 */
 	public function backendState(bool $fresh = false): array {
 		if (!$fresh) {
@@ -248,7 +284,7 @@ class ExAppService {
 		return is_array($info) ? $info : null;
 	}
 
-	/** @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string} */
+	/** @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string,sandboxDegraded:?list<string>} */
 	private function determineState(?string $uid): array {
 		$own = $this->ownVersion();
 		$result = [
@@ -257,6 +293,7 @@ class ExAppService {
 			'backendVersion' => null,
 			'checkedAt' => $this->timeFactory->getTime(),
 			'companion' => null,
+			'sandboxDegraded' => null,
 		];
 
 		if ($uid === null || !$this->appApiEnabledFor($uid)) {
@@ -308,6 +345,9 @@ class ExAppService {
 			$this->rememberBackendVersion($status['version']);
 		}
 		$result['companion'] = $status['companion'];
+		// Asked anew with every determination: a jail that failed in operation
+		// (exit 71 of a child) shows on the next check, nothing holds the old word.
+		$result['sandboxDegraded'] = self::degradedLayers($status['sandbox']);
 
 		$backend = $result['backendVersion'] ?? '';
 		if ($this->drifts($own, $backend)) {
@@ -321,7 +361,7 @@ class ExAppService {
 		return $result;
 	}
 
-	/** @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string}|null */
+	/** @return array{state:string,ownVersion:string,backendVersion:?string,checkedAt:int,companion:?string,sandboxDegraded:?list<string>}|null */
 	private function rememberedState(): ?array {
 		$raw = $this->appConfig->getValueString(Application::APP_ID, self::KEY_BACKEND_STATE, '');
 		$decoded = $raw === '' ? null : json_decode($raw, true);
@@ -348,6 +388,7 @@ class ExAppService {
 			'backendVersion' => $backend !== '' ? $backend : null,
 			'checkedAt' => $checkedAt,
 			'companion' => is_string($companion) && in_array($companion, self::COMPANION_VALUES, true) ? $companion : null,
+			'sandboxDegraded' => self::layerList($decoded['sandboxDegraded'] ?? null),
 		];
 	}
 
@@ -429,6 +470,52 @@ class ExAppService {
 		}
 
 		return ['kind' => $kind, 'rssKb' => $rssKb, 'ms' => $ms];
+	}
+
+	/**
+	 * The protection state of /status, only as the fixed words and a number
+	 * from 0 to 64; any other shape is null, so nothing else reaches the page.
+	 *
+	 * @return array{seccomp:string,landlock:string,landlockAbi:int,jail:string}|null
+	 */
+	private static function sandbox(mixed $raw): ?array {
+		if (!is_array($raw)) {
+			return null;
+		}
+		$seccomp = $raw['seccomp'] ?? null;
+		$landlock = $raw['landlock'] ?? null;
+		$abi = $raw['landlockAbi'] ?? null;
+		$jail = $raw['jail'] ?? null;
+		if (!is_string($seccomp) || !in_array($seccomp, self::SANDBOX_LAYER_VALUES, true)
+			|| !is_string($landlock) || !in_array($landlock, self::SANDBOX_LAYER_VALUES, true)
+			|| !is_int($abi) || $abi < 0 || $abi > self::MAX_LANDLOCK_ABI
+			|| !is_string($jail) || !in_array($jail, self::SANDBOX_JAIL_VALUES, true)) {
+			return null;
+		}
+
+		return ['seccomp' => $seccomp, 'landlock' => $landlock, 'landlockAbi' => $abi, 'jail' => $jail];
+	}
+
+	/**
+	 * A remembered list of missing layers: each word out of SANDBOX_LAYERS at
+	 * most once, otherwise null.
+	 *
+	 * @return list<string>|null
+	 */
+	private static function layerList(mixed $raw): ?array {
+		if (!is_array($raw) || !array_is_list($raw)) {
+			return null;
+		}
+		foreach ($raw as $layer) {
+			if (!is_string($layer) || !in_array($layer, self::SANDBOX_LAYERS, true)) {
+				return null;
+			}
+		}
+		if (count(array_unique($raw)) !== count($raw)) {
+			return null;
+		}
+
+		return $raw;
 	}
 
 	// -- transport ----------------------------------------------------------------
