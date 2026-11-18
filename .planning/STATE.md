@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-20 abgeschlossen (lokal, ungepusht: 30801ca bis 70406d3); nächster Plan 02-21"
-last_updated: "2026-11-18T09:35:47.397Z"
-last_activity: 2026-11-18 -- 02-20 abgeschlossen, Admin-Hinweis zum geminderten Schutz
+stopped_at: "02-21 abgeschlossen (lokal, ungepusht: 0be8589, de8f787); nächster Plan 02-22"
+last_updated: "2026-11-18T09:55:18.744Z"
+last_activity: 2026-11-18 -- 02-21 abgeschlossen, Container-Beweise Jail und Korpus (CI-Lauf offen)
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 41
+  completed_plans: 42
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 20 of 25 in current phase (02-01 bis 02-20 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 und 02-20 lokal ungepusht; nächster Schritt 02-21)
+Plan: 21 of 25 in current phase (02-01 bis 02-21 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-21 lokal ungepusht; Container-Lauf von 02-21 offen bis zum nächsten Push; nächster Schritt 02-22)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-20 abgeschlossen
+Last activity: 2026-11-18 -- 02-21 abgeschlossen
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -79,6 +79,7 @@ Progress: [█████████░] 89%
 | Phase 02 P17 | 60 min | 2 tasks | 9 files |
 | Phase 02 P19 | ca. 60 min | 2 tasks | 6 files |
 | Phase 02 P20 | ca. 15 min | 3 tasks | 17 files |
+| Phase 02 P21 | 15 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,8 @@ Recent decisions affecting current work:
 - [Phase 02-19]: expected null im analyze-Claim endet ohne Download als unsupported_format; fehlender Schlüssel oder fremdes Wort verwirft den Claim
 - [Phase 02-19]: andere Abstürze von precheck/sanitize sind damaged; Exit 71 markiert den Jail an jeder Kindstelle (auch soffice, Platzhalter)
 - [Phase 02-20]: sandboxDegraded nur aus festen Wörtern (seccomp, landlock, jail), bei jedem Recheck frisch; seccomp/Landlock teilen eine Abhilfe, Schutzschicht eigenes Fehlerbanner
+- [Phase 02-21]: Korpus im Container kommt vom Runner (ci/make_corpus.py, Mount /corpus:ro, PII_CORPUS), das Test-Image hat kein ci/
+- [Phase 02-21]: Grenzen im Jail-Kind per getrlimit; /proc/self/limits bleibt gesperrt, kein Recht geöffnet
 
 ### Pending Todos
 
@@ -142,6 +145,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T09:35:43.159Z
-Stopped at: Completed 02-20-PLAN.md
+Last session: 2026-11-18T09:55:09.436Z
+Stopped at: Completed 02-21-PLAN.md
 Resume file: None
