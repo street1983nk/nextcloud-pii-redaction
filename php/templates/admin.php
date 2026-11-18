@@ -8,7 +8,10 @@ declare(strict_types=1);
  * without its test switch.
  *
  * All seven state banners are rendered here, the current one visible and the
- * others hidden, plus the hidden warning for a failed recheck. The admin
+ * others hidden, plus the hidden warning for a failed recheck, plus the
+ * area for reduced protection (plan 02-20, D-02-11): one line
+ * per layer (data-layer seccomp, landlock, jail), visible when the container
+ * reports it missing, each banner with its remedy. The admin
  * script (src/admin.ts) flips hidden attributes and replaces text nodes; it
  * never builds markup. Without JavaScript a reload shows the new state.
  *
@@ -46,6 +49,16 @@ $own = is_string($_['ownVersion'] ?? null) && $_['ownVersion'] !== '' ? $_['ownV
 $backend = is_string($_['backendVersion'] ?? null) && $_['backendVersion'] !== '' ? $_['backendVersion'] : $unknown;
 $checkedAtText = is_string($_['checkedAtText'] ?? null) ? $_['checkedAtText'] : '';
 $checkedAtIso = is_string($_['checkedAtIso'] ?? null) ? $_['checkedAtIso'] : '';
+
+// The protection layers the container reports as missing (plan 02-20,
+// D-02-11): only the three fixed words count, anything else shows nothing.
+// An unknown state (null) shows no line either; the state banners say why.
+$reported = is_array($_['sandboxDegraded'] ?? null) ? $_['sandboxDegraded'] : [];
+$degraded = array_values(array_filter(
+	['seccomp', 'landlock', 'jail'],
+	static fn (string $layer): bool => in_array($layer, $reported, true),
+));
+$shows = static fn (string $layer): bool => in_array($layer, $degraded, true);
 
 // The app management of the server, the one action of an error banner
 // (orchestrator decision 3, AVS form): from Nextcloud 34 on it is the app
@@ -123,6 +136,24 @@ $banners = [
 			<span class="pii-banner__icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="<?php p($icons['warning']); ?>"/></svg></span>
 			<div class="pii-banner__body">
 				<p class="pii-banner__text"><?php p($l->t('The state could not be checked again. Shown is the state from when the page was loaded.')); ?></p>
+			</div>
+		</div>
+
+		<div id="pii-sandbox-state" class="pii-admin__sandbox"<?php if ($degraded === []) { ?> hidden<?php } ?>>
+			<div class="pii-banner pii-banner--warning" data-sandbox="layers"<?php if (!$shows('seccomp') && !$shows('landlock')) { ?> hidden<?php } ?>>
+				<span class="pii-banner__icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="<?php p($icons['warning']); ?>"/></svg></span>
+				<div class="pii-banner__body">
+					<p class="pii-banner__text" data-layer="seccomp"<?php if (!$shows('seccomp')) { ?> hidden<?php } ?>><?php p($l->t('Network block for helper processes not available (seccomp). Analyses run with reduced protection.')); ?></p>
+					<p class="pii-banner__text" data-layer="landlock"<?php if (!$shows('landlock')) { ?> hidden<?php } ?>><?php p($l->t('File access restriction for helper processes not available (Landlock). Analyses run with reduced protection.')); ?></p>
+					<p class="pii-banner__text pii-banner__remedy"><?php p($l->t('Run the container with seccomp and Landlock enabled (current Linux kernel, default security profile of the container runtime).')); ?></p>
+				</div>
+			</div>
+			<div class="pii-banner pii-banner--error" data-sandbox="jail"<?php if (!$shows('jail')) { ?> hidden<?php } ?>>
+				<span class="pii-banner__icon"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="<?php p($icons['error']); ?>"/></svg></span>
+				<div class="pii-banner__body">
+					<p class="pii-banner__text" data-layer="jail"<?php if (!$shows('jail')) { ?> hidden<?php } ?>><?php p($l->t('The protection layer for helper processes could not be loaded. Analyses fail until this is fixed.')); ?></p>
+					<p class="pii-banner__text pii-banner__remedy"><?php p($l->t('Restart the backend container and check its log.')); ?></p>
+				</div>
 			</div>
 		</div>
 	</div>

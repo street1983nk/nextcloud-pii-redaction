@@ -124,6 +124,14 @@
 	margin-block: calc(var(--default-grid-baseline) * 4);
 }
 
+/* Reduced protection (plan 02-20): the two banners stack like the state
+   banners above them. */
+.pii-admin__sandbox {
+	display: flex;
+	flex-direction: column;
+	gap: calc(var(--default-grid-baseline) * 2);
+}
+
 .pii-admin__state:focus-visible {
 	outline: 2px solid var(--color-main-text);
 	outline-offset: 2px;

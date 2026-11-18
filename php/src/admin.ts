@@ -18,12 +18,21 @@
  *   .pii-version-own, .pii-version-backend   text of the version line
  *   #pii-checked-at                 <time> of the last check
  *   #pii-recheck, #pii-recheck-label         the button and its text
+ *   #pii-sandbox-state              reduced protection (plan 02-20, D-02-11)
+ *   [data-sandbox="layers|jail"]    a banner with its remedy, inside it
+ *   [data-layer="seccomp|landlock|jail"]     one line per missing layer
+ *
+ * Every answer of admin/state carries sandboxDegraded: a list of the fixed
+ * words seccomp, landlock and jail, empty for full isolation, null when
+ * unknown. Each answer redraws the area, so a jail that failed in operation
+ * (exit 71 of a child) shows on the next check without a reload.
  */
 import axios from '@nextcloud/axios'
 import { t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 
 const STATES = ['ok', 'version_patch_differs', 'version_drift', 'backend_missing', 'backend_disabled', 'backend_unreachable', 'no_app_api']
+const LAYERS = ['seccomp', 'landlock', 'jail']
 
 type Answer = {
 	state?: unknown
@@ -31,6 +40,15 @@ type Answer = {
 	backendVersion?: unknown
 	checkedAt?: unknown
 	checkedAtText?: unknown
+	sandboxDegraded?: unknown
+}
+
+/** The missing layers of an answer, only words out of LAYERS. */
+function degradedLayers(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return []
+	}
+	return LAYERS.filter((layer) => value.includes(layer))
 }
 
 function setText(nodes: Iterable<Element>, value: string): void {
@@ -61,7 +79,23 @@ if (root !== null && stateArea !== null && button !== null) {
 	const failed = document.getElementById('pii-recheck-failed')
 	const checkedAt = document.getElementById('pii-checked-at')
 	const banners = stateArea.querySelectorAll<HTMLElement>('[data-state]')
+	const sandboxArea = document.getElementById('pii-sandbox-state')
 	const idleText = label.textContent ?? ''
+
+	// Only hidden attributes change; the sentences are the server's.
+	const showSandbox = (value: unknown): void => {
+		if (sandboxArea === null) {
+			return
+		}
+		const missing = degradedLayers(value)
+		for (const line of sandboxArea.querySelectorAll<HTMLElement>('[data-layer]')) {
+			line.hidden = !missing.includes(line.dataset.layer ?? '')
+		}
+		for (const banner of sandboxArea.querySelectorAll<HTMLElement>('[data-sandbox]')) {
+			banner.hidden = banner.querySelector('[data-layer]:not([hidden])') === null
+		}
+		sandboxArea.hidden = missing.length === 0
+	}
 
 	const busy = (on: boolean): void => {
 		button.disabled = on
@@ -78,6 +112,7 @@ if (root !== null && stateArea !== null && button !== null) {
 		for (const banner of banners) {
 			banner.hidden = banner.dataset.state !== answer.state
 		}
+		showSandbox(answer.sandboxDegraded)
 		setText(root.querySelectorAll('.pii-version-own'), version(answer.ownVersion))
 		setText(root.querySelectorAll('.pii-version-backend'), version(answer.backendVersion))
 		if (checkedAt !== null && typeof answer.checkedAt === 'number' && Number.isInteger(answer.checkedAt)) {

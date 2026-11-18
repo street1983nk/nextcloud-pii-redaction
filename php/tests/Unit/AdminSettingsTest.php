@@ -33,7 +33,7 @@ final class AdminSettingsTest extends TestCase {
 	/**
 	 * The template as the settings page renders it, as a DOM.
 	 */
-	private function renderTemplate(string $state, string $first = self::FIRST): \DOMXPath {
+	private function renderTemplate(string $state, string $first = self::FIRST, mixed $degraded = []): \DOMXPath {
 		if (!function_exists('p')) {
 			require_once \OC::$SERVERROOT . '/lib/private/Template/functions.php';
 		}
@@ -55,6 +55,7 @@ final class AdminSettingsTest extends TestCase {
 			'backendVersion' => '0.1.0',
 			'checkedAtText' => '14:00:00',
 			'checkedAtIso' => '2026-11-07T14:00:00Z',
+			'sandboxDegraded' => $degraded,
 			'urlGenerator' => $urls,
 		];
 
@@ -133,6 +134,67 @@ final class AdminSettingsTest extends TestCase {
 		$visible = $dom->query("//div[@data-state='backend_unreachable' and not(@hidden)]");
 		self::assertNotFalse($visible);
 		self::assertSame(1, $visible->length);
+	}
+
+	/**
+	 * The visible lines of the protection area, in document order.
+	 *
+	 * @return list<string>
+	 */
+	private static function visibleLayers(\DOMXPath $dom): array {
+		$lines = $dom->query("//div[@id='pii-sandbox-state' and not(@hidden)]//div[@data-sandbox and not(@hidden)]//p[@data-layer and not(@hidden)]");
+		self::assertNotFalse($lines);
+		$found = [];
+		foreach ($lines as $line) {
+			if ($line instanceof \DOMElement) {
+				$found[] = $line->getAttribute('data-layer');
+			}
+		}
+		return $found;
+	}
+
+	public function testFullIsolationShowsNoProtectionNotice(): void {
+		$dom = $this->renderTemplate('ok', self::FIRST, []);
+		$area = $dom->query("//div[@id='pii-sandbox-state' and @hidden]");
+		self::assertNotFalse($area);
+		self::assertSame(1, $area->length);
+		self::assertSame([], self::visibleLayers($dom));
+	}
+
+	/**
+	 * @return iterable<string, array{mixed, list<string>}>
+	 */
+	public static function protectionCases(): iterable {
+		yield 'no seccomp' => [['seccomp'], ['seccomp']];
+		yield 'no landlock' => [['landlock'], ['landlock']];
+		yield 'jail failed' => [['jail'], ['jail']];
+		yield 'everything' => [['jail', 'seccomp', 'landlock'], ['seccomp', 'landlock', 'jail']];
+		yield 'unknown state' => [null, []];
+		yield 'foreign words only' => [['<script>', 'net'], []];
+	}
+
+	/**
+	 * @param list<string> $expected
+	 */
+	#[DataProvider('protectionCases')]
+	public function testEveryMissingLayerShowsItsLine(mixed $degraded, array $expected): void {
+		self::assertSame($expected, self::visibleLayers($this->renderTemplate('ok', self::FIRST, $degraded)));
+	}
+
+	public function testEachBannerCarriesItsRemedyAndNoForeignText(): void {
+		$dom = $this->renderTemplate('ok', self::FIRST, ['landlock', 'jail', '<b>x</b>']);
+		$layers = $dom->query("//div[@data-sandbox='layers' and not(@hidden)]//p[contains(@class, 'pii-banner__remedy')]");
+		$jail = $dom->query("//div[@data-sandbox='jail' and not(@hidden)]//p[contains(@class, 'pii-banner__remedy')]");
+		self::assertNotFalse($layers);
+		self::assertNotFalse($jail);
+		self::assertSame(1, $layers->length);
+		self::assertSame(1, $jail->length);
+		self::assertStringContainsString('seccomp and Landlock enabled', (string)$layers->item(0)?->textContent);
+		self::assertSame('Restart the backend container and check its log.', $jail->item(0)?->textContent);
+
+		$html = $dom->document->saveHTML();
+		self::assertIsString($html);
+		self::assertStringNotContainsString('<b>x</b>', $html);
 	}
 
 	public function testTheFormPassesCodesVersionsAndTimeOnly(): void {
