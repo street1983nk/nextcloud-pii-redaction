@@ -128,6 +128,11 @@ OC.L10N.register(
     "The answer could not be saved. Try again.": "Die Antwort ließ sich nicht speichern. Erneut versuchen.",
     "Macros were removed for the analysis. The original stays unchanged.": "Makros wurden für die Analyse entfernt. Das Original bleibt unverändert.",
     "Checking the file": "Datei wird geprüft",
-    "A safety check runs before the analysis.": "Vor der Analyse läuft eine Sicherheitsprüfung."
+    "A safety check runs before the analysis.": "Vor der Analyse läuft eine Sicherheitsprüfung.",
+    "Network block for helper processes not available (seccomp). Analyses run with reduced protection.": "Netzsperre für Hilfsprozesse nicht verfügbar (seccomp). Analysen laufen mit geminderter Schutzwirkung.",
+    "File access restriction for helper processes not available (Landlock). Analyses run with reduced protection.": "Dateizugriffssperre für Hilfsprozesse nicht verfügbar (Landlock). Analysen laufen mit geminderter Schutzwirkung.",
+    "The protection layer for helper processes could not be loaded. Analyses fail until this is fixed.": "Die Schutzschicht für Hilfsprozesse ließ sich nicht laden. Bis zur Behebung schlagen Analysen fehl.",
+    "Run the container with seccomp and Landlock enabled (current Linux kernel, default security profile of the container runtime).": "Den Container mit aktiviertem seccomp und Landlock betreiben (aktueller Linux-Kernel, Standard-Sicherheitsprofil der Container-Laufzeit).",
+    "Restart the backend container and check its log.": "Den Backend-Container neu starten und sein Protokoll prüfen."
 },
 "nplurals=2; plural=(n != 1);");
