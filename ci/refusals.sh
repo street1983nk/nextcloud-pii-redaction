@@ -19,13 +19,24 @@
 #   (g) D-02-02: none of the refusals (a) to (e) made a notification. Judged
 #       last, so one run shows every other proof before it.
 #
+# Every proof runs on its own (proof below): one that fails is named, the
+# others still run, and the script ends red when any of them failed or could
+# not run. A CI run shows every finding at once that way, not only the first.
+#
+# Which notification a job has is asked of two witnesses. The OCS API of the
+# notifications app says what the user sees: it carries the rendered title in
+# the language of the user ("A review is ready"), never the subject word. The
+# word (review_ready) stands in oc_notifications.subject only, so it is read
+# there (as ci/stale.sh does). Nothing here depends on the language of alice.
+#
 # A6: the script reads the columns of oc_filecache from the database itself
 # and stops when there is no column "encrypted" (the flag FileAccess asks at
 # the folders above a file).
 #
 # The files come from ci/make_corpus.py --e2e into ci/out/corpus, where the
 # Playwright suite reads them afterwards. Output: words of the closed lists,
-# ids and numbers only, never the content of a file.
+# ids, numbers and the fixed titles of the notifications only, never the
+# content of a file, a password or a request token.
 #
 # Uses the contract of ci/lib.sh plus DB_KIND (and DB_CONTAINER, DB_USER,
 # DB_PASS, DB_NAME on the MariaDB leg).
@@ -41,6 +52,8 @@ CONTROL='harmless.pdf'
 SANITIZED='ext_image.docx'
 SIGNED='pdf_signed.pdf'
 JAR="${CI_OUT}/refusals-session.cookies"
+# What one proof hands to a later one: each proof is a process of its own.
+STATE="${CI_OUT}/refusals-state"
 NOTIFICATIONS_API='/ocs/v2.php/apps/notifications/api/v2/notifications?format=json'
 # The API hands out one page of notifications; a count close to it could hide
 # a new one. alice has six after ci/flow.sh.
@@ -49,11 +62,86 @@ NOTIFICATION_PAGE=20
 # through the renderer and LibreOffice within a minute.
 REFUSAL_SECONDS=180
 REVIEW_SECONDS=300
-REFUSED_JOBS=()
+# The four refusals of the pre-check, (a) to (d).
+REFUSALS_EXPECTED=4
+PROOFS=0
+FAILED=()
+SKIPPED=()
+STUCK=0
 
 db_init
+rm -rf "${STATE}"
+mkdir -p "${STATE}"
 
 # -- helpers -----------------------------------------------------------------------
+
+# proof <function> [arguments...]: runs one proof in a process of its own and
+# goes on when it fails. The call stands alone on its line: behind "if" or
+# before "||" bash would switch errexit off inside the proof. A proof that
+# failed after a wait ran out leaves the queue in an unknown state; the proofs
+# after it are not run and count as failed (no half an hour of further waits).
+proof() {
+	local name="$*" code=0 began="${SECONDS}"
+	PROOFS=$((PROOFS + 1))
+	if [ "${STUCK}" = "1" ]; then
+		SKIPPED+=("${name}")
+		echo "NOT RUN: ${name} (an earlier proof ran out of time)" >&2
+		return 0
+	fi
+	set +e
+	(
+		set -e
+		"$@"
+	)
+	code=$?
+	set -e
+	if [ "${code}" != "0" ]; then
+		FAILED+=("${name}")
+		echo "PROOF FAILED: ${name}" >&2
+		if [ "$((SECONDS - began))" -ge "${REFUSAL_SECONDS}" ]; then
+			STUCK=1
+		fi
+	fi
+	return 0
+}
+
+# keep <key> <value> and kept <key>: a value for the proofs that follow.
+keep() {
+	printf '%s' "$2" > "${STATE}/$1"
+}
+
+kept() {
+	[ -s "${STATE}/$1" ] || fail "$1 is not known: the proof that sets it did not get that far"
+	cat "${STATE}/$1"
+}
+
+# shown <file>: the start of an answer for a failure message, on one line, at
+# most 300 characters, request tokens blanked.
+shown() {
+	python3 - "$1" <<'PY'
+import re, sys
+try:
+    text = open(sys.argv[1], "rb").read(4096).decode("utf-8", "replace")
+except OSError:
+    text = ""
+text = re.sub(r'(requesttoken"?\s*[=:]\s*")[^"]*', r"\1...", text, flags=re.IGNORECASE)
+print(" ".join(text.split())[:300] or "(empty)")
+PY
+}
+
+# field_of <file> <key>: one field of a JSON object, or nothing when the
+# answer is no JSON object (json_field of ci/lib.sh stops with a traceback).
+field_of() {
+	python3 - "$1" "$2" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError):
+    data = None
+value = data.get(sys.argv[2]) if isinstance(data, dict) else None
+print("" if value is None else value)
+PY
+}
 
 mkcol() {
 	curl -sfS -u "$1:$(password_of "$1")" -X MKCOL "$(dav_url "$1" "$2")" > /dev/null \
@@ -68,9 +156,17 @@ upload() {
 # id_of <user> <path>: the file id, or a stop when there is none.
 id_of() {
 	local id
-	id=$(fileid_of "$1" "$2")
+	id=$(fileid_of "$1" "$2") || fail "the file id of $2 could not be asked"
 	[[ "${id}" =~ ^[0-9]+$ ]] || fail "no file id for $2"
 	printf '%s' "${id}"
+}
+
+# started <user> <file id>: a new job (201); prints its id.
+started() {
+	local job
+	job=$(start_job "$1" "$2" 201)
+	[[ "${job}" =~ ^[0-9]+$ ]] || fail "the start as $1 on file $2 gave no job id"
+	printf '%s' "${job}"
 }
 
 # db_exec <sql>: one changing statement, committed. db_query of ci/lib.sh only
@@ -100,16 +196,42 @@ column_of() {
 	fi
 }
 
+# encrypted_of <file id>: the E2E flag of one row of oc_filecache.
+encrypted_of() {
+	db_query "SELECT encrypted FROM oc_filecache WHERE fileid = $1"
+}
+
 events_of() {
 	db_query "SELECT action FROM oc_pii_job_events WHERE job_id = $1 ORDER BY id"
 }
 
+# events_line <job>: the events of a job on one line, for a message.
+events_line() {
+	local events
+	events=$(events_of "$1") || fail "the events of job $1 could not be read"
+	printf '%s' "${events//$'\n'/,}"
+}
+
 # has_event <job> <action>. The rows are read first: a grep -q that leaves
-# early would break the pipe of the query under pipefail.
+# early would break the pipe of the query under pipefail. A query that fails
+# stops the proof: "no such event" is an answer only when the rows were read.
 has_event() {
 	local events
-	events=$(events_of "$1")
+	events=$(events_of "$1") || fail "the events of job $1 could not be read"
 	grep -qx "$2" <<<"${events}"
+}
+
+# awaited_event <job> <action>: has_event, asked for up to 10 s. JobService
+# stores the state confirm first and the event signature_notice right after
+# it, in the same request; the status can be read a moment before the event.
+awaited_event() {
+	for _ in $(seq 1 10); do
+		if has_event "$1" "$2"; then
+			return 0
+		fi
+		sleep 1
+	done
+	return 1
 }
 
 # end_of <job> <seconds> <status...>: waits for one of the states and prints
@@ -121,59 +243,64 @@ end_of() {
 	json_field "${CI_OUT}/status-${job}.json" status
 }
 
-# notifications <user> [job]: prints "<of the app> <of the job> <subjects of
-# the job>", read over the OCS API the notification bell uses.
+# notifications <user> [job]: prints "<of the app> <of the job> <of the job
+# with the link to its review page> <titles of the job>", read over the OCS
+# API the notification bell uses. The titles are the rendered sentences of the
+# catalog in the language of the user; they are printed, never compared.
 notifications() {
 	local user="$1" job="${2:-0}" body="${CI_OUT}/refusals-notifications.json" code
 	code=$(req "${user}" GET "${NOTIFICATIONS_API}" "${body}" "${body}.headers")
-	[ "${code}" = "200" ] || fail "the notifications answered ${code} (is the notifications app enabled?)"
+	[ "${code}" = "200" ] || fail "the notifications answered ${code} (is the notifications app enabled?): $(shown "${body}")"
 	python3 - "${body}" "${job}" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))["ocs"]["data"]
 ours = [n for n in data if n.get("app") == "pii_redaction"]
 of_job = [n for n in ours if n.get("object_type") == "job" and str(n.get("object_id")) == sys.argv[2]]
-print(len(ours), len(of_job), ",".join(sorted(str(n.get("subject")) for n in of_job)) or "-")
+linked = [n for n in of_job if str(n.get("link", "")).endswith("/apps/pii_redaction/review/" + sys.argv[2])]
+titles = [str(n.get("subject") or "(no title)") for n in of_job]
+# ASCII only: the title of a French or German user must not depend on the
+# locale of the runner.
+shown = (" | ".join(sorted(titles)) or "-").encode("ascii", "backslashreplace").decode("ascii")
+print(len(ours), len(of_job), len(linked), shown)
 PY
 }
 
+# app_notifications <user>: how many notifications of the app the API shows.
 app_notifications() {
-	notifications "$1" | cut -d' ' -f1
+	local seen
+	seen=$(notifications "$1") || return 1
+	printf '%s' "${seen%% *}"
 }
 
-# seen_notification <user> <job> <subject>: waits up to 20 s for exactly that
-# one notification of the job. The state of a job changes a moment before its
-# notification is sent, within the same request of the container.
-seen_notification() {
-	local of_job="" subjects=""
-	for _ in $(seq 1 20); do
-		read -r _ of_job subjects < <(notifications "$1" "$2")
-		if [ "${of_job}" = "1" ] && [ "${subjects}" = "$3" ]; then
-			return 0
-		fi
-		sleep 1
-	done
-	echo "job $2 has ${of_job} notifications (${subjects}), expected one $3" >&2
-	return 1
+# The subject words of the notifications of one job, from the table of the
+# notifications app: the second witness next to the API, and the only place
+# that holds the word of the closed list.
+subjects_of() {
+	db_query "SELECT subject FROM oc_notifications WHERE app = 'pii_redaction' AND object_type = 'job' AND object_id = '$1'"
 }
 
-# The rows of the notifications app for one job, read in the database: the
-# second witness next to the API.
 notification_rows() {
 	db_query "SELECT COUNT(*) FROM oc_notifications WHERE app = 'pii_redaction' AND object_type = 'job' AND object_id = '$1'"
 }
 
-# refused <file name> <reason>: a start that the pre-check ends as failed.
-refused() {
-	local name="$1" reason="$2" file job status got
-	file=$(id_of alice "${FOLDER}/${name}")
-	job=$(start_job alice "${file}" 201)
-	[[ "${job}" =~ ^[0-9]+$ ]] || fail "the start on ${name} gave no job id"
-	status=$(end_of "${job}" "${REFUSAL_SECONDS}" failed review confirm)
-	got=$(json_field "${CI_OUT}/status-${job}.json" reason)
-	[ "${status}" = "failed" ] || fail "job ${job} on ${name} is ${status}, expected failed ${reason}"
-	[ "${got}" = "${reason}" ] || fail "job ${job} on ${name} failed with '${got}', expected ${reason}"
-	REFUSED_JOBS+=("${job}")
-	echo "ok: ${name} -> failed ${reason} (job ${job})"
+# seen_notification <user> <job> <subject>: waits up to 20 s until both
+# witnesses agree. The API shows the user exactly one notification of the job,
+# with a title and the link to its review page; the database holds exactly one
+# row of the job, with that subject word. The state of a job changes a moment
+# before its notification is sent, within the same request of the container.
+seen_notification() {
+	local seen shown_job="" linked="" titles="" keys=""
+	for _ in $(seq 1 20); do
+		seen=$(notifications "$1" "$2") || return 1
+		read -r _ shown_job linked titles <<<"${seen}"
+		keys=$(subjects_of "$2") || return 1
+		if [ "${shown_job}" = "1" ] && [ "${linked}" = "1" ] && [ "${titles}" != "(no title)" ] && [ "${keys}" = "$3" ]; then
+			return 0
+		fi
+		sleep 1
+	done
+	echo "job $2: the API shows $1 ${shown_job} notifications (${titles}), ${linked} with the link to the review page; oc_notifications holds the subjects '${keys//$'\n'/,}'; expected exactly one $3" >&2
+	return 1
 }
 
 # head_value <html file> <attribute>: the value of one attribute of the page.
@@ -184,18 +311,24 @@ head_value() {
 # session_login <user>: a browser session in the cookie jar, built the way the
 # login form builds it (no basic auth, no OCS-APIRequest).
 session_login() {
-	local user="$1" page="${CI_OUT}/refusals-login.html" token code
+	local user="$1" page="${CI_OUT}/refusals-login.html" answer="${CI_OUT}/refusals-login.headers" token code target
 	rm -f "${JAR}"
 	code=$(curl -s -o "${page}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}/index.php/login")
 	[ "${code}" = "200" ] || fail "the login page answered ${code}"
 	token=$(head_value "${page}" data-requesttoken)
 	[ -n "${token}" ] || fail "the login page carries no request token"
-	code=$(curl -s -o /dev/null -w '%{http_code}' -c "${JAR}" -b "${JAR}" \
+	code=$(curl -s -o /dev/null -D "${answer}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" \
 		--data-urlencode "user=${user}" --data-urlencode "password=$(password_of "${user}")" \
 		--data-urlencode "requesttoken=${token}" "${NC_URL}/index.php/login")
+	target=$(header_of "${answer}" Location || true)
+	# The address without its query: after a refused login the query names the user.
+	target="${target%%\?*}"
 	case "${code}" in
 		30[23]) ;;
 		*) fail "the login form answered ${code} for ${user}" ;;
+	esac
+	case "${target}" in
+		*/login | */login/*) fail "the login form sent ${user} back to ${target} (HTTP ${code}): the login was refused" ;;
 	esac
 }
 
@@ -203,10 +336,12 @@ session_login() {
 # request token. The page has to be the page of that user, so a login that
 # did not happen stops here.
 session_token() {
-	local user="$1" page="${CI_OUT}/refusals-page.html" code token
-	code=$(curl -s -o "${page}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}$2")
-	[ "${code}" = "200" ] || fail "the page $2 answered ${code} in the session of ${user}"
-	[ "$(head_value "${page}" data-user)" = "${user}" ] || fail "the session is not the session of ${user}"
+	local user="$1" page="${CI_OUT}/refusals-page.html" code token target
+	code=$(curl -s -o "${page}" -D "${page}.headers" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}$2")
+	target=$(header_of "${page}.headers" Location || true)
+	[ "${code}" = "200" ] || fail "the page $2 answered ${code} in the session of ${user} (Location '${target%%\?*}')"
+	[ "$(head_value "${page}" data-user)" = "${user}" ] \
+		|| fail "the session is not the session of ${user}: the page names the user '$(head_value "${page}" data-user)'"
 	token=$(head_value "${page}" data-requesttoken)
 	[ -n "${token}" ] || fail "the page $2 carries no request token"
 	printf '%s' "${token}"
@@ -233,150 +368,251 @@ done
 
 # -- (0) the controls --------------------------------------------------------------
 
-before_control=$(app_notifications alice)
-[ "${before_control}" -lt "${NOTIFICATION_PAGE}" ] \
-	|| fail "alice has ${before_control} notifications of the app, a new one could fall off the page of the API"
-job_control=$(start_job alice "$(id_of alice "${FOLDER}/${CONTROL}")" 201)
-status=$(end_of "${job_control}" "${REVIEW_SECONDS}" review)
-[ "${status}" = "review" ] || fail "the control ${CONTROL} is ${status}, expected review"
-seen_notification alice "${job_control}" review_ready \
-	|| fail "positive control failed: the API shows no review_ready for job ${job_control}"
-after_control=$(app_notifications alice)
-[ "${after_control}" = "$((before_control + 1))" ] \
-	|| fail "positive control failed: the count went from ${before_control} to ${after_control}, expected one more"
-[ "$(notification_rows "${job_control}")" = "1" ] \
-	|| fail "positive control failed: oc_notifications has no row for job ${job_control}"
-echo "positive control: ${CONTROL} reached review (job ${job_control}), the count saw its review_ready (${before_control} -> ${after_control})"
+# The count of (g) may report "none" only after it saw one: a job that reaches
+# review, its review_ready with both witnesses, and the count one higher.
+control_review() {
+	local before after job status
+	before=$(app_notifications alice)
+	[ "${before}" -lt "${NOTIFICATION_PAGE}" ] \
+		|| fail "alice has ${before} notifications of the app, a new one could fall off the page of the API"
+	job=$(started alice "$(id_of alice "${FOLDER}/${CONTROL}")")
+	keep job_control "${job}"
+	status=$(end_of "${job}" "${REVIEW_SECONDS}" review)
+	[ "${status}" = "review" ] || fail "the control ${CONTROL} is ${status}, expected review"
+	seen_notification alice "${job}" review_ready \
+		|| fail "positive control failed: job ${job} has no review_ready that the API shows and the database holds"
+	after=$(app_notifications alice)
+	[ "${after}" = "$((before + 1))" ] \
+		|| fail "positive control failed: the count went from ${before} to ${after}, expected one more"
+	[ "$(notification_rows "${job}")" = "1" ] \
+		|| fail "positive control failed: oc_notifications has not exactly one row for job ${job}"
+	keep control_passed yes
+	echo "positive control: ${CONTROL} reached review (job ${job}), the count saw its review_ready (${before} -> ${after})"
+}
+proof control_review
 
-job_sanitized=$(start_job alice "$(id_of alice "${FOLDER}/${SANITIZED}")" 201)
-status=$(end_of "${job_sanitized}" "${REVIEW_SECONDS}" review)
-[ "${status}" = "review" ] || fail "${SANITIZED} is ${status}, expected review"
-has_event "${job_sanitized}" external_links_removed \
-	|| fail "job ${job_sanitized} on ${SANITIZED} has no event external_links_removed"
-echo "ok: ${SANITIZED} -> review with external_links_removed (job ${job_sanitized})"
+# The second control waits for its notification as well: the count before the
+# refusals is taken after it, and a review_ready that arrived a moment later
+# would look like a notification of a refusal.
+control_sanitized() {
+	local job status
+	job=$(started alice "$(id_of alice "${FOLDER}/${SANITIZED}")")
+	keep job_sanitized "${job}"
+	status=$(end_of "${job}" "${REVIEW_SECONDS}" review)
+	[ "${status}" = "review" ] || fail "${SANITIZED} is ${status}, expected review"
+	has_event "${job}" external_links_removed \
+		|| fail "job ${job} on ${SANITIZED} has no event external_links_removed, its events: $(events_line "${job}")"
+	seen_notification alice "${job}" review_ready \
+		|| fail "job ${job} on ${SANITIZED} is in review without its review_ready"
+	echo "ok: ${SANITIZED} -> review with external_links_removed (job ${job})"
+}
+proof control_sanitized
 
 # -- (a) to (d) the refusals of the pre-check --------------------------------------
 
-before_refusals=$(app_notifications alice)
-refused wrong_pdf_as_docx.docx wrong_type
-refused pdf_301_pages.pdf too_many_pages
-refused pdf_user_password.pdf encrypted_pdf
-refused cfb_encrypted.docx encrypted_document
+# refused <file name> <reason>: a start that the pre-check ends as failed.
+refused() {
+	local name="$1" reason="$2" job status got
+	job=$(started alice "$(id_of alice "${FOLDER}/${name}")")
+	status=$(end_of "${job}" "${REFUSAL_SECONDS}" failed review confirm)
+	got=$(json_field "${CI_OUT}/status-${job}.json" reason)
+	[ "${status}" = "failed" ] \
+		|| fail "job ${job} on ${name} is ${status}, expected failed ${reason}; its events: $(events_line "${job}")"
+	[ "${got}" = "${reason}" ] \
+		|| fail "job ${job} on ${name} failed with '${got}', expected ${reason}; its events: $(events_line "${job}")"
+	echo "${job}" >> "${STATE}/refused"
+	echo "ok: ${name} -> failed ${reason} (job ${job})"
+}
+
+before_refusals=$(app_notifications alice) || before_refusals='unknown'
+proof refused wrong_pdf_as_docx.docx wrong_type
+proof refused pdf_301_pages.pdf too_many_pages
+proof refused pdf_user_password.pdf encrypted_pdf
+proof refused cfb_encrypted.docx encrypted_document
 
 # -- (e) the folder with the E2E flag ----------------------------------------------
 
-# A6, on this database: the query finds a column that is there, and the one
-# the app relies on.
-[ "$(column_of oc_filecache fileid)" = "fileid" ] \
-	|| fail "positive control failed: the column query does not see oc_filecache.fileid"
-[ "$(column_of oc_filecache encrypted)" = "encrypted" ] \
-	|| fail "A6 does not hold: oc_filecache has no column 'encrypted' on ${SERVER_VERSION:-this server} (${DB_KIND:-sqlite})"
-echo "ok: oc_filecache carries the column encrypted (A6)"
+e2e_refusal() {
+	local e2e_folder e2e_file e2e_body code got jobs
+	# A6, on this database: the query finds a column that is there, and the one
+	# the app relies on.
+	[ "$(column_of oc_filecache fileid)" = "fileid" ] \
+		|| fail "positive control failed: the column query does not see oc_filecache.fileid"
+	[ "$(column_of oc_filecache encrypted)" = "encrypted" ] \
+		|| fail "A6 does not hold: oc_filecache has no column 'encrypted' on ${SERVER_VERSION:-this server} (${DB_KIND:-sqlite})"
+	echo "ok: oc_filecache carries the column encrypted (A6)"
 
-mkcol alice "${E2E_FOLDER}"
-upload alice "${CORPUS}/${CONTROL}" "${E2E_FOLDER}/${CONTROL}"
-e2e_folder=$(id_of alice "${E2E_FOLDER}")
-e2e_file=$(id_of alice "${E2E_FOLDER}/${CONTROL}")
-[ "$(db_query "SELECT encrypted FROM oc_filecache WHERE fileid = ${e2e_folder}")" = "0" ] \
-	|| fail "the new folder ${e2e_folder} does not start with encrypted = 0"
-db_exec "UPDATE oc_filecache SET encrypted = 1 WHERE fileid = ${e2e_folder}"
-[ "$(db_query "SELECT encrypted FROM oc_filecache WHERE fileid = ${e2e_folder}")" = "1" ] \
-	|| fail "the E2E flag of folder ${e2e_folder} was not stored"
+	mkcol alice "${E2E_FOLDER}"
+	upload alice "${CORPUS}/${CONTROL}" "${E2E_FOLDER}/${CONTROL}"
+	e2e_folder=$(id_of alice "${E2E_FOLDER}")
+	e2e_file=$(id_of alice "${E2E_FOLDER}/${CONTROL}")
+	keep e2e_folder "${e2e_folder}"
+	keep e2e_file "${e2e_file}"
+	got=$(encrypted_of "${e2e_folder}")
+	[ "${got}" = "0" ] || fail "the new folder ${e2e_folder} starts with encrypted = '${got}', expected 0"
+	db_exec "UPDATE oc_filecache SET encrypted = 1 WHERE fileid = ${e2e_folder}"
+	got=$(encrypted_of "${e2e_folder}")
+	[ "${got}" = "1" ] || fail "the E2E flag of folder ${e2e_folder} was not stored (encrypted = '${got}')"
 
-e2e_body="${CI_OUT}/refusals-start-e2e.json"
-code=$(req alice POST "${APP_PATH}/api/v1/jobs" "${e2e_body}" "${e2e_body}.headers" \
-	-H 'Content-Type: application/json' --data "{\"fileId\": ${e2e_file}}")
-case "${code}" in
-	4??) ;;
-	*) fail "the start below the E2E folder answered ${code}, expected a refusal: $(cat "${e2e_body}")" ;;
-esac
-got=$(json_field "${e2e_body}" reason)
-[ "${got}" = "e2e_encrypted" ] || fail "the start below the E2E folder gave reason '${got}', expected e2e_encrypted"
-[ "$(db_query "SELECT COUNT(*) FROM oc_pii_jobs WHERE file_id = ${e2e_file}")" = "0" ] \
-	|| fail "a job exists for the file below the E2E folder"
-echo "ok: start below the E2E folder -> HTTP ${code} e2e_encrypted, no job (file ${e2e_file})"
+	e2e_body="${CI_OUT}/refusals-start-e2e.json"
+	code=$(req alice POST "${APP_PATH}/api/v1/jobs" "${e2e_body}" "${e2e_body}.headers" \
+		-H 'Content-Type: application/json' --data "{\"fileId\": ${e2e_file}}")
+	case "${code}" in
+		4??) ;;
+		*) fail "the start below the E2E folder answered ${code}, expected a refusal: $(shown "${e2e_body}")" ;;
+	esac
+	got=$(field_of "${e2e_body}" reason)
+	[ "${got}" = "e2e_encrypted" ] \
+		|| fail "the start below the E2E folder gave reason '${got}' (HTTP ${code}), expected e2e_encrypted: $(shown "${e2e_body}")"
+	jobs=$(db_query "SELECT COUNT(*) FROM oc_pii_jobs WHERE file_id = ${e2e_file}")
+	[ "${jobs}" = "0" ] || fail "${jobs} jobs exist for the file below the E2E folder, expected none"
+	echo "ok: start below the E2E folder -> HTTP ${code} e2e_encrypted, no job (file ${e2e_file})"
+}
+proof e2e_refusal
 
-after_refusals=$(app_notifications alice)
+after_refusals=$(app_notifications alice) || after_refusals='unknown'
 
-# The same file starts once the flag is gone: the flag refused it.
-db_exec "UPDATE oc_filecache SET encrypted = 0 WHERE fileid = ${e2e_folder}"
-[ "$(db_query "SELECT encrypted FROM oc_filecache WHERE fileid = ${e2e_folder}")" = "0" ] \
-	|| fail "the E2E flag of folder ${e2e_folder} was not taken back"
-job_unflagged=$(start_job alice "${e2e_file}" 201)
-status=$(end_of "${job_unflagged}" "${REVIEW_SECONDS}" review)
-[ "${status}" = "review" ] || fail "the file ${e2e_file} is ${status} without the E2E flag, expected review"
-echo "control: without the flag the same file reached review (job ${job_unflagged})"
+# The same file starts once the flag is gone: the flag refused it. The flag
+# is taken back also when the proof before this one failed half way.
+e2e_control() {
+	local e2e_folder e2e_file job status got
+	e2e_folder=$(kept e2e_folder)
+	e2e_file=$(kept e2e_file)
+	db_exec "UPDATE oc_filecache SET encrypted = 0 WHERE fileid = ${e2e_folder}"
+	got=$(encrypted_of "${e2e_folder}")
+	[ "${got}" = "0" ] || fail "the E2E flag of folder ${e2e_folder} was not taken back (encrypted = '${got}')"
+	job=$(started alice "${e2e_file}")
+	keep job_unflagged "${job}"
+	status=$(end_of "${job}" "${REVIEW_SECONDS}" review)
+	[ "${status}" = "review" ] || fail "the file ${e2e_file} is ${status} without the E2E flag, expected review"
+	echo "control: without the flag the same file reached review (job ${job})"
+}
+proof e2e_control
 
 # -- (f) the signed PDF ------------------------------------------------------------
 
-job_signed=$(start_job alice "$(id_of alice "${FOLDER}/${SIGNED}")" 201)
-status=$(end_of "${job_signed}" "${REFUSAL_SECONDS}" confirm review failed)
-[ "${status}" = "confirm" ] || fail "job ${job_signed} on ${SIGNED} is ${status}, expected confirm before any analysis"
-has_event "${job_signed}" signature_notice || fail "job ${job_signed} has no event signature_notice"
-if has_event "${job_signed}" signature_confirmed; then
-	fail "job ${job_signed} carries signature_confirmed before anybody confirmed"
-fi
-read -r _ of_signed subjects_signed < <(notifications alice "${job_signed}")
-[ "${of_signed}" = "0" ] || fail "job ${job_signed} in confirm made a notification (${subjects_signed}), D-02-02 allows none"
-echo "ok: ${SIGNED} -> confirm with signature_notice, no notification (job ${job_signed})"
+signed_waits() {
+	local job_signed status seen of_signed titles_signed rows
+	job_signed=$(started alice "$(id_of alice "${FOLDER}/${SIGNED}")")
+	status=$(end_of "${job_signed}" "${REFUSAL_SECONDS}" confirm review failed)
+	[ "${status}" = "confirm" ] \
+		|| fail "job ${job_signed} on ${SIGNED} is ${status}, expected confirm before any analysis; its events: $(events_line "${job_signed}")"
+	keep job_signed "${job_signed}"
+	awaited_event "${job_signed}" signature_notice || fail "job ${job_signed} has no event signature_notice, its events: $(events_line "${job_signed}")"
+	if has_event "${job_signed}" signature_confirmed; then
+		fail "job ${job_signed} carries signature_confirmed before anybody confirmed"
+	fi
+	seen=$(notifications alice "${job_signed}")
+	read -r _ of_signed _ titles_signed <<<"${seen}"
+	rows=$(notification_rows "${job_signed}")
+	if [ "${of_signed}" != "0" ] || [ "${rows}" != "0" ]; then
+		fail "job ${job_signed} in confirm made a notification (API ${of_signed}: ${titles_signed}; ${rows} rows in oc_notifications), D-02-02 allows none"
+	fi
+	echo "ok: ${SIGNED} -> confirm with signature_notice, no notification (job ${job_signed})"
+}
+proof signed_waits
 
-# A stranger cannot confirm (ci/rights.sh holds the other routes).
-foreign="${CI_OUT}/refusals-confirm-bob.json"
-code=$(req bob POST "${APP_PATH}/review/${job_signed}/confirm" "${foreign}" "${foreign}.headers")
-[ "${code}" = "404" ] || fail "confirm of job ${job_signed} as bob answered ${code}, expected 404"
+signed_refuses() {
+	local job_signed foreign forged code status
+	job_signed=$(kept job_signed)
 
-# The session of alice without the request token cannot either (CSRF).
-session_login alice
-token=$(session_token alice "${APP_PATH}/review/${job_signed}")
-forged="${CI_OUT}/refusals-confirm-no-token.json"
-code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${forged}")
-case "${code}" in
-	2??) fail "confirm of job ${job_signed} without the request token answered ${code}" ;;
-esac
-[ "$(end_of "${job_signed}" "${REFUSAL_SECONDS}" confirm review failed)" = "confirm" ] \
-	|| fail "job ${job_signed} left confirm without a valid confirmation"
-if has_event "${job_signed}" signature_confirmed; then
-	fail "job ${job_signed} carries signature_confirmed after two refused attempts"
-fi
-echo "ok: confirm refused for a stranger (404) and without the request token (HTTP ${code})"
+	# A stranger cannot confirm (ci/rights.sh holds the other routes).
+	foreign="${CI_OUT}/refusals-confirm-bob.json"
+	code=$(req bob POST "${APP_PATH}/review/${job_signed}/confirm" "${foreign}" "${foreign}.headers")
+	[ "${code}" = "404" ] || fail "confirm of job ${job_signed} as bob answered ${code}, expected 404: $(shown "${foreign}")"
+
+	# The session of alice without the request token cannot either (CSRF). The
+	# page is opened first: the session is a session of alice that could confirm.
+	session_login alice
+	session_token alice "${APP_PATH}/review/${job_signed}" > /dev/null
+	forged="${CI_OUT}/refusals-confirm-no-token.json"
+	code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${forged}")
+	case "${code}" in
+		2??) fail "confirm of job ${job_signed} without the request token answered ${code}: $(shown "${forged}")" ;;
+	esac
+	status=$(end_of "${job_signed}" "${REFUSAL_SECONDS}" confirm review failed)
+	[ "${status}" = "confirm" ] || fail "job ${job_signed} left confirm without a valid confirmation, it is ${status}"
+	if has_event "${job_signed}" signature_confirmed; then
+		fail "job ${job_signed} carries signature_confirmed after two refused attempts"
+	fi
+	echo "ok: confirm refused for a stranger (404) and without the request token (HTTP ${code})"
+}
+proof signed_refuses
 
 # The initiator confirms with the request token of the session.
-confirmed="${CI_OUT}/refusals-confirm.json"
-code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${confirmed}" -H "requesttoken: ${token}")
-[ "${code}" = "202" ] || fail "confirm of job ${job_signed} with the request token answered ${code}: $(cat "${confirmed}")"
-[ "$(json_field "${confirmed}" status)" = "queued" ] || fail "confirm of job ${job_signed} did not answer queued"
-cache_control=$(header_of "${confirmed}.headers" Cache-Control || true)
-[[ "${cache_control}" == *no-store* ]] || fail "the confirm answer is not no-store"
-status=$(end_of "${job_signed}" "${REVIEW_SECONDS}" review)
-[ "${status}" = "review" ] || fail "job ${job_signed} is ${status} after the confirmation, expected review"
-[ "$(json_field "${CI_OUT}/status-${job_signed}.json" signatureConfirmed)" = "True" ] \
-	|| fail "the status of job ${job_signed} does not report signatureConfirmed"
-events_signed=$(events_of "${job_signed}")
-notice_at=$(grep -nx signature_notice <<<"${events_signed}" | head -n 1 | cut -d: -f1 || true)
-confirmed_at=$(grep -nx signature_confirmed <<<"${events_signed}" | head -n 1 | cut -d: -f1 || true)
-if [ -z "${notice_at}" ] || [ -z "${confirmed_at}" ] || [ "${notice_at}" -ge "${confirmed_at}" ]; then
-	fail "the events of job ${job_signed} do not carry signature_notice before signature_confirmed"
-fi
-[ "$(grep -cx signature_confirmed <<<"${events_signed}" || true)" = "1" ] \
-	|| fail "job ${job_signed} carries signature_confirmed more than once"
-echo "ok: ${SIGNED} confirmed with the request token -> review, events signature_notice then signature_confirmed"
+signed_confirms() {
+	local job_signed token confirmed code got cache_control status events_signed notice_at confirmed_at
+	job_signed=$(kept job_signed)
+	session_login alice
+	token=$(session_token alice "${APP_PATH}/review/${job_signed}")
+	confirmed="${CI_OUT}/refusals-confirm.json"
+	code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${confirmed}" -H "requesttoken: ${token}")
+	[ "${code}" = "202" ] || fail "confirm of job ${job_signed} with the request token answered ${code}: $(shown "${confirmed}")"
+	got=$(field_of "${confirmed}" status)
+	[ "${got}" = "queued" ] || fail "confirm of job ${job_signed} answered status '${got}', expected queued: $(shown "${confirmed}")"
+	cache_control=$(header_of "${confirmed}.headers" Cache-Control || true)
+	[[ "${cache_control}" == *no-store* ]] || fail "the confirm answer is not no-store (Cache-Control '${cache_control}')"
+	status=$(end_of "${job_signed}" "${REVIEW_SECONDS}" review)
+	[ "${status}" = "review" ] || fail "job ${job_signed} is ${status} after the confirmation, expected review"
+	got=$(json_field "${CI_OUT}/status-${job_signed}.json" signatureConfirmed)
+	[ "${got}" = "True" ] || fail "the status of job ${job_signed} reports signatureConfirmed '${got}', expected True"
+	events_signed=$(events_of "${job_signed}")
+	notice_at=$(grep -nx signature_notice <<<"${events_signed}" | head -n 1 | cut -d: -f1 || true)
+	confirmed_at=$(grep -nx signature_confirmed <<<"${events_signed}" | head -n 1 | cut -d: -f1 || true)
+	if [ -z "${notice_at}" ] || [ -z "${confirmed_at}" ] || [ "${notice_at}" -ge "${confirmed_at}" ]; then
+		fail "the events of job ${job_signed} do not carry signature_notice before signature_confirmed: ${events_signed//$'\n'/,}"
+	fi
+	[ "$(grep -cx signature_confirmed <<<"${events_signed}" || true)" = "1" ] \
+		|| fail "job ${job_signed} carries signature_confirmed more than once: ${events_signed//$'\n'/,}"
+	keep signed_confirmed yes
+	echo "ok: ${SIGNED} confirmed with the request token -> review, events signature_notice then signature_confirmed"
+}
+proof signed_confirms
 
 # -- (g) no notification for a refusal (D-02-02) -----------------------------------
 
-findings=0
-for job in "${REFUSED_JOBS[@]}"; do
-	read -r _ of_job subjects_job < <(notifications alice "${job}")
-	rows=$(notification_rows "${job}")
-	if [ "${of_job}" != "0" ] || [ "${rows}" != "0" ]; then
-		echo "FINDING: refused job ${job} has ${of_job} notifications (${subjects_job}), ${rows} rows in oc_notifications" >&2
+no_notification_for_a_refusal() {
+	local findings=0 refused_jobs=() job seen of_job titles_job rows
+	# Without the positive control a count of zero proves nothing.
+	[ -s "${STATE}/control_passed" ] \
+		|| fail "the positive control did not pass, so the count cannot judge the refusals; D-02-02 allows none and stays unproven"
+	if [ -s "${STATE}/refused" ]; then
+		mapfile -t refused_jobs < "${STATE}/refused"
+	fi
+	if [ "${#refused_jobs[@]}" != "${REFUSALS_EXPECTED}" ]; then
+		echo "FINDING: ${#refused_jobs[@]} of ${REFUSALS_EXPECTED} refusals happened, the others cannot be judged" >&2
 		findings=$((findings + 1))
 	fi
-done
-if [ "${after_refusals}" != "${before_refusals}" ]; then
-	echo "FINDING: the notifications of the app went from ${before_refusals} to ${after_refusals} over the refusals" >&2
-	findings=$((findings + 1))
-fi
-[ "${findings}" = "0" ] || fail "a refusal made a notification, D-02-02 allows none (${findings} findings)"
-echo "ok: ${#REFUSED_JOBS[@]} refused jobs and the refused start made no notification (${before_refusals} before, ${after_refusals} after)"
+	for job in "${refused_jobs[@]}"; do
+		seen=$(notifications alice "${job}")
+		read -r _ of_job _ titles_job <<<"${seen}"
+		rows=$(notification_rows "${job}")
+		if [ "${of_job}" != "0" ] || [ "${rows}" != "0" ]; then
+			echo "FINDING: refused job ${job} has ${of_job} notifications (${titles_job}), ${rows} rows in oc_notifications" >&2
+			findings=$((findings + 1))
+		fi
+	done
+	if [ "${before_refusals}" = "unknown" ] || [ "${after_refusals}" = "unknown" ]; then
+		echo "FINDING: the notifications of the app could not be counted (${before_refusals} before, ${after_refusals} after)" >&2
+		findings=$((findings + 1))
+	elif [ "${after_refusals}" != "${before_refusals}" ]; then
+		echo "FINDING: the notifications of the app went from ${before_refusals} to ${after_refusals} over the refusals" >&2
+		findings=$((findings + 1))
+	fi
+	[ "${findings}" = "0" ] || fail "a refusal made a notification or could not be judged, D-02-02 allows none (${findings} findings)"
+	echo "ok: ${#refused_jobs[@]} refused jobs and the refused start made no notification (${before_refusals} before, ${after_refusals} after)"
+}
+proof no_notification_for_a_refusal
 
-echo "refusals done: jobs ${REFUSED_JOBS[*]} refused, ${job_signed} confirmed, controls ${job_control} ${job_sanitized} ${job_unflagged}"
+# -- the verdict -------------------------------------------------------------------
+
+for name in "${FAILED[@]}"; do
+	echo "failed: ${name}" >&2
+done
+for name in "${SKIPPED[@]}"; do
+	echo "not run: ${name}" >&2
+done
+[ "$((${#FAILED[@]} + ${#SKIPPED[@]}))" = "0" ] \
+	|| fail "${#FAILED[@]} of ${PROOFS} proofs failed, ${#SKIPPED[@]} were not run"
+
+echo "refusals done: ${PROOFS} proofs, jobs $(tr '\n' ' ' < "${STATE}/refused")refused, $(kept job_signed) confirmed, controls $(kept job_control) $(kept job_sanitized) $(kept job_unflagged)"

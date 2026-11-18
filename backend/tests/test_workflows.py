@@ -672,7 +672,7 @@ REFUSED_FILES = (
 REFUSAL_NEEDS = (
     ('[ "${got}" = "e2e_encrypted" ]', "does not check the reason e2e_encrypted of the refused start"),
     ('[ "${status}" = "confirm" ]', "does not expect the signed PDF in confirm"),
-    ('has_event "${job_signed}" signature_notice ||', "does not ask for the event signature_notice"),
+    ('awaited_event "${job_signed}" signature_notice ||', "does not ask for the event signature_notice"),
     ('grep -nx signature_confirmed <<<"${events_signed}"', "does not ask for the event signature_confirmed"),
     ('-H "requesttoken: ${token}"', "does not confirm with the request token of the session"),
     ('[ "$(column_of oc_filecache encrypted)" = "encrypted" ]', "does not ask the database for the column encrypted"),
@@ -680,8 +680,21 @@ REFUSAL_NEEDS = (
     ("UPDATE oc_filecache SET encrypted = 1 WHERE fileid = ${e2e_folder}", "does not set the E2E flag on the folder"),
     ('"${after_refusals}" != "${before_refusals}"', "does not compare the notifications before and after"),
     ("D-02-02 allows none", "does not judge the notifications of the refusals"),
+    # The OCS API carries the rendered title in the language of the user, the
+    # subject word stands in the table only (CI run 44300061301).
+    (
+        "SELECT subject FROM oc_notifications WHERE app = 'pii_redaction'",
+        "does not read the subject word of a notification in the database",
+    ),
+    ('[ "${keys}" = "$3" ]', "does not compare the subject word of the database with the expected one"),
+    ('[ "${shown_job}" = "1" ]', "does not ask the API whether the user sees the notification"),
+    ('[ -s "${STATE}/control_passed" ]', "judges the refusals without the positive control"),
+    ('[ "$((${#FAILED[@]} + ${#SKIPPED[@]}))" = "0" ]', "does not end red when a proof failed or was not run"),
 )
-_REFUSED_CALL = re.compile(r"^refused (\S+) (\S+)$", re.MULTILINE)
+_REFUSED_CALL = re.compile(r"^proof refused (\S+) (\S+)$", re.MULTILINE)
+# A proof behind if, while or ! or before || or &&: bash switches errexit off
+# inside it, and a line that fails in the proof would go unnoticed.
+_PROOF_UNGUARDED = re.compile(r"^\s*(?:if|while|until|!)\s+proof\b|^\s*proof\b[^\n]*(?:\|\||&&)", re.MULTILINE)
 
 
 def refusal_findings(script: str) -> list[str]:
@@ -695,6 +708,8 @@ def refusal_findings(script: str) -> list[str]:
     first = min((match.start() for match in _REFUSED_CALL.finditer(code)), default=-1)
     if control < 0 or first < 0 or control > first:
         findings.append("the script counts no notification as positive control before the refusals")
+    if _PROOF_UNGUARDED.search(code):
+        findings.append("the script calls a proof where errexit is switched off")
     return findings
 
 
@@ -715,7 +730,7 @@ def test_self_the_refusals_step_is_named_when_missing_or_late() -> None:
 
 def test_self_the_refusal_rules_fire() -> None:
     script = _ci("refusals.sh")
-    assert refusal_findings(script.replace("refused pdf_301_pages.pdf too_many_pages\n", "")) == [
+    assert refusal_findings(script.replace("proof refused pdf_301_pages.pdf too_many_pages\n", "")) == [
         "too_many_pages is not checked on pdf_301_pages.pdf"
     ]
     swapped = script.replace("refused wrong_pdf_as_docx.docx wrong_type", "refused wrong_pdf_as_docx.docx damaged")
@@ -731,11 +746,37 @@ def test_self_the_refusal_rules_fire() -> None:
     ]
     # A comment that names a check is no check.
     commented = script.replace(
-        "refused cfb_encrypted.docx encrypted_document", "# refused cfb_encrypted.docx encrypted_document"
+        "proof refused cfb_encrypted.docx encrypted_document", "# proof refused cfb_encrypted.docx encrypted_document"
     )
     assert refusal_findings(commented) == ["encrypted_document is not checked on cfb_encrypted.docx"]
     no_control = script.replace("seen_notification alice", "seen_notification bob")
     assert refusal_findings(no_control) == ["the script counts no notification as positive control before the refusals"]
+    # A call that is not a proof does not count: its failure would end the run
+    # before the proofs after it.
+    bare = script.replace("proof refused pdf_user_password.pdf", "refused pdf_user_password.pdf")
+    assert refusal_findings(bare) == ["encrypted_pdf is not checked on pdf_user_password.pdf"]
+
+
+def test_self_the_notification_and_proof_rules_fire() -> None:
+    script = _ci("refusals.sh")
+    # The fault of CI run 44300061301: the title of the API taken for the subject word.
+    by_title = script.replace('[ "${keys}" = "$3" ]', '[ "${titles}" = "$3" ]')
+    assert refusal_findings(by_title) == [
+        "the script does not compare the subject word of the database with the expected one"
+    ]
+    no_table = script.replace("SELECT subject FROM oc_notifications", "SELECT 'review_ready' FROM oc_notifications")
+    assert refusal_findings(no_table) == ["the script does not read the subject word of a notification in the database"]
+    # The check must not turn green by asking less: the API stays a witness.
+    database_only = script.replace('[ "${shown_job}" = "1" ] && ', "")
+    assert refusal_findings(database_only) == ["the script does not ask the API whether the user sees the notification"]
+    uncontrolled = script.replace('[ -s "${STATE}/control_passed" ]', "true")
+    assert refusal_findings(uncontrolled) == ["the script judges the refusals without the positive control"]
+    always_green = script.replace('[ "$((${#FAILED[@]} + ${#SKIPPED[@]}))" = "0" ]', "true")
+    assert refusal_findings(always_green) == ["the script does not end red when a proof failed or was not run"]
+    for unguarded in ("proof e2e_refusal || true", "if proof e2e_refusal; then :; fi", "! proof e2e_refusal"):
+        assert refusal_findings(script.replace("proof e2e_refusal\n", unguarded + "\n")) == [
+            "the script calls a proof where errexit is switched off"
+        ]
 
 
 # -- sandbox.yml: the container proofs of phase 2 (plan 02-12) -------------------------
