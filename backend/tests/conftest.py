@@ -105,6 +105,27 @@ def corpus(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict[str, di
     return folder, module.build(folder)
 
 
+# The test stage of the image carries no ci/ (see repo_text above), so in the
+# container the corpus is made on the runner by ci/make_corpus.py and mounted
+# read only; sandbox.yml names the folder in this variable (plan 02-21).
+CORPUS_ENV = "PII_CORPUS"
+
+
+@pytest.fixture(scope="session")
+def mounted_corpus() -> tuple[Path, dict[str, dict[str, object]]]:
+    """The corpus sandbox.yml mounted into the container: the folder and its manifest."""
+    return load_mounted_corpus(os.environ)
+
+
+def load_mounted_corpus(env: Mapping[str, str]) -> tuple[Path, dict[str, dict[str, object]]]:
+    """The corpus the variable names; fails loudly (never skips) when it names none."""
+    root = env.get(CORPUS_ENV, "")
+    manifest = Path(root) / "manifest.json"
+    if not root or not manifest.is_file():
+        pytest.fail(f"{CORPUS_ENV} names no corpus with manifest.json (sandbox.yml makes and mounts it)")
+    return Path(root), json.loads(manifest.read_text(encoding="utf-8"))
+
+
 # -- container and linux markers ---------------------------------------------------------
 #
 # Container tests (pytest -m container) run only inside the test stage of the

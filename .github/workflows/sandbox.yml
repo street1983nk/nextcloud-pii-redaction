@@ -91,6 +91,15 @@ jobs:
           done
           echo "CERTS=${certs}" >> "${GITHUB_ENV}"
 
+      # The test stage carries no ci/, so the attack corpus of plan 02-07 is
+      # made here (standard library only) and mounted read only; the jail and
+      # corpus tests of plan 02-21 read it through PII_CORPUS.
+      - name: Make the attack corpus
+        run: |
+          python3 ci/make_corpus.py "${RUNNER_TEMP}/corpus"
+          test -f "${RUNNER_TEMP}/corpus/manifest.json"
+          echo "CORPUS=${RUNNER_TEMP}/corpus" >> "${GITHUB_ENV}"
+
       - name: Start the server as PID 1 without a network
         run: |
           docker run -d --name sbx --network none \
@@ -99,6 +108,7 @@ jobs:
             -e APP_PERSISTENT_STORAGE=/nc_app_pii_redaction_backend_data \
             -e HP_SHARED_KEY="${CANARY_HP}" -e HP_FRP_ADDRESS=127.0.0.1 -e HP_FRP_PORT=8782 \
             -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
+            -v "${CORPUS}:/corpus:ro" \
             pii-sandbox:test
           answer=""
           for _ in $(seq 60); do
@@ -113,7 +123,7 @@ jobs:
 
       - name: Run the container tests
         run: |
-          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
+          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models -e PII_CORPUS=/corpus sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
 
       # Read only, for the soffice diagnosis of plan 02-16: Landlock writes a
       # denial to the kernel audit only from ABI 7 (Linux 6.15) on and only

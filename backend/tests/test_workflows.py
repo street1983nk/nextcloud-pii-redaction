@@ -671,6 +671,10 @@ SANDBOX_NEEDS = (
     "--dns 192.0.2.1",
     "uses: actions/cache@",
     "permissions:\n  contents: read",
+    # The container has no ci/: the corpus comes from the runner (plan 02-21).
+    "python3 ci/make_corpus.py",
+    '-v "${CORPUS}:/corpus:ro"',
+    "-e PII_CORPUS=/corpus",
 )
 _TOLERANCE = (
     "|| true",
