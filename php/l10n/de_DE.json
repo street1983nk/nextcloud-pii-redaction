@@ -99,7 +99,35 @@
         "_%n job is ahead._::_%n jobs are ahead._": [
             "%n Auftrag ist vorher dran.",
             "%n Aufträge sind vorher dran."
-        ]
+        ],
+        "The file is end-to-end encrypted": "Die Datei ist Ende-zu-Ende-verschlüsselt",
+        "The server cannot read it. If it may be stored unencrypted, analyse a copy from a normal folder.": "Der Server kann sie nicht lesen. Darf sie unverschlüsselt liegen, eine Kopie aus einem normalen Ordner analysieren.",
+        "The PDF is password-protected": "Die PDF ist passwortgeschützt",
+        "Remove the password and analyse the file again.": "Das Passwort entfernen und die Datei neu analysieren.",
+        "The document is password-protected": "Das Dokument ist passwortgeschützt",
+        "Save it without a password and analyse the file again.": "Ohne Passwort speichern und die Datei neu analysieren.",
+        "The content does not match the file type": "Der Inhalt passt nicht zum Dateityp",
+        "Save the file again as PDF, DOCX or ODT and analyse that.": "Die Datei neu als PDF, DOCX oder ODT speichern und diese analysieren.",
+        "The file is damaged": "Die Datei ist beschädigt",
+        "Open it in the original program, save it again and analyse that.": "Im ursprünglichen Programm öffnen, neu speichern und diese analysieren.",
+        "The file is too large to analyse": "Die Datei ist zu groß für die Analyse",
+        "It exceeds a safety limit. Split it into smaller files or reduce the images.": "Sie überschreitet eine Sicherheitsgrenze. In kleinere Dateien aufteilen oder die Bilder verkleinern.",
+        "The document has more than 300 pages": "Das Dokument hat mehr als 300 Seiten",
+        "Split it into parts of at most 300 pages and analyse each part.": "In Teile mit höchstens 300 Seiten aufteilen und jeden Teil analysieren.",
+        "The file contains unsafe parts": "Die Datei enthält unsichere Bestandteile",
+        "It was not analysed, for protection. Save it as PDF in the original program and analyse that.": "Zum Schutz wurde sie nicht analysiert. Im ursprünglichen Programm als PDF speichern und diese analysieren.",
+        "Analysis cancelled": "Analyse abgebrochen",
+        "The signed PDF was not analysed. To redact it, analyse it again and confirm the notice.": "Die signierte PDF wurde nicht analysiert. Zum Schwärzen neu analysieren und den Hinweis bestätigen.",
+        "End-to-end encrypted files cannot be analysed on the server.": "Ende-zu-Ende-verschlüsselte Dateien lassen sich auf dem Server nicht analysieren.",
+        "The PDF is signed": "Die PDF ist signiert",
+        "The signature is lost when redacting. The original stays signed. Continue?": "Die Signatur geht bei der Schwärzung verloren. Das Original bleibt signiert. Fortfahren?",
+        "Continue": "Fortfahren",
+        "Cancel": "Abbrechen",
+        "Saving…": "Wird gespeichert…",
+        "The answer could not be saved. Try again.": "Die Antwort ließ sich nicht speichern. Erneut versuchen.",
+        "Macros were removed for the analysis. The original stays unchanged.": "Makros wurden für die Analyse entfernt. Das Original bleibt unverändert.",
+        "Checking the file": "Datei wird geprüft",
+        "A safety check runs before the analysis.": "Vor der Analyse läuft eine Sicherheitsprüfung."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }
