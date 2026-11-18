@@ -240,8 +240,9 @@ LEGS = frozenset(
     | {("stable35", "ubuntu-24.04", "mariadb")}
 )
 # Every check of the run, in the order the workflow has to call them: the
-# fixtures and the seed, the core path per format and language, the check
-# scripts of plan 17, Playwright of plan 16, the measurement, the canary last.
+# fixtures and the seed, the core path per format and language, the refusals
+# of plan 02-23, the check scripts of plan 17, Playwright of plan 16, the
+# measurement, the canary last.
 CHECK_ORDER = (
     "ci/make_fixtures.py",
     "ci/seed.sh",
@@ -251,6 +252,7 @@ CHECK_ORDER = (
     "ci/flow.sh pdf elke",
     "ci/flow.sh pdf fleur",
     "ci/flow.sh pdf greta",
+    "ci/refusals.sh",
     "ci/rights.sh",
     "ci/stale.sh",
     "ci/queue.sh",
@@ -655,6 +657,85 @@ def test_self_the_loglevel_rules_fire() -> None:
         "ci/canary.sh has no positive control of the info lines of the app",
         "the PHP app touches the loglevel",
     ]
+
+
+# -- ci/refusals.sh: the refusals on the real instance (plan 02-23) -------------------
+
+# The four reasons the pre-check ends a job with, each on its own file.
+REFUSED_FILES = (
+    ("wrong_pdf_as_docx.docx", "wrong_type"),
+    ("pdf_301_pages.pdf", "too_many_pages"),
+    ("pdf_user_password.pdf", "encrypted_pdf"),
+    ("cfb_encrypted.docx", "encrypted_document"),
+)
+# What the script has to say besides them, as the line that checks it.
+REFUSAL_NEEDS = (
+    ('[ "${got}" = "e2e_encrypted" ]', "does not check the reason e2e_encrypted of the refused start"),
+    ('[ "${status}" = "confirm" ]', "does not expect the signed PDF in confirm"),
+    ('has_event "${job_signed}" signature_notice ||', "does not ask for the event signature_notice"),
+    ('grep -nx signature_confirmed <<<"${events_signed}"', "does not ask for the event signature_confirmed"),
+    ('-H "requesttoken: ${token}"', "does not confirm with the request token of the session"),
+    ('[ "$(column_of oc_filecache encrypted)" = "encrypted" ]', "does not ask the database for the column encrypted"),
+    ('fail "A6 does not hold', "does not stop when the column encrypted is missing"),
+    ("UPDATE oc_filecache SET encrypted = 1 WHERE fileid = ${e2e_folder}", "does not set the E2E flag on the folder"),
+    ('"${after_refusals}" != "${before_refusals}"', "does not compare the notifications before and after"),
+    ("D-02-02 allows none", "does not judge the notifications of the refusals"),
+)
+_REFUSED_CALL = re.compile(r"^refused (\S+) (\S+)$", re.MULTILINE)
+
+
+def refusal_findings(script: str) -> list[str]:
+    """What ci/refusals.sh has to check, read from its code lines."""
+    code = _without_comments(script)
+    calls = _REFUSED_CALL.findall(code)
+    findings = [f"{reason} is not checked on {name}" for name, reason in REFUSED_FILES if (name, reason) not in calls]
+    findings += [f"the script {what}" for needle, what in REFUSAL_NEEDS if needle not in code]
+    # The count has to see a notification before it may report none.
+    control = code.find("seen_notification alice")
+    first = min((match.start() for match in _REFUSED_CALL.finditer(code)), default=-1)
+    if control < 0 or first < 0 or control > first:
+        findings.append("the script counts no notification as positive control before the refusals")
+    return findings
+
+
+def test_the_refusal_script_checks_every_reason_the_flag_and_the_notifications() -> None:
+    assert refusal_findings(_ci("refusals.sh")) == []
+
+
+def test_self_the_refusals_step_is_named_when_missing_or_late() -> None:
+    source = deploy_source()
+    assert source.count("ci/refusals.sh") == 1
+    missing = source.replace("bash app-src/ci/refusals.sh", "true")
+    assert "ci/refusals.sh is not called" in deploy_findings(missing)
+    late = missing.replace(
+        "bash app-src/ci/rights.sh", "bash app-src/ci/rights.sh\n          bash app-src/ci/refusals.sh"
+    )
+    assert deploy_findings(late) == ["the checks are not called in the fixed order"]
+
+
+def test_self_the_refusal_rules_fire() -> None:
+    script = _ci("refusals.sh")
+    assert refusal_findings(script.replace("refused pdf_301_pages.pdf too_many_pages\n", "")) == [
+        "too_many_pages is not checked on pdf_301_pages.pdf"
+    ]
+    swapped = script.replace("refused wrong_pdf_as_docx.docx wrong_type", "refused wrong_pdf_as_docx.docx damaged")
+    assert refusal_findings(swapped) == ["wrong_type is not checked on wrong_pdf_as_docx.docx"]
+    assert refusal_findings(script.replace('-H "requesttoken: ${token}"', "-H 'OCS-APIRequest: true'")) == [
+        "the script does not confirm with the request token of the session"
+    ]
+    assert refusal_findings(script.replace('fail "A6 does not hold', 'echo "A6 does not hold')) == [
+        "the script does not stop when the column encrypted is missing"
+    ]
+    assert refusal_findings(script.replace("D-02-02 allows none", "nothing to see")) == [
+        "the script does not judge the notifications of the refusals"
+    ]
+    # A comment that names a check is no check.
+    commented = script.replace(
+        "refused cfb_encrypted.docx encrypted_document", "# refused cfb_encrypted.docx encrypted_document"
+    )
+    assert refusal_findings(commented) == ["encrypted_document is not checked on cfb_encrypted.docx"]
+    no_control = script.replace("seen_notification alice", "seen_notification bob")
+    assert refusal_findings(no_control) == ["the script counts no notification as positive control before the refusals"]
 
 
 # -- sandbox.yml: the container proofs of phase 2 (plan 02-12) -------------------------

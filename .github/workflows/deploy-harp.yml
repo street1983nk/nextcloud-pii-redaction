@@ -18,6 +18,11 @@ name: Deploy through HaRP
 #     as elke (de_DE), fleur (fr) and greta (de): start, progress until
 #     review, page 1 as PNG through PHP, notification without the file name,
 #     placeholder copy next to the original, the second copy with " (2)",
+#   - the refusal checks of plan 02-23 (JOB-05): a wrongly named file, a PDF
+#     of 301 pages, a PDF and a DOCX with a password each end as failed with
+#     their reason, a start below a folder with the E2E flag is refused, a
+#     signed PDF waits in confirm and runs to review only after the POST with
+#     the request token of the session, and no refusal makes a notification,
 #   - ci/rights.sh, ci/stale.sh, ci/queue.sh, ci/routes.sh: rights and
 #     download block, etag binding, one job at a time, no browser route,
 #   - Playwright: the screenshots and assertions of the UI-SPEC,
@@ -410,6 +415,14 @@ jobs:
 
       - name: Core path, PDF as greta (de)
         run: bash app-src/ci/flow.sh pdf greta
+
+      # Plan 02-23 (JOB-05, D-02-02, D-02-04): the files come from
+      # ci/make_corpus.py --e2e into ci/out/corpus, where Playwright reads the
+      # wrongly named file and the signed PDF again. The script asks the
+      # database of this leg for the column encrypted of oc_filecache and
+      # stops when it is missing (assumption A6).
+      - name: Refusals with their reason, E2E folder, signed PDF after the confirmation
+        run: bash app-src/ci/refusals.sh
 
       - name: Rights, download block and revoked shares
         run: bash app-src/ci/rights.sh
