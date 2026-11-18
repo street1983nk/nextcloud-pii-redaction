@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-19 abgeschlossen (lokal, ungepusht: 30801ca bis 36067d9); nächster Plan 02-20"
-last_updated: "2026-11-18T09:25:45.678Z"
-last_activity: 2026-11-18 -- 02-19 abgeschlossen, Runner mit Vorprüfung, Signatur-Bestätigung, Bereiniger und Seitendeckel
+stopped_at: "02-20 abgeschlossen (lokal, ungepusht: 30801ca bis 70406d3); nächster Plan 02-21"
+last_updated: "2026-11-18T09:35:47.397Z"
+last_activity: 2026-11-18 -- 02-20 abgeschlossen, Admin-Hinweis zum geminderten Schutz
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 40
+  completed_plans: 41
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 19 of 25 in current phase (02-01 bis 02-19 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 lokal ungepusht; nächster Schritt 02-20)
+Plan: 20 of 25 in current phase (02-01 bis 02-20 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 und 02-20 lokal ungepusht; nächster Schritt 02-21)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-19 abgeschlossen
+Last activity: 2026-11-18 -- 02-20 abgeschlossen
 
-Progress: [█████████░] 87%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -78,6 +78,7 @@ Progress: [█████████░] 87%
 | Phase 02 P16 | 1 Tag | 2 tasks | 12 files |
 | Phase 02 P17 | 60 min | 2 tasks | 9 files |
 | Phase 02 P19 | ca. 60 min | 2 tasks | 6 files |
+| Phase 02 P20 | ca. 15 min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,7 @@ Recent decisions affecting current work:
 - [Phase 02-18]: Status-Route und Startzustand der Prüfseite tragen macrosRemoved/signatureConfirmed (nur bool); confirm gilt als offen, wird aber nicht gepollt
 - [Phase 02-19]: expected null im analyze-Claim endet ohne Download als unsupported_format; fehlender Schlüssel oder fremdes Wort verwirft den Claim
 - [Phase 02-19]: andere Abstürze von precheck/sanitize sind damaged; Exit 71 markiert den Jail an jeder Kindstelle (auch soffice, Platzhalter)
+- [Phase 02-20]: sandboxDegraded nur aus festen Wörtern (seccomp, landlock, jail), bei jedem Recheck frisch; seccomp/Landlock teilen eine Abhilfe, Schutzschicht eigenes Fehlerbanner
 
 ### Pending Todos
 
@@ -140,6 +142,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T09:25:45.658Z
-Stopped at: Completed 02-19-PLAN.md
+Last session: 2026-11-18T09:35:43.159Z
+Stopped at: Completed 02-20-PLAN.md
 Resume file: None

@@ -123,7 +123,7 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 02-19-PLAN.md: Runner-Integration: Vorprüfung, confirm, Bereiniger, 300-Seiten-Deckel (Welle 5)
-- [ ] 02-20-PLAN.md: Admin-Hinweis geminderter Schutz (Welle 5)
+- [x] 02-20-PLAN.md: Admin-Hinweis geminderter Schutz (Welle 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -355,7 +355,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Zwei-App-Gerüst und Integrationsbeweis | 21/21 | Complete | 2026-11-15 |
-| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 19/25 | In Progress|  |
+| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 20/25 | In Progress|  |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
 | 5. Unabhängiger Leck-Prüfer | 0/TBD | Not started | - |
