@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-22 abgeschlossen (lokal, ungepusht: 044c895, 2e6d2ab); nächster Plan 02-23"
-last_updated: "2026-11-18T10:28:44.882Z"
-last_activity: 2026-11-18 -- 02-22 abgeschlossen, Netzbeweise LibreOffice und RES-02 (CI-Lauf offen)
+stopped_at: "02-23 abgeschlossen (lokal, ungepusht: ee4e9a4, 59d4d7a); vor 02-24 Owner-Entscheid zu D-02-02 (siehe Blockers)"
+last_updated: "2026-11-18T11:27:54.750Z"
+last_activity: 2026-11-18 -- 02-23 abgeschlossen, refusals.sh und Playwright-Karten (CI-Lauf offen)
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 43
+  completed_plans: 44
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 22 of 25 in current phase (02-01 bis 02-22 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-22 lokal ungepusht; Container-Läufe von 02-21 und 02-22 offen bis zum nächsten Push; nächster Schritt 02-23)
+Plan: 23 of 25 in current phase (02-01 bis 02-23 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-23 lokal ungepusht; Container-Läufe von 02-21 und 02-22 und der deploy-harp-Lauf von 02-23 offen bis zum nächsten Push; nächster Schritt 02-24, davor Owner-Entscheid zu D-02-02)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-22 abgeschlossen
+Last activity: 2026-11-18 -- 02-23 abgeschlossen
 
-Progress: [█████████░] 93%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Progress: [█████████░] 93%
 | Phase 02 P20 | ca. 15 min | 3 tasks | 17 files |
 | Phase 02 P21 | 15 min | 2 tasks | 8 files |
 | Phase 02 P22 | 75 min | 2 tasks | 8 files |
+| Phase 02 P23 | 15 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -126,6 +127,7 @@ Recent decisions affecting current work:
 - [Phase 02-21]: Grenzen im Jail-Kind per getrlimit; /proc/self/limits bleibt gesperrt, kein Recht geöffnet
 - [Phase 02-22]: Netzbeweis LibreOffice mit Kanarienserver und Schichtläufen a bis d; Korpus per retarget auf den Kanarienport, auch im Bridge-Container
 - [Phase 02-22]: Presidio lädt bei falschem spaCy-Pfad per spacy.cli.download aus dem Netz; Erkennungs-Kind muss Modellordner vorher prüfen
+- [Phase 02-23]: E2E-Korpus des deploy-harp-Laufs liegt in ci/out/corpus (refusals.sh erzeugt, Playwright liest); Signaturbestätigung im CI über echte Sitzung mit Request-Token; A6 prüft refusals.sh selbst an der Datenbank des Laufs
 
 ### Pending Todos
 
@@ -139,6 +141,7 @@ None yet.
 - Zertifikat `pii_redaction_backend` beantragt (#1419), noch nicht erteilt
 - Scans und arm64-Tempo ungemessen (Phase 12, 15)
 - Länder-Label-Sätze brauchen juristisches Gegenlesen vor Store (Phase 11)
+- 02-23: D-02-02 gegen Produkt: JobService::toFailed sendet job_failed auch für Ablehnungen der Vorprüfung; refusals.sh Schritt (g) wird voraussichtlich rot. Owner-Entscheid vor dem Push 02-24; dazu erwartet notification.spec.ts render_failed, die Vorprüfung liefert damaged (deferred-items.md)
 
 ## Deferred Items
 
@@ -148,8 +151,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T10:28:36.411Z
-Stopped at: Completed 02-22-PLAN.md
+Last session: 2026-11-18T11:27:45.415Z
+Stopped at: Completed 02-23-PLAN.md
 Resume file: None
 
 ## Quick Tasks Completed

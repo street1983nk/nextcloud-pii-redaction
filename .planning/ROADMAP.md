@@ -129,7 +129,7 @@ Plans:
 
 - [x] 02-21-PLAN.md: Container-Beweis Geheimnis-Lesewege, Grenzen, Zombies, Korpus (Welle 6)
 - [x] 02-22-PLAN.md: Container-Beweis LibreOffice-Netz und RES-02 mit --network none (Welle 6)
-- [ ] 02-23-PLAN.md: deploy-harp refusals.sh und Playwright-Karten (Welle 6)
+- [x] 02-23-PLAN.md: deploy-harp refusals.sh und Playwright-Karten (Welle 6)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
@@ -355,7 +355,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Zwei-App-Gerüst und Integrationsbeweis | 21/21 | Complete | 2026-11-15 |
-| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 22/25 | In Progress|  |
+| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 23/25 | In Progress|  |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
 | 5. Unabhängiger Leck-Prüfer | 0/TBD | Not started | - |
