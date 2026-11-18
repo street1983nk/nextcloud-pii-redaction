@@ -13,8 +13,15 @@ instead of after the next five minute check (plan 18, PLAT-02).
 
 Tasks (01-SKELETON.md):
 
-- ``analyze``: source through the job bound gateway, format by magic bytes,
-  DOCX/ODT to PDF with LibreOffice, page 1 as PNG, ``ack(review)``.
+- ``analyze``: source through the job bound gateway, then the pre-check in a
+  jailed child (stage ``checking``, SAFE-02). A refusal ends the job with its
+  word; a signed PDF the initiator has not confirmed yet ends with
+  ``ack(confirm)`` (D-02-04). DOCX/ODT go through the cleaner child first
+  (SAFE-03) and LibreOffice only ever sees the cleaned copy. Page 1 as PNG,
+  the page count against the one cap of intake.limits (D-02-08), then
+  ``ack(review)`` with what the pre-check and the cleaner changed (D-02-10,
+  D-02-12). The server process parses no user file: it only reads the closed
+  answers of the children and checks them again (T-02-15, T-02-49).
 - ``apply``: the placeholder PDF without any source, ``ack(verified)`` with
   hash and size.
 - ``purge``: delete ``work/<job>`` and the state row, ``ack(purged)``.
@@ -35,32 +42,53 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from pii_redaction_backend import companion, config, nc
+from pii_redaction_backend.intake import limits
+from pii_redaction_backend.intake.verdict import OK, VERDICTS
 from pii_redaction_backend.model import AckResult, Reason, Stage, Task
 from pii_redaction_backend.resources import memory_guard
+from pii_redaction_backend.sandbox import probe
 from pii_redaction_backend.store import repo
-from pii_redaction_backend.workers import child, sniff, soffice
+from pii_redaction_backend.workers import child, soffice
 
 LOGGER = logging.getLogger(__name__)
 
 IDLE_MIN_SECONDS: Final = 1.0
 IDLE_MAX_SECONDS: Final = 10.0
 HEARTBEAT_SECONDS: Final = 30.0
-RENDER_TIMEOUT_SECONDS: Final = 60.0
-SOFFICE_TIMEOUT_SECONDS: Final = 120.0
-PLACEHOLDER_TIMEOUT_SECONDS: Final = 60.0
+# Every child runs within the wall clock of its jail profile (sandbox/profiles.py);
+# the runner names no time limit of its own.
 RENDER_DPI: Final = 120
 ACK_ATTEMPTS: Final = 3
 ACK_RETRY_SECONDS: Final = 2.0
 PAGE_FILE: Final = "page-1.png"
 META_FILE: Final = "meta.json"
+VERDICT_FILE: Final = "verdict.json"
+SANITIZE_FILE: Final = "sanitize.json"
 OUTPUT_FILE: Final = "output.pdf"
+# The source, its typed name and the cleaned copy all start with this stem, so
+# _remove_sources takes every form of the user file in one sweep.
 SOURCE_STEM: Final = "src"
+CLEAN_STEM: Final = "src-clean"
+# Plausibility caps of the protocol (QueueController::MAX_PAGES): an answer
+# beyond them is broken. The page cap for the user is limits.MAX_PAGES (300,
+# D-02-08), checked after rendering with its own word too_many_pages.
 MAX_PAGES: Final = 100_000
 MAX_SIDE: Final = 100_000
 _SERVER_ERROR: Final = 500
+# The child gave up because a layer of the jail was offered but could not be
+# loaded (sandbox/jail.py EXIT_LAYER_FAILED); the admin has to see it (D-02-11).
+_EXIT_LAYER_FAILED: Final = 71
+# Linux numbers (x86_64 and arm64) of the signals the kernel sends at
+# RLIMIT_CPU and RLIMIT_FSIZE; asyncio reports a killed child as minus the number.
+_SIGXCPU: Final = 24
+_SIGXFSZ: Final = 25
+# The children that judge the file itself: a limit hit there means the file is too large.
+_CHECK_CHILDREN: Final = frozenset({"precheck", "sanitize"})
+_VERDICT_KEYS: Final = frozenset({"verdict", "format", "pages", "signed", "ownerProtected"})
+_SANITIZE_KEYS: Final = frozenset({"verdict", "macrosRemoved", "externalLinksRemoved"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +126,47 @@ class _Fail(Exception):
         self.reason = reason
 
 
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    """The checked answer of the pre-check child (workers/precheck.py)."""
+
+    verdict: str
+    format: Literal["pdf", "docx", "odt"] | None
+    pages: int | None
+    signed: bool
+    owner_protected: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Cleaned:
+    """The checked answer of the cleaner child (workers/sanitize.py)."""
+
+    verdict: str
+    macros_removed: bool
+    external_links_removed: int
+
+
+def _child_failure_reason(kind: str, exc: Exception) -> Reason:
+    """The word for a child that did not end well.
+
+    Exit 71 is the jail, not the file: render_failed (the runner marks the jail
+    as failed besides). In precheck and sanitize, the time limit and the
+    rlimit signals SIGXCPU and SIGXFSZ mean the file asks for more than a safe
+    analysis gives: too_large; any other crash there is a file the parsers
+    could not take: damaged. In render and soffice every failure stays
+    render_failed.
+    """
+    if isinstance(exc, child.ChildFailed) and exc.exit_code == _EXIT_LAYER_FAILED:
+        return Reason.RENDER_FAILED
+    if kind not in _CHECK_CHILDREN:
+        return Reason.RENDER_FAILED
+    if isinstance(exc, child.ChildTimeout):
+        return Reason.TOO_LARGE
+    if isinstance(exc, child.ChildFailed) and exc.signal in {_SIGXCPU, _SIGXFSZ}:
+        return Reason.TOO_LARGE
+    return Reason.DAMAGED
+
+
 Client = Any
 
 
@@ -117,6 +186,7 @@ class Runner:
         admit: Callable[[str], bool] = memory_guard.admit,
         run_child: Callable[..., Awaitable[None]] = child.run_child,
         convert: Callable[..., Awaitable[Path]] = soffice.convert,
+        mark_jail_failed: Callable[[], None] = probe.mark_jail_failed,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         now: Callable[[], int] = lambda: int(time.time()),
@@ -134,6 +204,7 @@ class Runner:
         self._admit = admit
         self._run_child = run_child
         self._convert = convert
+        self._mark_jail_failed = mark_jail_failed
         self._sleep = sleep
         self._clock = clock
         self._now = now
@@ -266,6 +337,10 @@ class Runner:
     async def _analyze(self, job: nc.Claim, stage: "_StageBox") -> None:
         folder = self._work_dir(job.job_id)
         try:
+            if job.expected is None:
+                # The PHP app names no format: the file is gone or no longer
+                # a PDF, DOCX or ODT (plan 02-15). Nothing to download.
+                raise _Fail(Reason.UNSUPPORTED_FORMAT)
             await asyncio.to_thread(_fresh_folder, folder)
             await self._report(job, stage, Stage.FETCHING, None, None)
             fetched = await self._fetch(self._client, job, folder / SOURCE_STEM, max_bytes=config.MAX_SOURCE_BYTES)
@@ -285,28 +360,41 @@ class Runner:
                     lambda db: repo.set_source(db, job.job_id, sha256=digest, size=fetched.size, now=self._now())
                 )
 
-            source = await asyncio.to_thread(_typed_source, folder)
-            if source is None:
-                raise _Fail(Reason.UNSUPPORTED_FORMAT)
-            pdf = source
-            if source.suffix != ".pdf":
+            await self._report(job, stage, Stage.CHECKING, None, None)
+            verdict = await self._precheck(job, folder, job.expected)
+            if verdict.verdict != OK:
+                raise _Fail(Reason(verdict.verdict))
+            if verdict.signed and not job.confirmed:
+                # The signature is lost by any redaction: the user decides
+                # first (D-02-04). Confirmed, the job comes back to the queue.
+                LOGGER.info("signature needs confirmation", extra={"job_id": job.job_id})
+                await asyncio.to_thread(_remove_sources, folder)
+                await self._close(job, AckResult.CONFIRM)
+                return
+            source = await asyncio.to_thread(_name_source, folder, job.expected)
+            flags: dict[str, Any]
+            if job.expected == "pdf":
+                pdf = source
+                flags = {"owner_protection_dropped": verdict.owner_protected}
+            else:
+                clean, cleaned = await self._sanitize(job, folder, source, job.expected)
+                flags = {
+                    "macros_removed": cleaned.macros_removed,
+                    "external_links_removed": cleaned.external_links_removed,
+                }
                 await self._report(job, stage, Stage.CONVERTING, None, None)
-                pdf = await self._timed(
-                    "soffice", self._convert(source, folder / "pdf", str(job.job_id), SOFFICE_TIMEOUT_SECONDS)
-                )
+                # LibreOffice only ever opens the cleaned copy (T-02-13).
+                pdf = await self._timed("soffice", self._convert(clean, folder / "pdf", str(job.job_id)))
 
             await self._report(job, stage, Stage.RENDERING, 0, None)
             args = child.python_child("render", str(pdf), str(folder / PAGE_FILE), str(RENDER_DPI))
-            run = self._run_child(
-                args,
-                profile="render",
-                cwd=folder,
-                read=(str(pdf),),
-                write=(str(folder),),
-                timeout_s=RENDER_TIMEOUT_SECONDS,
-            )
+            run = self._run_child(args, profile="render", cwd=folder, read=(str(pdf),), write=(str(folder),))
             await self._timed("render", run)
             pages, width, height = await asyncio.to_thread(_read_meta, folder / META_FILE)
+            if pages > limits.MAX_PAGES:
+                # The one page cap (D-02-08); for DOCX and ODT the count exists
+                # only now, in the PDF of LibreOffice.
+                raise _Fail(Reason.TOO_MANY_PAGES)
             await self._report(job, stage, Stage.RENDERING, 1, pages)
         except _Abort:
             await asyncio.to_thread(_remove, folder)
@@ -315,6 +403,7 @@ class Runner:
             await self._fail(job, failure.reason)
             return
         except (child.ChildTimeout, child.ChildFailed, soffice.ConversionFailed, ValueError, OSError) as exc:
+            self._note_jail(exc)
             # Exit code, signal and the cleaned stderr tail (child.diagnostic_tail) of a
             # failed child; the other exceptions carry none of them.
             LOGGER.info(
@@ -335,7 +424,71 @@ class Runner:
         # Only the page image stays; the source and the converted PDF go now.
         await asyncio.to_thread(_remove_sources, folder)
         await self._db(lambda db: repo.upsert_job(db, job.job_id, task=job.task, stage=Stage.DONE, now=self._now()))
-        await self._close(job, AckResult.REVIEW, pages_total=pages, etag_seen=fetched.etag, image=(width, height))
+        await self._close(
+            job, AckResult.REVIEW, pages_total=pages, etag_seen=fetched.etag, image=(width, height), **flags
+        )
+
+    async def _precheck(self, job: nc.Claim, folder: Path, expected: Literal["pdf", "docx", "odt"]) -> Verdict:
+        """The pre-check child on the source, its answer checked again here (T-02-15)."""
+        source = folder / SOURCE_STEM
+        answer = folder / VERDICT_FILE
+        args = child.python_child("precheck", str(source), expected, str(answer))
+        await self._check_child(job, "precheck", args, folder, read=(str(source),))
+        try:
+            return await asyncio.to_thread(_read_verdict, answer, expected)
+        except (ValueError, OSError) as exc:
+            LOGGER.info(
+                "check answer refused",
+                extra={"job_id": job.job_id, "child": "precheck", "exc_type": type(exc).__name__},
+            )
+            raise _Fail(Reason.DAMAGED) from None
+
+    async def _sanitize(
+        self, job: nc.Claim, folder: Path, source: Path, fmt: Literal["pdf", "docx", "odt"]
+    ) -> tuple[Path, Cleaned]:
+        """The cleaner child: a cleaned copy of a DOCX or ODT beside the source, and its checked answer."""
+        clean = folder / f"{CLEAN_STEM}.{fmt}"
+        answer = folder / SANITIZE_FILE
+        args = child.python_child("sanitize", str(source), fmt, str(clean), str(answer))
+        await self._check_child(job, "sanitize", args, folder, read=(str(source),))
+        try:
+            cleaned = await asyncio.to_thread(_read_sanitize, answer, clean)
+        except (ValueError, OSError) as exc:
+            LOGGER.info(
+                "check answer refused",
+                extra={"job_id": job.job_id, "child": "sanitize", "exc_type": type(exc).__name__},
+            )
+            raise _Fail(Reason.DAMAGED) from None
+        if cleaned.verdict != OK:
+            raise _Fail(Reason(cleaned.verdict))
+        return clean, cleaned
+
+    async def _check_child(
+        self, job: nc.Claim, kind: str, args: list[str], folder: Path, *, read: tuple[str, ...]
+    ) -> None:
+        """Run precheck or sanitize in the jail profile of its kind; a failure becomes its word."""
+        try:
+            await self._timed(kind, self._run_child(args, profile=kind, cwd=folder, read=read, write=(str(folder),)))
+        except (child.ChildTimeout, child.ChildFailed) as exc:
+            reason = _child_failure_reason(kind, exc)
+            self._note_jail(exc)
+            LOGGER.info(
+                "check step failed",
+                extra={
+                    "job_id": job.job_id,
+                    "child": kind,
+                    "exc_type": type(exc).__name__,
+                    "exit_code": getattr(exc, "exit_code", None),
+                    "signal": getattr(exc, "signal", None),
+                    "reason": reason.value,
+                },
+            )
+            raise _Fail(reason) from None
+
+    def _note_jail(self, exc: BaseException) -> None:
+        """Exit 71: a jail layer was offered but not loadable; /status shows jail failed from now on."""
+        if isinstance(exc, child.ChildFailed) and exc.exit_code == _EXIT_LAYER_FAILED:
+            self._mark_jail_failed()
 
     # -- apply --------------------------------------------------------------------
 
@@ -346,15 +499,14 @@ class Runner:
             await asyncio.to_thread(_ensure_folder, folder)
             await self._report(job, stage, Stage.RENDERING, None, None)
             args = child.python_child("placeholder", str(output), str(job.job_id))
-            run = self._run_child(
-                args, profile="render", cwd=folder, write=(str(folder),), timeout_s=PLACEHOLDER_TIMEOUT_SECONDS
-            )
+            run = self._run_child(args, profile="render", cwd=folder, write=(str(folder),))
             await self._timed("placeholder", run)
             digest, size = await asyncio.to_thread(_hash_file, output)
         except _Abort:
             await asyncio.to_thread(_remove, folder)
             return
         except (child.ChildTimeout, child.ChildFailed, OSError) as exc:
+            self._note_jail(exc)
             LOGGER.info(
                 "placeholder step failed",
                 extra={
@@ -439,15 +591,81 @@ def _remove_sources(folder: Path) -> None:
     shutil.rmtree(folder / "pdf", ignore_errors=True)
 
 
-def _typed_source(folder: Path) -> Path | None:
-    """The source renamed to src.<format> (LibreOffice needs the suffix), or None."""
-    raw = folder / SOURCE_STEM
-    kind = sniff.detect(raw)
-    if kind is None:
-        return None
-    typed = folder / f"{SOURCE_STEM}.{kind}"
-    raw.replace(typed)
+def _name_source(folder: Path, fmt: str) -> Path:
+    """The source renamed to src.<format>, the format the pre-check confirmed; nothing is read."""
+    typed = folder / f"{SOURCE_STEM}.{fmt}"
+    (folder / SOURCE_STEM).replace(typed)
     return typed
+
+
+def _answer_object(path: Path, keys: frozenset[str]) -> dict[str, Any]:
+    """A child's answer file as an object with exactly these keys, or ValueError."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != keys:
+        msg = "answer is not an object with the closed keys"
+        raise ValueError(msg)
+    return data
+
+
+def _word(value: object) -> str:
+    if not isinstance(value, str) or value not in VERDICTS:
+        msg = "answer word outside the closed list"
+        raise ValueError(msg)
+    return value
+
+
+def _flag(value: object) -> bool:
+    if not isinstance(value, bool):
+        msg = "answer flag is not a bool"
+        raise ValueError(msg)
+    return value
+
+
+def _read_verdict(path: Path, expected: Literal["pdf", "docx", "odt"]) -> Verdict:
+    """verdict.json of the pre-check, every field against its list and range (T-02-15).
+
+    ok needs the format the job expects; a PDF has 1 to limits.MAX_PAGES pages,
+    DOCX and ODT none yet, and only a PDF may be signed or owner protected. A
+    refusal carries no format, no pages and no flag set. Anything else is a
+    ValueError, which the runner turns into damaged.
+    """
+    data = _answer_object(path, _VERDICT_KEYS)
+    word = _word(data["verdict"])
+    signed = _flag(data["signed"])
+    owner = _flag(data["ownerProtected"])
+    pages = data["pages"]
+    fmt = data["format"]
+    if word != OK:
+        if fmt is not None or pages is not None or signed or owner:
+            msg = "a refusal carries no facts"
+            raise ValueError(msg)
+        return Verdict(verdict=word, format=None, pages=None, signed=False, owner_protected=False)
+    if fmt != expected:
+        msg = "format is not the expected one"
+        raise ValueError(msg)
+    if expected == "pdf":
+        if isinstance(pages, bool) or not isinstance(pages, int) or not 1 <= pages <= limits.MAX_PAGES:
+            msg = "pages out of range"
+            raise ValueError(msg)
+    elif pages is not None or signed or owner:
+        msg = "an office document has no pages, signature or owner protection yet"
+        raise ValueError(msg)
+    return Verdict(verdict=word, format=expected, pages=pages, signed=signed, owner_protected=owner)
+
+
+def _read_sanitize(path: Path, clean: Path) -> Cleaned:
+    """sanitize.json of the cleaner, checked; ok also needs the cleaned copy to exist."""
+    data = _answer_object(path, _SANITIZE_KEYS)
+    word = _word(data["verdict"])
+    macros = _flag(data["macrosRemoved"])
+    links = data["externalLinksRemoved"]
+    if isinstance(links, bool) or not isinstance(links, int) or not 0 <= links <= nc.MAX_LINKS_REMOVED:
+        msg = "externalLinksRemoved out of range"
+        raise ValueError(msg)
+    if word == OK and not clean.is_file():
+        msg = "the cleaned copy is missing"
+        raise ValueError(msg)
+    return Cleaned(verdict=word, macros_removed=macros, external_links_removed=links)
 
 
 def _read_meta(path: Path) -> tuple[int, int, int]:
