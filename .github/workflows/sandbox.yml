@@ -147,6 +147,7 @@ jobs:
             -e APP_PERSISTENT_STORAGE=/nc_app_pii_redaction_backend_data \
             -e HP_SHARED_KEY="${CANARY_HP}" -e HP_FRP_ADDRESS=127.0.0.1 -e HP_FRP_PORT=8782 \
             -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
+            -v "${CORPUS}:/corpus:ro" \
             pii-sandbox:test
           ip=$(docker inspect --format '{{.NetworkSettings.IPAddress}}' sbx-bridge)
           test -n "${ip}"
@@ -167,7 +168,7 @@ jobs:
           capture=$!
           sleep 2
           if docker exec sbx-bridge test -f /app/tests/test_lo_network.py; then
-            docker exec -e PII_IN_CONTAINER=1 -e PII_MODELS=/models sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container -k bridge /app/tests/test_lo_network.py
+            docker exec -e PII_IN_CONTAINER=1 -e PII_MODELS=/models -e PII_CORPUS=/corpus sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container -k bridge /app/tests/test_lo_network.py
           else
             echo "::notice::bridge test absent, smoke only"
             docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" sbx-bridge /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests/test_container_smoke.py

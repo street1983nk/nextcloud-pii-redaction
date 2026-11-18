@@ -726,6 +726,32 @@ def test_self_the_sandbox_rules_fire() -> None:
     assert "names a secret" in sandbox_problems(source + "\n# ${{ secrets.TOKEN }}\n")
 
 
+CORPUS_MOUNT = '-v "${CORPUS}:/corpus:ro"'
+
+
+def bridge_corpus_problems(source: str) -> list[str]:
+    """The network proof of plan 02-22 reads the corpus in both containers: mounted twice, named on the bridge run."""
+    found: list[str] = []
+    if source.count(CORPUS_MOUNT) != 2:
+        found.append("the corpus is not mounted into both containers")
+    bridge = [line for line in source.splitlines() if "pytest" in line and "test_lo_network.py" in line]
+    if not bridge or any("-e PII_CORPUS=/corpus" not in line for line in bridge):
+        found.append("the bridge run of test_lo_network.py does not name PII_CORPUS")
+    return found
+
+
+def test_both_containers_get_the_corpus() -> None:
+    assert bridge_corpus_problems(SANDBOX.read_text(encoding="utf-8")) == []
+
+
+def test_self_the_bridge_corpus_rules_fire() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    one_mount = source.replace(f"            {CORPUS_MOUNT} \\\n", "", 1)
+    assert "the corpus is not mounted into both containers" in bridge_corpus_problems(one_mount)
+    unnamed = source.replace("-e PII_CORPUS=/corpus sbx-bridge", "sbx-bridge")
+    assert bridge_corpus_problems(unnamed) == ["the bridge run of test_lo_network.py does not name PII_CORPUS"]
+
+
 def test_self_the_tolerance_rules_fire() -> None:
     source = SANDBOX.read_text(encoding="utf-8")
     run = "-m container /app/tests\n"
