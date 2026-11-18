@@ -8,6 +8,7 @@ like the PHP app would (OCS envelope, ``X-Pii-Etag``, 409 for a changed file).
 import base64
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,6 +30,8 @@ CLAIM_ANSWER = {
     "userId": "alice",
     "etag": ETAG,
     "leaseSeconds": 120,
+    "expected": "pdf",
+    "confirmed": False,
 }
 
 
@@ -59,8 +62,19 @@ def _entries(directory: Path) -> list[Path]:
     return sorted(directory.iterdir())
 
 
-def _claim() -> nc.Claim:
-    return nc.Claim(job_id=7, task=Task.ANALYZE, token=TOKEN, file_id=42, user_id="alice", etag=ETAG, lease_seconds=120)
+def _claim(**fields: object) -> nc.Claim:
+    values: dict[str, object] = {
+        "job_id": 7,
+        "task": Task.ANALYZE,
+        "token": TOKEN,
+        "file_id": 42,
+        "user_id": "alice",
+        "etag": ETAG,
+        "lease_seconds": 120,
+        "expected": "pdf",
+        "confirmed": False,
+    } | fields
+    return nc.Claim(**values)  # pyright: ignore[reportArgumentType]
 
 
 # -- signed headers --------------------------------------------------------------
@@ -133,6 +147,86 @@ async def test_a_missing_field_discards_the_claim() -> None:
 
     async with Recorder(lambda _request: _ocs(answer)).client() as client:
         assert await nc.claim(client) is None
+
+
+# -- claim: expected and confirmed (plan 02-15/02-19, JOB-05) ----------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"expected": "doc"},
+        {"expected": "PDF"},
+        {"expected": ""},
+        {"expected": 1},
+        {"expected": ["pdf"]},
+        {"confirmed": "true"},
+        {"confirmed": 1},
+        {"confirmed": None},
+    ],
+)
+async def test_an_analyze_claim_with_expected_or_confirmed_outside_its_shape_is_discarded(
+    change: dict[str, object], caplog: pytest.LogCaptureFixture
+) -> None:
+    answer = CLAIM_ANSWER | change
+
+    with caplog.at_level(logging.WARNING, logger="pii_redaction_backend"):
+        async with Recorder(lambda _request: _ocs(answer)).client() as client:
+            assert await nc.claim(client) is None
+
+    (record,) = [record for record in caplog.records if record.getMessage() == "claim answer discarded"]
+    assert record.__dict__["reason"] == "shape"
+
+
+async def test_an_analyze_claim_without_expected_is_discarded() -> None:
+    answer = {key: value for key, value in CLAIM_ANSWER.items() if key != "expected"}
+
+    async with Recorder(lambda _request: _ocs(answer)).client() as client:
+        assert await nc.claim(client) is None
+
+
+async def test_expected_null_is_a_claim_without_a_format() -> None:
+    # The PHP app sends null when the file is gone or its mime type is no
+    # longer one of the three (02-15); the runner ends such a job itself.
+    answer = CLAIM_ANSWER | {"expected": None}
+
+    async with Recorder(lambda _request: _ocs(answer)).client() as client:
+        claim = await nc.claim(client)
+
+    assert claim == _claim(expected=None)
+
+
+@pytest.mark.parametrize("word", ["pdf", "docx", "odt"])
+async def test_every_format_word_is_taken(word: str) -> None:
+    answer = CLAIM_ANSWER | {"expected": word, "confirmed": True}
+
+    async with Recorder(lambda _request: _ocs(answer)).client() as client:
+        claim = await nc.claim(client)
+
+    assert claim == _claim(expected=word, confirmed=True)
+
+
+async def test_a_missing_confirmed_is_false() -> None:
+    answer = {key: value for key, value in CLAIM_ANSWER.items() if key != "confirmed"}
+
+    async with Recorder(lambda _request: _ocs(answer)).client() as client:
+        claim = await nc.claim(client)
+
+    assert claim is not None
+    assert claim.confirmed is False
+
+
+@pytest.mark.parametrize("task", [Task.APPLY, Task.PURGE])
+async def test_other_tasks_carry_neither_format_nor_confirmation(task: Task) -> None:
+    # Apply and purge claims of the PHP app carry neither field (02-15); a
+    # stray value is not taken over into the claim.
+    base = {key: value for key, value in CLAIM_ANSWER.items() if key not in {"expected", "confirmed"}}
+    answer = base | {"task": task.value}
+
+    async with Recorder(lambda _request: _ocs(answer)).client() as client:
+        claim = await nc.claim(client)
+
+    assert claim == _claim(task=task, expected=None, confirmed=False)
 
 
 async def test_numbers_as_strings_are_accepted_like_ocs_may_send_them() -> None:
@@ -250,6 +344,94 @@ async def test_ack_refuses_values_outside_their_shape(kwargs: dict[str, object])
     async with php.client() as client:
         with pytest.raises(ValueError):  # noqa: PT011 - each shape has its own message
             await nc.ack(client, _claim(), AckResult.FAILED, **kwargs)  # pyright: ignore[reportArgumentType]
+
+    assert php.requests == []
+
+
+async def test_ack_confirm_sends_only_the_word() -> None:
+    php = Recorder(lambda _request: _ocs({"ok": True}))
+
+    async with php.client() as client:
+        assert await nc.ack(client, _claim(), AckResult.CONFIRM) is True
+
+    assert php.body() == {"token": TOKEN, "result": "confirm"}
+
+
+async def test_ack_review_carries_the_cleaning_flags() -> None:
+    php = Recorder(lambda _request: _ocs({"ok": True}))
+
+    async with php.client() as client:
+        await nc.ack(
+            client,
+            _claim(),
+            AckResult.REVIEW,
+            pages_total=3,
+            etag_seen=ETAG,
+            image=(992, 1403),
+            macros_removed=True,
+            external_links_removed=10_000,
+        )
+        await nc.ack(
+            client,
+            _claim(),
+            AckResult.REVIEW,
+            pages_total=3,
+            etag_seen=ETAG,
+            image=(992, 1403),
+            owner_protection_dropped=False,
+            external_links_removed=0,
+        )
+
+    assert php.body(0)["macrosRemoved"] is True
+    assert php.body(0)["externalLinksRemoved"] == 10_000
+    assert "ownerProtectionDropped" not in php.body(0)
+    assert php.body(1)["ownerProtectionDropped"] is False
+    assert php.body(1)["externalLinksRemoved"] == 0
+    assert "macrosRemoved" not in php.body(1)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"macros_removed": "yes"},
+        {"macros_removed": 1},
+        {"owner_protection_dropped": 0},
+        {"owner_protection_dropped": "false"},
+        {"external_links_removed": -1},
+        {"external_links_removed": 10_001},
+        {"external_links_removed": True},
+        {"external_links_removed": "7"},
+    ],
+)
+async def test_review_flags_outside_their_type_raise_before_sending(kwargs: dict[str, object]) -> None:
+    php = Recorder(lambda _request: _ocs({"ok": True}))
+
+    async with php.client() as client:
+        with pytest.raises(ValueError):  # noqa: PT011 - each flag has its own message
+            await nc.ack(
+                client,
+                _claim(),
+                AckResult.REVIEW,
+                pages_total=3,
+                etag_seen=ETAG,
+                image=(992, 1403),
+                **kwargs,  # pyright: ignore[reportArgumentType]
+            )
+
+    assert php.requests == []
+
+
+@pytest.mark.parametrize("result", [AckResult.FAILED, AckResult.CONFIRM, AckResult.VERIFIED, AckResult.PURGED])
+@pytest.mark.parametrize(
+    "flag",
+    [{"macros_removed": True}, {"external_links_removed": 0}, {"owner_protection_dropped": False}],
+)
+async def test_cleaning_flags_belong_to_review_only(result: AckResult, flag: dict[str, object]) -> None:
+    php = Recorder(lambda _request: _ocs({"ok": True}))
+
+    async with php.client() as client:
+        with pytest.raises(ValueError, match="review"):
+            await nc.ack(client, _claim(), result, **flag)  # pyright: ignore[reportArgumentType]
 
     assert php.requests == []
 
