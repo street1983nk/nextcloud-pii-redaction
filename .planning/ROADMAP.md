@@ -117,7 +117,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 02-16-PLAN.md: Früher Push auf phase-02 mit Owner-Freigabe, Linux/PHP/Image-CI grün (Welle 4)
-- [ ] 02-17-PLAN.md: Kinder precheck/sanitize und gehärtetes LibreOffice-Profil (Welle 4)
+- [x] 02-17-PLAN.md: Kinder precheck/sanitize und gehärtetes LibreOffice-Profil (Welle 4)
 - [ ] 02-18-PLAN.md: Dateikarte: Ablehnungsgründe, Signatur-Bestätigung, Makro-Hinweis, Kataloge (Welle 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -355,7 +355,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Zwei-App-Gerüst und Integrationsbeweis | 21/21 | Complete | 2026-11-15 |
-| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 16/25 | In Progress|  |
+| 2. Sicherer Dateieingang und Kindprozess-Sandbox | 17/25 | In Progress|  |
 | 3. Positionsindex und Dokumentmodell | 0/TBD | Not started | - |
 | 4. Testsatz, Leck-Zoo und Eval-Harness | 0/TBD | Not started | - |
 | 5. Unabhängiger Leck-Prüfer | 0/TBD | Not started | - |
