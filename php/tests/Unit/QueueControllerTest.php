@@ -276,6 +276,8 @@ final class QueueControllerTest extends TestCase {
 		self::assertSame(Status::Failed, $job->getStatusEnum());
 		self::assertSame('render_failed', $job->getReason());
 		self::assertSame(Task::Purge, $job->getTaskEnum());
+		// An error still notifies, once (control for the refusals below).
+		self::assertSame(['job_failed'], $this->subjects());
 	}
 
 	public function testAnUnknownResultIs400(): void {
@@ -391,10 +393,12 @@ final class QueueControllerTest extends TestCase {
 	}
 
 	/**
+	 * The words of a refused file, written out (not read from the product).
+	 *
 	 * @return list<array{0: string}>
 	 */
 	public static function precheckReasons(): array {
-		return [['unsafe_content'], ['wrong_type'], ['damaged'], ['too_large'], ['encrypted_document']];
+		return [['unsafe_content'], ['wrong_type'], ['damaged'], ['too_large'], ['encrypted_document'], ['encrypted_pdf'], ['too_many_pages'], ['unsupported_format']];
 	}
 
 	#[\PHPUnit\Framework\Attributes\DataProvider('precheckReasons')]
@@ -405,6 +409,9 @@ final class QueueControllerTest extends TestCase {
 		$job = $this->job($claim['jobId']);
 		self::assertSame(Status::Failed, $job->getStatusEnum());
 		self::assertSame($reason, $job->getReason());
+		self::assertSame(Task::Purge, $job->getTaskEnum());
+		// D-02-02: the file card names the reason, no notification on top.
+		self::assertSame([], $this->sent);
 	}
 
 	public function testAckWithAForeignTokenIs409(): void {

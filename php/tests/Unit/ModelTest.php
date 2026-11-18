@@ -43,6 +43,25 @@ final class ModelTest extends TestCase {
 		);
 	}
 
+	/**
+	 * D-02-02: which reasons are refusals of the pre-check (no notification)
+	 * and which are errors, as two literal lists. A new reason has to be put
+	 * into one of them here, by hand.
+	 */
+	public function testEveryReasonIsARefusalOfThePrecheckOrNot(): void {
+		$refusals = array_values(array_filter(Reason::cases(), static fn (Reason $r): bool => $r->isPrecheckRefusal()));
+		$others = array_values(array_filter(Reason::cases(), static fn (Reason $r): bool => !$r->isPrecheckRefusal()));
+
+		self::assertSame(
+			['encrypted_pdf', 'unsupported_format', 'too_many_pages', 'encrypted_document', 'wrong_type', 'damaged', 'too_large', 'unsafe_content'],
+			self::values($refusals),
+		);
+		self::assertSame(
+			['out_of_memory', 'repeatedly_stuck', 'leak_detected', 'check_error', 'original_changed', 'original_deleted', 'target_not_writable', 'backend_state_lost', 'download_blocked', 'not_readable', 'render_failed', 'backend_unavailable', 'e2e_encrypted', 'signature_declined'],
+			self::values($others),
+		);
+	}
+
 	public function testTheSmallListsAreClosed(): void {
 		self::assertSame(['waiting', 'fetching', 'checking', 'converting', 'rendering', 'done'], self::values(Stage::cases()));
 		self::assertSame(['analyze', 'apply', 'purge'], self::values(Task::cases()));

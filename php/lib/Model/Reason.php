@@ -33,4 +33,26 @@ enum Reason: string {
 	case TooLarge = 'too_large';
 	case UnsafeContent = 'unsafe_content';
 	case SignatureDeclined = 'signature_declined';
+
+	/**
+	 * True for the words the pre-check of the container answers for a file
+	 * it refuses (the verdicts of intake/verdict.py; too_many_pages also
+	 * after the conversion, D-02-08). Such a job fails without a
+	 * notification: the file card names the reason (D-02-02, owner decision
+	 * of 2026-11-18). Every other reason is an error and notifies; a new
+	 * reason is an error until it is listed here.
+	 */
+	public function isPrecheckRefusal(): bool {
+		return match ($this) {
+			self::EncryptedPdf,
+			self::EncryptedDocument,
+			self::WrongType,
+			self::Damaged,
+			self::TooLarge,
+			self::TooManyPages,
+			self::UnsafeContent,
+			self::UnsupportedFormat => true,
+			default => false,
+		};
+	}
 }

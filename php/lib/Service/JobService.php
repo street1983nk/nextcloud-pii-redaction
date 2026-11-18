@@ -248,12 +248,23 @@ final class JobService {
 		$this->finish($job, Status::Review, $job->getInitiatorUid(), Subject::ReviewReady);
 	}
 
+	/**
+	 * The job ends as failed and goes to the purge task. An error sends
+	 * job_failed; a refusal of the pre-check sends nothing, the file card
+	 * names the reason (D-02-02).
+	 */
 	public function toFailed(Job $job, Reason $reason): void {
 		$this->expectOpen($job);
 		$job->setStatus(Status::Failed->value);
 		$job->setReason($reason->value);
 		$job->setTask(Task::Purge->value);
-		$this->finish($job, Status::Failed, $job->getInitiatorUid(), Subject::JobFailed);
+		$refused = $reason->isPrecheckRefusal();
+		$this->finish($job, Status::Failed, $job->getInitiatorUid(), $refused ? null : Subject::JobFailed);
+		if ($refused) {
+			// As for a cancelled job: no older notification of this job may
+			// stay and announce a review that will not come.
+			$this->notifications->dismiss($job);
+		}
 	}
 
 	public function toStale(Job $job): void {
@@ -395,7 +406,9 @@ final class JobService {
 	/**
 	 * The mapper fails a job that was handed out three times without an ack
 	 * (repeatedly_stuck) and cannot notify. The first reader of such a job
-	 * records the event and sends job_failed, once.
+	 * records the event and sends job_failed, once. Only for this one
+	 * reason: a refusal of the pre-check already carries its failed event
+	 * and never gets a notification afterwards (D-02-02).
 	 */
 	private function catchUpGiveUp(Job $job): void {
 		if ($job->getStatusEnum() !== Status::Failed || $job->getReasonEnum() !== Reason::RepeatedlyStuck) {

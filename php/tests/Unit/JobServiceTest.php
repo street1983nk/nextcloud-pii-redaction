@@ -15,6 +15,7 @@ use OCA\PiiRedaction\Model\Task;
 use OCA\PiiRedaction\Service\JobService;
 use OCA\PiiRedaction\Service\NotificationSender;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -179,6 +180,79 @@ final class JobServiceTest extends TestCase {
 		self::assertSame(Reason::RenderFailed, $job->getReasonEnum());
 		self::assertSame(Task::Purge, $job->getTaskEnum());
 		self::assertSame(['job_failed'], $this->subjects());
+	}
+
+	/**
+	 * The refusals of the pre-check, written out here on purpose: the test
+	 * must not read the list the product reads (Reason::isPrecheckRefusal).
+	 *
+	 * @return iterable<string, array{string}>
+	 */
+	public static function precheckRefusals(): iterable {
+		yield 'encrypted_pdf' => ['encrypted_pdf'];
+		yield 'encrypted_document' => ['encrypted_document'];
+		yield 'wrong_type' => ['wrong_type'];
+		yield 'damaged' => ['damaged'];
+		yield 'too_large' => ['too_large'];
+		yield 'too_many_pages' => ['too_many_pages'];
+		yield 'unsafe_content' => ['unsafe_content'];
+		yield 'unsupported_format' => ['unsupported_format'];
+	}
+
+	#[DataProvider('precheckRefusals')]
+	public function testARefusalOfThePrecheckFailsAndGoesToPurgeWithoutANotification(string $reason): void {
+		$job = $this->claimed();
+		$this->service->toFailed($job, Reason::from($reason));
+		$job = $this->reload($job);
+
+		self::assertSame(Status::Failed, $job->getStatusEnum());
+		self::assertSame($reason, $job->getReason());
+		self::assertSame(Task::Purge, $job->getTaskEnum());
+		self::assertNull($job->getClaimToken());
+		self::assertSame(['queued', 'failed'], $this->actions($job->getId()));
+
+		// Neither the transition nor a later reader of the job sends one.
+		self::assertSame('failed', $this->service->view($job->getId(), 'alice')['status'] ?? null);
+		$this->service->view($job->getId(), 'alice');
+		self::assertSame([], $this->sent);
+		self::assertSame(['queued', 'failed'], $this->actions($job->getId()));
+		// And no older notification of the job stays behind.
+		self::assertContains('job:' . $job->getId(), $this->dismissed);
+	}
+
+	/**
+	 * The errors, written out as well: every one of them still notifies.
+	 *
+	 * @return iterable<string, array{string}>
+	 */
+	public static function errorReasons(): iterable {
+		yield 'render_failed' => ['render_failed'];
+		yield 'check_error' => ['check_error'];
+		yield 'not_readable' => ['not_readable'];
+		yield 'download_blocked' => ['download_blocked'];
+		yield 'target_not_writable' => ['target_not_writable'];
+		yield 'backend_unavailable' => ['backend_unavailable'];
+		yield 'backend_state_lost' => ['backend_state_lost'];
+		yield 'out_of_memory' => ['out_of_memory'];
+		yield 'leak_detected' => ['leak_detected'];
+		yield 'repeatedly_stuck' => ['repeatedly_stuck'];
+	}
+
+	#[DataProvider('errorReasons')]
+	public function testAnErrorFailsGoesToPurgeAndNotifiesOnce(string $reason): void {
+		$job = $this->claimed();
+		$this->service->toFailed($job, Reason::from($reason));
+		$job = $this->reload($job);
+
+		self::assertSame(Status::Failed, $job->getStatusEnum());
+		self::assertSame($reason, $job->getReason());
+		self::assertSame(Task::Purge, $job->getTaskEnum());
+		self::assertSame(['queued', 'failed'], $this->actions($job->getId()));
+
+		self::assertSame('failed', $this->service->view($job->getId(), 'alice')['status'] ?? null);
+		self::assertSame(['job_failed'], $this->subjects());
+		self::assertSame('alice', $this->sent[0]['user']);
+		self::assertSame('job:' . $job->getId(), $this->sent[0]['object']);
 	}
 
 	public function testStaleNotifiesAndGoesToPurge(): void {
