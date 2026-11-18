@@ -153,7 +153,13 @@ def test_positive_control_without_configure_tldextract_reaches_for_the_net(tmp_p
 # local path. gliner2 imports its cloud client on its own, so the gate forbids
 # the use, not the package.
 
-GATED_ROOTS = (REPO_ROOT / "backend" / "src", REPO_ROOT / "scripts", REPO_ROOT / "ci")
+# tests/probes: the probes load the models in the container (plan 02-22, offline_stack.py).
+GATED_ROOTS = (
+    REPO_ROOT / "backend" / "src",
+    REPO_ROOT / "scripts",
+    REPO_ROOT / "ci",
+    REPO_ROOT / "backend" / "tests" / "probes",
+)
 FORBIDDEN_NAMES = frozenset({"GLiNER2API", "hf_hub_download", "snapshot_download"})
 
 
@@ -208,6 +214,7 @@ def test_the_gate_reads_the_source_scripts_and_ci() -> None:
     files = _gated_files()
     assert any(path.name == "offline.py" for path in files)
     assert any(path.parent.name == "ci" for path in files)
+    assert any(path.name == "offline_stack.py" and path.parent.name == "probes" for path in files)
 
 
 @pytest.mark.parametrize("path", _gated_files(), ids=lambda p: str(p.relative_to(REPO_ROOT)))
