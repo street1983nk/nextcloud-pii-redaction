@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-08 bis 02-15 abgeschlossen; Halt am Push-Tor 02-16 (Owner-Freigabe je SHA)"
-last_updated: "2026-11-17T02:48:15.482Z"
-last_activity: 2026-11-17 -- Wellen 2 und 3 abgeschlossen (02-08 bis 02-15), Halt am Push-Tor 02-16
+stopped_at: "02-16 abgeschlossen (phase-02 bei c1b6f5f grün); nächster Plan 02-17"
+last_updated: "2026-11-18T07:35:28.170Z"
+last_activity: 2026-11-18 -- 02-16 abgeschlossen, CI zu c1b6f5f komplett grün
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 36
+  completed_plans: 37
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 15 of 25 in current phase (Wellen 1 bis 3 komplett: 02-01 bis 02-15 abgeschlossen, lokal ungepusht; nächster Schritt 02-16 Push-Tor, danach 02-17, 02-18)
-Status: Halt am Checkpoint 02-16 Task 1 (Owner-Freigabe für git push origin HEAD:phase-02)
-Last activity: 2026-11-17 -- 02-15 abgeschlossen
+Plan: 16 of 25 in current phase (02-01 bis 02-16 abgeschlossen, phase-02 auf origin bei c1b6f5f; nächster Schritt 02-17, danach 02-18)
+Status: Ready to execute
+Last activity: 2026-11-18 -- 02-16 abgeschlossen
 
-Progress: [██████░░░░] 61%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -75,6 +75,7 @@ Progress: [██████░░░░] 61%
 | Phase 02 P13 | 45 min | 2 tasks | 4 files |
 | Phase 02 P14 | 30 min | 2 tasks | 9 files |
 | Phase 02 P15 | 30 min | 2 tasks | 5 files |
+| Phase 02 P16 | 1 Tag | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,7 @@ Recent decisions affecting current work:
 - [Phase 02-06]: tests/ wieder im Build-Kontext nur für die Teststufe; runtime kopiert nie tests, Push nur target runtime
 - [Phase 02-07]: zip_lying_size und XML/PDF-Strukturfälle bestehen Stufe A/B; 02-09 muss sie ablehnen (Querprobe)
 - [Phase 02-02]: transformers 5.22.1, hub 2.4.0, tokenizers 0.23.3 statt 4.57.6 (Owner-Freigabe 1); Lock mit exclude-newer 2026-11-03 für alle Pakete inkl. torch aus dem CPU-Index (Owner-Freigabe 2, Option B); pip-audit mit +cpu-Strip
+- [Phase 02-16]: detect-Kind ohne OMP_THREAD_LIMIT, OMP_NUM_THREADS aus hardware.worker_threads (Deckel 2); ocr behält die Grenze
 
 ### Pending Todos
 
@@ -132,6 +134,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-17T02:48:15.464Z
-Stopped at: 02-15 abgeschlossen; Halt am Push-Tor 02-16 Task 1
-Resume file: .planning/phases/02-sicherer-dateieingang-und-kindprozess-sandbox/02-16-PLAN.md
+Last session: 2026-11-18T07:35:16.958Z
+Stopped at: Completed 02-16-PLAN.md
+Resume file: None
