@@ -106,6 +106,8 @@ final class ReviewController extends Controller {
 			'outputFileId' => $view['outputFileId'],
 			'outputName' => $view['outputName'],
 			'recheck' => $view['recheck'],
+			'macrosRemoved' => $view['macrosRemoved'],
+			'signatureConfirmed' => $view['signatureConfirmed'],
 		];
 		if ($name !== null) {
 			$state['fileName'] = $name;

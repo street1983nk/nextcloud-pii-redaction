@@ -35,10 +35,15 @@ final class JobController extends Controller {
 		'unsupported_format' => Http::STATUS_UNSUPPORTED_MEDIA_TYPE,
 	];
 
-	/** The fields of the status answer (01-SKELETON.md, PHP-Routen). */
+	/**
+	 * The fields of the status answer (01-SKELETON.md, PHP-Routen). The two
+	 * flags (plan 02-18) let the polling page show the macro notice once the
+	 * job reaches review, without a reload; both are booleans only.
+	 */
 	private const STATUS_FIELDS = [
 		'jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal',
 		'backendReady', 'outputFileId', 'outputName', 'recheck',
+		'macrosRemoved', 'signatureConfirmed',
 	];
 
 	public function __construct(

@@ -145,6 +145,21 @@ final class ReviewControllerTest extends TestCase {
 		self::assertSame('review', $initial['status']);
 		self::assertSame(['width' => 992, 'height' => 1403], $initial['image']);
 		self::assertSame(3, $initial['pagesTotal']);
+		self::assertFalse($initial['macrosRemoved']);
+		self::assertFalse($initial['signatureConfirmed']);
+	}
+
+	public function testAJobInReviewCarriesTheMacroFlag(): void {
+		$this->started();
+		$claim = $this->mapper->claimNext();
+		self::assertNotNull($claim);
+		$this->service->recordAckFlags($claim['job'], true, 0, false);
+		$this->service->toReview($claim['job'], 3, 992, 1403);
+
+		$this->controller()->page($claim['job']->getId());
+
+		self::assertTrue($this->initial()['macrosRemoved']);
+		self::assertFalse($this->initial()['signatureConfirmed']);
 	}
 
 	public function testAForeignUserGetsA404WithoutAnyName(): void {

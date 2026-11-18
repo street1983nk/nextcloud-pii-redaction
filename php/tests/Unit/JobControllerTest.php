@@ -135,12 +135,30 @@ final class JobControllerTest extends TestCase {
 		self::assertSame(Http::STATUS_OK, $response->getStatus());
 		$body = $this->body($response);
 		self::assertSame(
-			['jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal', 'backendReady', 'outputFileId', 'outputName', 'recheck'],
+			['jobId', 'status', 'stage', 'reason', 'ahead', 'pagesDone', 'pagesTotal', 'backendReady', 'outputFileId', 'outputName', 'recheck', 'macrosRemoved', 'signatureConfirmed'],
 			array_keys($body),
 		);
 		self::assertSame('queued', $body['status']);
 		self::assertTrue($body['backendReady']);
+		self::assertFalse($body['macrosRemoved']);
+		self::assertFalse($body['signatureConfirmed']);
 		self::assertNoStore($response);
+	}
+
+	public function testTheStatusCarriesTheMacroFlagOfTheReview(): void {
+		$this->controller()->create(42);
+		$claim = $this->mapper->claimNext();
+		self::assertNotNull($claim);
+		$this->service->recordAckFlags($claim['job'], true, 0, false);
+		$this->service->toReview($claim['job'], 1, 992, 1403);
+
+		$response = $this->controller()->show($claim['job']->getId());
+
+		self::assertInstanceOf(JSONResponse::class, $response);
+		$body = $this->body($response);
+		self::assertSame('review', $body['status']);
+		self::assertTrue($body['macrosRemoved']);
+		self::assertFalse($body['signatureConfirmed']);
 	}
 
 	public function testTheStatusReportsADownloadBlockAddedAfterTheStart(): void {
