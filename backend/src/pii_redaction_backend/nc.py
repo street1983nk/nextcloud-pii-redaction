@@ -44,7 +44,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, BinaryIO, Final
+from typing import Any, BinaryIO, Final, Literal
 
 import httpx
 from nc_py_api import AsyncNextcloudApp, NextcloudException
@@ -128,6 +128,10 @@ _TOKEN: Final = re.compile(r"[0-9a-f]{16,64}")
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
 _TASKS: Final = frozenset(item.value for item in Task)
 _ETAG_MAX: Final = 40
+# The formats an analyze claim may name (JobService::formatOf of the PHP app).
+_FORMATS: Final = ("pdf", "docx", "odt")
+# The most external links one cleaned copy may report (QueueController::MAX_LINKS_REMOVED).
+MAX_LINKS_REMOVED: Final = 10_000
 _USER_MAX: Final = 64
 
 
@@ -222,6 +226,38 @@ class Claim:
     user_id: str
     etag: str
     lease_seconds: int
+    # Only an analyze claim carries these two (plan 02-15). expected is the
+    # format of the file by its Nextcloud mime type, None when the PHP app
+    # could not name one (file gone or of another type); confirmed is true once
+    # the initiator accepted the loss of a signature (D-02-04).
+    expected: Literal["pdf", "docx", "odt"] | None = None
+    confirmed: bool = False
+
+
+_MISSING: Final = object()
+
+
+def _expected(value: object) -> tuple[bool, Literal["pdf", "docx", "odt"] | None]:
+    """(valid, format): null is valid without a format, a word outside the three is not."""
+    if value is None:
+        return True, None
+    if value == "pdf":
+        return True, "pdf"
+    if value == "docx":
+        return True, "docx"
+    if value == "odt":
+        return True, "odt"
+    return False, None
+
+
+def _analyze_fields(fields: Mapping[str, Any]) -> tuple[bool, Literal["pdf", "docx", "odt"] | None, bool]:
+    """(valid, expected, confirmed) of an analyze claim; expected must be there, confirmed defaults to false."""
+    raw = fields.get("expected", _MISSING)
+    valid, expected = (False, None) if raw is _MISSING else _expected(raw)
+    confirmed = fields.get("confirmed", False)
+    if not isinstance(confirmed, bool):
+        return False, None, False
+    return valid, expected, confirmed
 
 
 def _parse_claim(data: object) -> Claim | None:
@@ -248,6 +284,13 @@ def _parse_claim(data: object) -> Claim | None:
     ):
         LOGGER.warning("claim answer discarded", extra={"reason": "shape"})
         return None
+    expected: Literal["pdf", "docx", "odt"] | None = None
+    confirmed = False
+    if task_word == Task.ANALYZE.value:
+        valid, expected, confirmed = _analyze_fields(fields)
+        if not valid:
+            LOGGER.warning("claim answer discarded", extra={"reason": "shape"})
+            return None
     return Claim(
         job_id=job_id,
         task=Task(task_word),
@@ -256,6 +299,8 @@ def _parse_claim(data: object) -> Claim | None:
         user_id=user_id,
         etag=etag,
         lease_seconds=lease,
+        expected=expected,
+        confirmed=confirmed,
     )
 
 
@@ -377,8 +422,11 @@ def _ack_body(
     etag_seen: str | None,
     image: tuple[int, int] | None,
     output: tuple[str, int] | None,
+    flags: "ReviewFlags | None" = None,
 ) -> dict[str, object]:
     body: dict[str, object] = {"token": claim.token, "result": AckResult(result).value}
+    if flags is not None:
+        body |= _flag_fields(AckResult(result), flags)
     if reason is not None:
         body["reason"] = Reason(reason).value
     if pages_total is not None:
@@ -403,6 +451,40 @@ def _ack_body(
     return body
 
 
+@dataclass(frozen=True)
+class ReviewFlags:
+    """What the pre-check and the cleaner changed for the analysis (D-02-10, D-02-12); None is not sent."""
+
+    macros_removed: bool | None = None
+    external_links_removed: int | None = None
+    owner_protection_dropped: bool | None = None
+
+
+def _flag_fields(result: AckResult, flags: ReviewFlags) -> dict[str, object]:
+    """The flags as fields of a review ack; any other result or type is a programming error."""
+    fields: dict[str, object] = {}
+    for key, value in (
+        ("macrosRemoved", flags.macros_removed),
+        ("ownerProtectionDropped", flags.owner_protection_dropped),
+    ):
+        if value is None:
+            continue
+        if not isinstance(value, bool):
+            msg = f"{key} must be a bool"
+            raise ValueError(msg)
+        fields[key] = value
+    links = flags.external_links_removed
+    if links is not None:
+        if isinstance(links, bool) or not isinstance(links, int) or not 0 <= links <= MAX_LINKS_REMOVED:
+            msg = f"externalLinksRemoved must be a whole number from 0 to {MAX_LINKS_REMOVED}"
+            raise ValueError(msg)
+        fields["externalLinksRemoved"] = links
+    if fields and result is not AckResult.REVIEW:
+        msg = "cleaning flags belong to a review ack only"
+        raise ValueError(msg)
+    return fields
+
+
 async def ack(
     client: httpx.AsyncClient,
     claim: Claim,
@@ -413,10 +495,23 @@ async def ack(
     etag_seen: str | None = None,
     image: tuple[int, int] | None = None,
     output: tuple[str, int] | None = None,
+    macros_removed: bool | None = None,
+    external_links_removed: int | None = None,
+    owner_protection_dropped: bool | None = None,
 ) -> bool:
     """Close a claimed task. False on 409 or any other refusal; a value outside its shape raises before sending."""
     outcome = await ack_outcome(
-        client, claim, result, reason=reason, pages_total=pages_total, etag_seen=etag_seen, image=image, output=output
+        client,
+        claim,
+        result,
+        reason=reason,
+        pages_total=pages_total,
+        etag_seen=etag_seen,
+        image=image,
+        output=output,
+        macros_removed=macros_removed,
+        external_links_removed=external_links_removed,
+        owner_protection_dropped=owner_protection_dropped,
     )
     return outcome is Outcome.OK
 
@@ -431,10 +526,29 @@ async def ack_outcome(
     etag_seen: str | None = None,
     image: tuple[int, int] | None = None,
     output: tuple[str, int] | None = None,
+    macros_removed: bool | None = None,
+    external_links_removed: int | None = None,
+    owner_protection_dropped: bool | None = None,
 ) -> Outcome:
-    """Close a claimed task and say how the report ended (:class:`Outcome`)."""
+    """Close a claimed task and say how the report ended (:class:`Outcome`).
+
+    ``confirm`` carries no field but the token; the three cleaning flags go
+    only with ``review`` and only with their types (plan 02-15).
+    """
+    flags = ReviewFlags(
+        macros_removed=macros_removed,
+        external_links_removed=external_links_removed,
+        owner_protection_dropped=owner_protection_dropped,
+    )
     body = _ack_body(
-        claim, result, reason=reason, pages_total=pages_total, etag_seen=etag_seen, image=image, output=output
+        claim,
+        result,
+        reason=reason,
+        pages_total=pages_total,
+        etag_seen=etag_seen,
+        image=image,
+        output=output,
+        flags=flags,
     )
     return await _report(client, ACK_PATH, claim, body)
 
