@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-23 abgeschlossen (lokal, ungepusht: ee4e9a4, 59d4d7a); vor 02-24 Owner-Entscheid zu D-02-02 (siehe Blockers)"
+stopped_at: "02-23 abgeschlossen; Quick-Task 261118-hs4 setzt Owner-Entscheid A zu D-02-02 um (lokal, ungepusht: a2a5d59, bb328c5); nächster Schritt 02-24"
 last_updated: "2026-11-18T11:27:54.750Z"
-last_activity: 2026-11-18 -- 02-23 abgeschlossen, refusals.sh und Playwright-Karten (CI-Lauf offen)
+last_activity: 2026-11-18 -- Quick-Task 261118-hs4: keine Benachrichtigung je Ablehnung der Vorprüfung (CI-Lauf offen)
 progress:
   total_phases: 15
   completed_phases: 1
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 23 of 25 in current phase (02-01 bis 02-23 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-23 lokal ungepusht; Container-Läufe von 02-21 und 02-22 und der deploy-harp-Lauf von 02-23 offen bis zum nächsten Push; nächster Schritt 02-24, davor Owner-Entscheid zu D-02-02)
+Plan: 23 of 25 in current phase (02-01 bis 02-23 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-23 lokal ungepusht; Container-Läufe von 02-21 und 02-22 und der deploy-harp-Lauf von 02-23 offen bis zum nächsten Push; Owner-Entscheid A zu D-02-02 vom 18.11. umgesetzt in Quick-Task 261118-hs4; nächster Schritt 02-24)
 Status: Ready to execute
 Last activity: 2026-11-18 -- 02-23 abgeschlossen
 
@@ -141,7 +141,7 @@ None yet.
 - Zertifikat `pii_redaction_backend` beantragt (#1419), noch nicht erteilt
 - Scans und arm64-Tempo ungemessen (Phase 12, 15)
 - Länder-Label-Sätze brauchen juristisches Gegenlesen vor Store (Phase 11)
-- 02-23: D-02-02 gegen Produkt: JobService::toFailed sendet job_failed auch für Ablehnungen der Vorprüfung; refusals.sh Schritt (g) wird voraussichtlich rot. Owner-Entscheid vor dem Push 02-24; dazu erwartet notification.spec.ts render_failed, die Vorprüfung liefert damaged (deferred-items.md)
+- GELÖST 18.11. (Quick-Task 261118-hs4, a2a5d59, bb328c5): Owner-Entscheid A zu D-02-02. JobService::toFailed sendet für die acht Ablehnungsgründe der Vorprüfung (Reason::isPrecheckRefusal) keine Benachrichtigung mehr, echte Fehler benachrichtigen weiter; notification.spec.ts holt job_failed aus target_not_writable und belegt, dass die kaputte PDF (damaged) keine Meldung erzeugt. Beleg erst in CI (PHPUnit, deploy-harp). Zweifelsfälle für den Owner im SUMMARY des Quick-Tasks
 
 ## Deferred Items
 
@@ -160,3 +160,4 @@ Resume file: None
 | ID | Date | Task | Status |
 |----|------|------|--------|
 | 261118-gbl | 2026-11-18 | Fix two broken assertions in ExAppServiceTest (CI eb46ef4 PHP gates red) | done, CI proof pending |
+| 261118-hs4 | 2026-11-18 | No notification for a refusal of the pre-check (D-02-02, owner decision A) | done, CI proof pending |
