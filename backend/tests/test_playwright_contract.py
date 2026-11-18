@@ -88,6 +88,11 @@ GRID: dict[str, tuple[str, tuple[str, ...]]] = {
             "stand-nicht-aktualisiert",
             "sitzung-abgelaufen",
             "bereit-backend-nicht-bereit",
+            # Plan 02-23: a refusal of the pre-check and the signature notice,
+            # both on real runs of the files of ci/make_corpus.py --e2e.
+            "abgelehnt-wrong_type",
+            "signatur-bestaetigen",
+            "signatur-bestaetigt-bereit",
         ),
     ),
     "benachrichtigung": ("notification.spec.ts", ("popover",)),

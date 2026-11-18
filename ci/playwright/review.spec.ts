@@ -3,7 +3,9 @@
 // copy, fetched over WebDAV and rendered in the backend container (surface 4).
 //
 // Real runs for ready (PDF, DOCX, ODT), copy being created and created, file
-// changed, file deleted, download blocked afterwards and every "not
+// changed, file deleted, download blocked afterwards, a refusal of the
+// pre-check with its reason, the signature notice with both buttons (plan
+// 02-23, files of ci/make_corpus.py --e2e) and every "not
 // available" (stranger, group folder ACL, share taken back). The queue, run,
 // failure, expired and polling states are forged on a real job with values of
 // the closed lists only (helpers.forgeState); their real path is ci/flow.sh
@@ -16,12 +18,15 @@
 // var(--color-main-text); 16 px from status card to the next block; no
 // horizontal scrolling at 320 px.
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
 	CANARY,
 	DOCX,
 	FILE_STEMS,
 	ODT,
 	PDF,
+	RESPONSE_TIMEOUT,
 	baseJob,
 	color,
 	contrastRatio,
@@ -39,6 +44,7 @@ import {
 	isFunctional,
 	jobInReview,
 	jobStatus,
+	language,
 	login,
 	occ,
 	projectUser,
@@ -50,6 +56,7 @@ import {
 	share,
 	showPng,
 	sharer,
+	startJob,
 	textContrast,
 	unshare,
 	upload,
@@ -380,6 +387,138 @@ test('Prüfseite: Download nachträglich gesperrt', async ({ page }, testInfo) =
 	} finally {
 		await unshare(owner, shared.id);
 	}
+});
+
+// -- refusal and signature notice (plan 02-23) -----------------------------------------
+
+// The files of ci/make_corpus.py --e2e; ci/refusals.sh wrote them before this
+// suite runs. Both are made of harmless text, the canary is in neither.
+const CORPUS = fileURLToPath(new URL('../out/corpus/', import.meta.url));
+const WRONG_TYPE_FILE = 'wrong_pdf_as_docx.docx';
+const SIGNED_FILE = 'pdf_signed.pdf';
+
+function corpusFile(name: string): Uint8Array {
+	return readFileSync(`${CORPUS}${name}`);
+}
+
+// The catalogue of the installed app by the language ci/seed.sh gave the user.
+const CATALOGUES = { de: 'de_DE', fr: 'fr', 'de-du': 'de' } as const;
+
+/**
+ * A sentence as the user of the project reads it: the English source for an
+ * English user, otherwise its entry in the catalogue the server of this run
+ * ships. No sentence is written down here a second time, and a missing or
+ * untranslated entry fails instead of passing as English.
+ */
+function translated(testInfo: TestInfo, source: string): string {
+	const lang = language(testInfo);
+	if (lang === 'en') {
+		return source;
+	}
+	const root = process.env.NC_ROOT;
+	if (root === undefined || root === '') {
+		throw new Error('NC_ROOT is not set; the catalogues are read from the installed app');
+	}
+	const catalogue = JSON.parse(readFileSync(`${root}/apps/pii_redaction/l10n/${CATALOGUES[lang]}.json`, 'utf8')) as { translations?: Record<string, unknown> };
+	const text = catalogue.translations?.[source];
+	if (typeof text !== 'string' || text === '' || text === source) {
+		throw new Error(`the catalogue ${CATALOGUES[lang]} has no translation of: ${source}`);
+	}
+	return text;
+}
+
+test('Prüfseite: Ablehnung mit Grund und Abhilfe (falsch benannte Datei)', async ({ page }, testInfo) => {
+	const who = projectUser(testInfo);
+	const folder = workFolder(testInfo, 'refused');
+	await davFreshFolder(who, folder);
+	const id = await upload(who, folder, WRONG_TYPE_FILE, corpusFile(WRONG_TYPE_FILE));
+	const answer = await startJob(who, id);
+	expect(answer.code).toBe(201);
+	expect(answer.jobId).not.toBeNull();
+	const jobId = answer.jobId as number;
+	// The other ends are targets too, so a wrong one fails by name at once.
+	const ended = await waitFor(who, jobId, ['failed', 'review', 'confirm']);
+	expect(ended.status).toBe('failed');
+	expect(ended.reason).toBe('wrong_type');
+
+	await login(page, who);
+	expect(await openReview(page, jobId)).toBe(200);
+	await expect(page.locator(`${STATE} .pii-note__title`)).toHaveText(translated(testInfo, 'The content does not match the file type'));
+	await expect(page.locator(`${STATE} .pii-note__text`).first()).toHaveText(
+		translated(testInfo, 'Save the file again as PDF, DOCX or ODT and analyse that.'),
+	);
+	await expect(page.locator('#pii-review img')).toHaveCount(0);
+	await expect(page.locator('#pii-placeholder')).toHaveCount(0);
+	await expectCardText(page);
+	await expectNoCanary(page);
+	await screenshot(page, 'pruefseite', 'abgelehnt-wrong_type', testInfo);
+});
+
+test('Prüfseite: signierte PDF wartet auf die Bestätigung, Fortfahren startet die Analyse', async ({ page }, testInfo) => {
+	const who = projectUser(testInfo);
+	const folder = workFolder(testInfo, 'signed');
+	await davFreshFolder(who, folder);
+	const id = await upload(who, folder, SIGNED_FILE, corpusFile(SIGNED_FILE));
+	const answer = await startJob(who, id);
+	expect(answer.code).toBe(201);
+	expect(answer.jobId).not.toBeNull();
+	const jobId = answer.jobId as number;
+	const waiting = await waitFor(who, jobId, ['confirm', 'review', 'failed']);
+	expect(waiting.status).toBe('confirm');
+	expect(waiting.signatureConfirmed).toBe(false);
+
+	await login(page, who);
+	expect(await openReview(page, jobId)).toBe(200);
+	await expect(page.locator(`${STATE} .pii-note__title`)).toHaveText(translated(testInfo, 'The PDF is signed'));
+	await expect(page.locator(`${STATE} .pii-note__text`).first()).toHaveText(
+		translated(testInfo, 'The signature is lost when redacting. The original stays signed. Continue?'),
+	);
+	const proceed = page.locator('#pii-confirm');
+	const cancel = page.locator('#pii-decline');
+	await expect(proceed).toHaveText(translated(testInfo, 'Continue'));
+	await expect(cancel).toHaveText(translated(testInfo, 'Cancel'));
+	await expect(proceed).toBeEnabled();
+	await expect(cancel).toBeEnabled();
+	// Nothing of the file is shown before the answer (D-02-04).
+	await expect(page.locator('#pii-review img')).toHaveCount(0);
+	await expect(page.locator('#pii-placeholder')).toHaveCount(0);
+	await expectCardText(page);
+	await expectNoCanary(page);
+
+	// Both buttons take the keyboard focus, one Tab apart, in reading order.
+	await proceed.focus();
+	await expect(proceed).toBeFocused();
+	await page.keyboard.press('Tab');
+	await expect(cancel).toBeFocused();
+	await page.keyboard.press('Shift+Tab');
+	await expect(proceed).toBeFocused();
+	await screenshot(page, 'pruefseite', 'signatur-bestaetigen', testInfo);
+
+	const confirmRoute = `/review/${jobId}/confirm`;
+	const confirmed = page.waitForResponse(
+		(response) => new URL(response.url()).pathname.endsWith(confirmRoute) && response.request().method() === 'POST',
+		{ timeout: RESPONSE_TIMEOUT },
+	);
+	await proceed.click();
+	expect((await confirmed).status()).toBe(202);
+	// Focus moves to the status area, the question is gone (UI-SPEC, Fokuspunkte).
+	await expect(page.locator(STATE)).toBeFocused();
+	await expect(proceed).toHaveCount(0);
+	await expect(cancel).toHaveCount(0);
+	// Back in the queue; a fast backend may already be past it.
+	const after = await jobStatus(who, jobId);
+	expect(after.code).toBe(200);
+	expect(['queued', 'analyzing', 'review']).toContain(after.body?.status);
+
+	const done = await waitFor(who, jobId, ['review', 'failed']);
+	expect(done.status).toBe('review');
+	expect(done.signatureConfirmed).toBe(true);
+	// The open page follows by its own polling, without a reload.
+	await expect(page.locator('#pii-review img')).toBeVisible({ timeout: 30_000 });
+	await expect(page.locator('#pii-placeholder')).toBeEnabled();
+	await expectCardText(page);
+	await expectNoCanary(page);
+	await screenshot(page, 'pruefseite', 'signatur-bestaetigt-bereit', testInfo);
 });
 
 // -- not available ---------------------------------------------------------------------
