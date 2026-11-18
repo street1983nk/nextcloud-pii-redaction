@@ -48,6 +48,35 @@
 			</p>
 		</div>
 
+		<template v-if="isConfirm">
+			<div class="pii-review__actions">
+				<NcButton id="pii-confirm"
+					variant="primary"
+					:disabled="deciding !== null"
+					@click="decide('confirm')">
+					<template v-if="deciding === 'confirm'" #icon>
+						<NcLoadingIcon :size="20" />
+					</template>
+					{{ deciding === 'confirm' ? t('pii_redaction', 'Saving…') : t('pii_redaction', 'Continue') }}
+				</NcButton>
+				<NcButton id="pii-decline"
+					variant="secondary"
+					:disabled="deciding !== null"
+					@click="decide('decline')">
+					<template v-if="deciding === 'decline'" #icon>
+						<NcLoadingIcon :size="20" />
+					</template>
+					{{ deciding === 'decline' ? t('pii_redaction', 'Saving…') : t('pii_redaction', 'Cancel') }}
+				</NcButton>
+			</div>
+
+			<NcNoteCard v-if="decideFailed" type="error" show-alert>
+				<p class="pii-note__text">
+					{{ t('pii_redaction', 'The answer could not be saved. Try again.') }}
+				</p>
+			</NcNoteCard>
+		</template>
+
 		<NcNoteCard v-if="pollFailed && !sessionExpired" type="warning">
 			<p class="pii-note__text">
 				{{ t('pii_redaction', 'Status not updated. Retrying.') }}
@@ -79,6 +108,12 @@
 				</p>
 				<p class="pii-note__text">
 					{{ t('pii_redaction', 'No search for personal data yet. The copy contains nothing from the original.') }}
+				</p>
+			</NcNoteCard>
+
+			<NcNoteCard v-if="job.macrosRemoved" type="info">
+				<p class="pii-note__text">
+					{{ t('pii_redaction', 'Macros were removed for the analysis. The original stays unchanged.') }}
 				</p>
 			</NcNoteCard>
 
@@ -161,6 +196,8 @@ type Job = {
 	backendReady: boolean
 	outputFileId: number | null
 	outputName: string | null
+	macrosRemoved: boolean
+	signatureConfirmed: boolean
 }
 
 type Card = {
@@ -177,7 +214,9 @@ const props = defineProps({
 // UI-SPEC Fläche 2, Abfrage: every 3 s while open, back off on failures.
 const POLL_MS = 3000
 const BACKOFF_MS = [3000, 6000, 12000, 30000]
-const OPEN = ['queued', 'analyzing', 'approved', 'applying', 'verified']
+// confirm is open (the job is not over) but waits for the user, not for the
+// backend: the page does not poll then (D-02-04).
+const OPEN = ['queued', 'analyzing', 'approved', 'applying', 'verified', 'confirm']
 const COPYING = ['approved', 'applying', 'verified']
 
 const start = props.initial as Record<string, unknown>
@@ -208,6 +247,8 @@ const job = reactive<Job>({
 	backendReady: start.backendReady === true,
 	outputFileId: int(start.outputFileId),
 	outputName: text(start.outputName),
+	macrosRemoved: start.macrosRemoved === true,
+	signatureConfirmed: start.signatureConfirmed === true,
 })
 
 const unavailable = ref(start.state === 'unavailable' || jobId === 0)
@@ -216,6 +257,8 @@ const pollFailed = ref(false)
 const sessionExpired = ref(false)
 const posting = ref(false)
 const postFailed = ref(false)
+const deciding = ref<'confirm' | 'decline' | null>(null)
+const decideFailed = ref(false)
 const imageFailed = ref(false)
 const imageLoading = ref(true)
 const imageRetry = ref(0)
@@ -227,6 +270,7 @@ let stopped = false
 
 const isOpen = computed(() => !unavailable.value && !blocked.value && OPEN.includes(job.status))
 const isReady = computed(() => !unavailable.value && !blocked.value && job.status === 'review')
+const isConfirm = computed(() => isOpen.value && job.status === 'confirm')
 const nameVisible = computed(() => !unavailable.value && job.status !== 'cancelled' && startName !== null)
 const heading = computed(() => nameVisible.value ? startName as string : t('pii_redaction', 'Review'))
 const showMeta = computed(() => !unavailable.value && createdAt !== null)
@@ -246,7 +290,7 @@ const filesLink = computed(() => generateUrl('/apps/files/'))
 
 /** The status line of a waiting or running job, or null. */
 const line = computed<{ title: string, text: string } | null>(() => {
-	if (!isOpen.value) {
+	if (!isOpen.value || job.status === 'confirm') {
 		return null
 	}
 	if (job.status === 'queued') {
@@ -264,6 +308,8 @@ const line = computed<{ title: string, text: string } | null>(() => {
 	switch (job.stage) {
 	case 'fetching':
 		return { title: t('pii_redaction', 'Loading the file'), text: t('pii_redaction', 'The file stays on this server.') }
+	case 'checking':
+		return { title: t('pii_redaction', 'Checking the file'), text: t('pii_redaction', 'A safety check runs before the analysis.') }
 	case 'converting':
 		return { title: t('pii_redaction', 'Converting to PDF'), text: t('pii_redaction', 'Large documents take a little longer.') }
 	case 'rendering':
@@ -287,6 +333,24 @@ function failure(reason: string | null): [string, string] {
 		return [t('pii_redaction', 'Copy not created'), t('pii_redaction', 'The folder of the original is not writable. Analyse again afterwards.')]
 	case 'unsupported_format':
 		return [t('pii_redaction', 'Format not supported'), t('pii_redaction', 'Only PDF, DOCX and ODT can be analysed.')]
+	case 'e2e_encrypted':
+		return [t('pii_redaction', 'The file is end-to-end encrypted'), t('pii_redaction', 'The server cannot read it. If it may be stored unencrypted, analyse a copy from a normal folder.')]
+	case 'encrypted_pdf':
+		return [t('pii_redaction', 'The PDF is password-protected'), t('pii_redaction', 'Remove the password and analyse the file again.')]
+	case 'encrypted_document':
+		return [t('pii_redaction', 'The document is password-protected'), t('pii_redaction', 'Save it without a password and analyse the file again.')]
+	case 'wrong_type':
+		return [t('pii_redaction', 'The content does not match the file type'), t('pii_redaction', 'Save the file again as PDF, DOCX or ODT and analyse that.')]
+	case 'damaged':
+		return [t('pii_redaction', 'The file is damaged'), t('pii_redaction', 'Open it in the original program, save it again and analyse that.')]
+	case 'too_large':
+		return [t('pii_redaction', 'The file is too large to analyse'), t('pii_redaction', 'It exceeds a safety limit. Split it into smaller files or reduce the images.')]
+	case 'too_many_pages':
+		return [t('pii_redaction', 'The document has more than 300 pages'), t('pii_redaction', 'Split it into parts of at most 300 pages and analyse each part.')]
+	case 'unsafe_content':
+		return [t('pii_redaction', 'The file contains unsafe parts'), t('pii_redaction', 'It was not analysed, for protection. Save it as PDF in the original program and analyse that.')]
+	case 'signature_declined':
+		return [t('pii_redaction', 'Analysis cancelled'), t('pii_redaction', 'The signed PDF was not analysed. To redact it, analyse it again and confirm the notice.')]
 	default:
 		return [t('pii_redaction', 'The analysis failed'), t('pii_redaction', 'Analyse the file again. If it persists, tell your administrators.')]
 	}
@@ -312,8 +376,17 @@ const card = computed<Card | null>(() => {
 		}
 	case 'stale':
 		return { type: 'warning', title: t('pii_redaction', 'The file has changed'), text: t('pii_redaction', 'The analysis was for the old version. Analyse the file again.'), link: showFile }
-	case 'cancelled':
+	case 'confirm':
+		return { type: 'warning', title: t('pii_redaction', 'The PDF is signed'), text: t('pii_redaction', 'The signature is lost when redacting. The original stays signed. Continue?'), link: null }
+	case 'cancelled': {
+		// A declined signature notice ends the job too, but the file is still
+		// there: its own text, not "The file was deleted" (02-TEXTS.md).
+		if (job.reason === 'signature_declined') {
+			const [title, sentence] = failure(job.reason)
+			return { type: 'info', title, text: sentence, link: showFile }
+		}
 		return { type: 'info', title: t('pii_redaction', 'The file was deleted'), text: t('pii_redaction', 'The analysis was stopped.'), link: goFiles }
+	}
 	case 'expired':
 		return { type: 'info', title: t('pii_redaction', 'This review has expired'), text: t('pii_redaction', 'Analyse the file again.'), link: null }
 	case 'failed': {
@@ -359,6 +432,8 @@ function apply(data: Record<string, unknown>): void {
 	job.backendReady = data.backendReady === true
 	job.outputFileId = int(data.outputFileId)
 	job.outputName = text(data.outputName)
+	job.macrosRemoved = data.macrosRemoved === true
+	job.signatureConfirmed = data.signatureConfirmed === true
 	// The status route reports a download block added after the page loaded.
 	if (data.recheck === 'download_blocked') {
 		blocked.value = true
@@ -370,7 +445,8 @@ function schedule(delay: number): void {
 		clearTimeout(timer)
 	}
 	timer = null
-	if (stopped || !isOpen.value || document.visibilityState === 'hidden') {
+	// confirm waits for the user's answer, nothing changes on the server.
+	if (stopped || !isOpen.value || job.status === 'confirm' || document.visibilityState === 'hidden') {
 		return
 	}
 	timer = setTimeout(() => {
@@ -414,7 +490,7 @@ function onVisibility(): void {
 		}
 		return
 	}
-	if (isOpen.value && !stopped) {
+	if (isOpen.value && job.status !== 'confirm' && !stopped) {
 		void poll()
 	}
 }
@@ -446,6 +522,51 @@ async function requestCopy(): Promise<void> {
 		}
 	} finally {
 		posting.value = false
+	}
+}
+
+/**
+ * The answer to the signature notice (D-02-04): confirm sends the job back
+ * into the queue, decline ends it. Only the status word of the answer is
+ * taken over; CSRF stays on through @nextcloud/axios.
+ */
+async function decide(answer: 'confirm' | 'decline'): Promise<void> {
+	if (deciding.value !== null) {
+		return
+	}
+	deciding.value = answer
+	decideFailed.value = false
+	try {
+		const url = answer === 'confirm'
+			? generateUrl('/apps/pii_redaction/review/{jobId}/confirm', { jobId })
+			: generateUrl('/apps/pii_redaction/review/{jobId}/decline', { jobId })
+		const response = await axios.post(url)
+		const status = text((response.data as Record<string, unknown> | null)?.status)
+		job.status = status ?? (answer === 'confirm' ? 'queued' : 'cancelled')
+		if (job.status === 'cancelled') {
+			job.reason = 'signature_declined'
+		}
+		job.stage = null
+		await nextTick()
+		stateRegion.value?.focus()
+		schedule(POLL_MS)
+	} catch (error) {
+		const response = (error as { response?: { status?: number, data?: { reason?: unknown, status?: unknown } } }).response
+		if (response?.status === 404) {
+			unavailable.value = true
+			stopped = true
+		} else if (response?.status === 401) {
+			sessionExpired.value = true
+			stopped = true
+		} else if (response?.data?.reason === 'download_blocked') {
+			blocked.value = true
+		} else if (response?.data?.reason === 'original_changed' || response?.status === 409) {
+			void poll()
+		} else {
+			decideFailed.value = true
+		}
+	} finally {
+		deciding.value = null
 	}
 }
 

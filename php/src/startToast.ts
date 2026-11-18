@@ -56,6 +56,8 @@ function refusal(reason: unknown): [string, ToastType] {
 		return [t('pii_redaction', 'The file can no longer be read. Reload the view.'), ToastType.ERROR]
 	case 'unsupported_format':
 		return [t('pii_redaction', 'Only PDF, DOCX and ODT can be analysed.'), ToastType.ERROR]
+	case 'e2e_encrypted':
+		return [t('pii_redaction', 'End-to-end encrypted files cannot be analysed on the server.'), ToastType.ERROR]
 	default:
 		return [t('pii_redaction', 'The analysis could not start. Try again later.'), ToastType.ERROR]
 	}
