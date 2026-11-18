@@ -9,7 +9,7 @@ deny_connect (jail_layers.py deny-connect) and compares.
     python -I profile_work.py module <child> <args...>   a product child (render, placeholder) as __main__
     python -I profile_work.py precheck <pdf> <docx>       the intake checks of the pre-check
     python -I profile_work.py sanitize <docx> <out>       the sanitizer on a DOCX
-    python -I profile_work.py detect <models root> <work> [<dump every s> [<threads>]]
+    python -I profile_work.py detect <models root> <work> [<dump every s>]
                                                           Presidio with de_core_news_lg and GLiNER2, offline
 
 detect writes <work>/detect-trace.txt (sandbox run of cfb428a: on arm64 it
@@ -24,8 +24,13 @@ cpuinfo: failed to parse the list of present processors"; amd64 extracted in
 0.4 s. So detect also writes a FACTS line (what torch and the kernel say about
 the CPUs, and whether /sys/devices/system/cpu/{present,possible,online} and
 /proc/cpuinfo are readable) and an EXTRACT line (ms of extract_entities).
-<threads> is "-" (unchanged, the product) or "cpu": OMP_NUM_THREADS and
-torch.set_num_threads fixed to os.cpu_count(), a measurement variant only.
+
+Sandbox run of 87f5744 (CI 44221141543): the cause was OMP_THREAD_LIMIT=1
+from SAFE_ENV; without it arm64 extracted in about 230 ms. The product
+environment of detect now carries OMP_NUM_THREADS=<n> from the parent
+instead (child.child_env), and detect and torchbench hand the same count to
+torch right after the import (hardware.apply_worker_threads), as the
+detection child will.
 
     python -I profile_work.py torchbench <work>           torch facts and three timings
 
@@ -73,8 +78,6 @@ DETECT_NAME: Final = "Mustermann"
 SPACY_FOLDER: Final = ("spacy", "de_core_news_lg-3.8.0")
 TRACE_FILE: Final = "detect-trace.txt"
 DUMP_EVERY_S: Final = 60.0
-THREADS_UNCHANGED: Final = "-"
-THREADS_CPU: Final = "cpu"
 CPU_FILES: Final = (
     ("present", "/sys/devices/system/cpu/present"),
     ("possible", "/sys/devices/system/cpu/possible"),
@@ -283,26 +286,22 @@ def cpu_facts() -> str:
     return "FACTS " + " ".join(parts)
 
 
-def thread_count(spec: str) -> int | None:
-    """None for the product setting, the CPU count for "cpu"; anything else is a usage error."""
-    if spec == THREADS_UNCHANGED:
-        return None
-    if spec == THREADS_CPU:
-        return os.cpu_count() or 1
-    raise WorkFailed("usage")
+def apply_threads() -> None:
+    """The thread count of the child environment to torch, as the detection child does it (product helper)."""
+    import torch
+
+    from pii_redaction_backend.resources import hardware
+
+    hardware.apply_worker_threads(torch)
 
 
-def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S, threads: str = THREADS_UNCHANGED) -> None:
+def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S) -> None:
     """Load both detectors from local folders, offline as the detection child will be, and find a name."""
-    count = thread_count(threads)
     use_work_folder_as_temp(work)
-    if count is not None:
-        # Before torch is imported: OpenMP reads it when it loads.
-        os.environ["OMP_NUM_THREADS"] = str(count)
     trace = Trace(work, every_s)
     try:
         trace.mark("start")
-        _detect(models, trace, count)
+        _detect(models, trace)
         trace.mark("done")
     except BaseException as exc:
         trace.mark(f"raised:{type(exc).__name__}")
@@ -311,19 +310,17 @@ def detect(models: Path, work: Path, every_s: float = DUMP_EVERY_S, threads: str
         trace.close()
 
 
-def _detect(models: Path, trace: Trace, threads: int | None = None) -> None:
+def _detect(models: Path, trace: Trace) -> None:
     from pii_redaction_backend import offline
 
     offline.configure()
     trace.mark("offline_configured")
+    apply_threads()
+    trace.mark("threads_set")
     from presidio_analyzer import AnalyzerEngine
     from presidio_analyzer.nlp_engine import SpacyNlpEngine
 
     trace.mark("presidio_imported")
-    if threads is not None:
-        import torch
-
-        torch.set_num_threads(threads)
     trace.line(cpu_facts())
     engine = SpacyNlpEngine(models=[{"lang_code": "de", "model_name": str(models.joinpath(*SPACY_FOLDER))}])
     engine.load()
@@ -488,6 +485,7 @@ def torchbench(work: Path, budget_s: float = BENCH_STEP_S) -> None:
         handle.flush()
         import torch
 
+        apply_threads()
         torch.manual_seed(0)
         for step in BENCH_STEPS:
             line, still_running = bench_step(step, budget_s)
@@ -509,8 +507,6 @@ def work(argv: list[str]) -> None:
         detect(Path(argv[1]), Path(argv[2]))
     elif len(argv) == 4 and argv[0] == "detect":
         detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]))
-    elif len(argv) == 5 and argv[0] == "detect":
-        detect(Path(argv[1]), Path(argv[2]), _seconds(argv[3]), argv[4])
     elif len(argv) == 2 and argv[0] == "torchbench":
         torchbench(Path(argv[1]))
     else:

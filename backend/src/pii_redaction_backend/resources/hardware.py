@@ -18,13 +18,15 @@ unreadable or garbled file becomes None for the field it feeds, and ``detect``
 never raises. It logs nothing, neither paths nor values.
 """
 
+import contextlib
 import math
 import os
 import platform
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Protocol
 
 CGROUP_ROOT: Final = Path("/sys/fs/cgroup")
 MEMINFO: Final = Path("/proc/meminfo")
@@ -218,3 +220,62 @@ def detect(
         architecture=_call_machine(machine),
         cgroup=cgroup,
     )
+
+
+# -- the thread count of the detection worker (plan 02-16) ------------------------------------
+
+# torch.set_num_threads from cpu.max, default cap 2 (research STACK.md). The
+# parent computes it, because the jailed child cannot read /sys, and hands it
+# to the child as THREADS_ENV (workers/child.py child_env); the child gives the
+# same number to OpenMP (the variable) and to torch (apply_worker_threads), so
+# both plan with one count. Sandbox run 44221141543 (arm64): with
+# OMP_THREAD_LIMIT=1 next to torch's own count of 4, detect never finished,
+# without it the extraction took about 230 ms.
+WORKER_THREADS_CAP: Final = 2
+THREADS_ENV: Final = "OMP_NUM_THREADS"
+_THREADS_TEXT: Final = re.compile(r"[1-9][0-9]{0,2}")
+_THREADS_MAX: Final = 256
+
+
+def worker_threads(found: Hardware | None = None, cap: int = WORKER_THREADS_CAP) -> int:
+    """The thread count of the detection worker: the whole cores of the container, at least 1, at most cap.
+
+    cores is min(affinity, cpu.max quota) from detect(); a quota below one
+    core still gets one thread, nothing known gets one thread.
+    """
+    reading = detect() if found is None else found
+    whole = reading.cores_whole
+    return max(1, min(cap, whole if whole is not None else 1))
+
+
+def threads_from_env(environ: Mapping[str, str]) -> int | None:
+    """THREADS_ENV as set by the parent, or None when it is missing or not a plain small number."""
+    raw = environ.get(THREADS_ENV, "")
+    if not _THREADS_TEXT.fullmatch(raw):
+        return None
+    value = int(raw)
+    return value if value <= _THREADS_MAX else None
+
+
+class TorchThreads(Protocol):
+    """The two thread setters of torch; a protocol, so this module never imports torch."""
+
+    def set_num_threads(self, count: int, /) -> None: ...
+
+    def set_num_interop_threads(self, count: int, /) -> None: ...
+
+
+def apply_worker_threads(torch: TorchThreads, environ: Mapping[str, str] = os.environ) -> int | None:
+    """Give torch the count of THREADS_ENV, intra-op and inter-op; None, and nothing changed, without one.
+
+    Call it once, right after torch is imported and before any tensor work:
+    torch refuses a new inter-op count once inter-op work has started
+    (RuntimeError), and then keeps its own; the intra-op count still applies.
+    """
+    count = threads_from_env(environ)
+    if count is None:
+        return None
+    torch.set_num_threads(count)
+    with contextlib.suppress(RuntimeError):
+        torch.set_num_interop_threads(count)
+    return count

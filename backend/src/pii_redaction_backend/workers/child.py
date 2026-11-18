@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
+from pii_redaction_backend.resources import hardware
 from pii_redaction_backend.sandbox.jail import jail_argv
 from pii_redaction_backend.sandbox.profiles import profile_for
 from pii_redaction_backend.sandbox.reaper import reap_group
@@ -40,6 +41,12 @@ SAFE_ENV: Final[dict[str, str]] = {
     "PATH": "/usr/bin:/bin",
     "HOME": "/tmp",  # noqa: S108 - the child's home is a throwaway, its profile lives below the job folder
     "LANG": "C.UTF-8",
+    # One OpenMP thread for every child but detect (child_env). Tesseract
+    # (ocr) is the OpenMP user it is meant for: one thread per page call is
+    # its documented setting and keeps a page from taking every core
+    # (research ARCHITECTURE.md). soffice, render, placeholder, precheck and
+    # sanitize have no known OpenMP user; there it caps nothing and stays, so
+    # their environment does not change (plan 02-16).
     "OMP_THREAD_LIMIT": "1",
     # One malloc arena per process (Pitfall 8); mallopt in the jail would not
     # survive execv, the environment does.
@@ -60,6 +67,9 @@ SOFFICE_ENV: Final = frozenset({"TMPDIR"})
 # PROFILE_ROOT); a value is that folder or a plain folder below it: no dots,
 # so no "..", no hidden name, nothing outside.
 SOFFICE_PROFILE_VALUE: Final = re.compile(r"/tmp/lo-[0-9]+(?:/[A-Za-z0-9_-]+)*")  # noqa: S108 - a pattern, no file
+
+# The torch child: its environment carries a thread count instead of OMP_THREAD_LIMIT (child_env).
+DETECT_PROFILE: Final = "detect"
 
 # The diagnosis of a failed child: how much stderr is kept while it runs, and
 # how much of it may reach the log. soffice prints several harmless warnings
@@ -123,13 +133,32 @@ async def _keep_tail(stream: asyncio.StreamReader | None, kept: bytearray) -> No
         del kept[: max(0, len(kept) - STDERR_KEEP_BYTES)]
 
 
-def child_env(extra: dict[str, str] | None = None, *, profile: str | None = None) -> dict[str, str]:
+def child_env(
+    extra: dict[str, str] | None = None, *, profile: str | None = None, threads: int | None = None
+) -> dict[str, str]:
     """SAFE_ENV plus allowlisted extras; any other key or value is a programming error.
 
     The SOFFICE_ENV keys pass only for the soffice profile and only with a
     value inside its job profile (SOFFICE_PROFILE_VALUE).
+
+    detect gets no OMP_THREAD_LIMIT and instead hardware.THREADS_ENV with its
+    thread count: threads, or else hardware.worker_threads() read here in the
+    parent, since the jailed child cannot read cpu.max. With OMP_THREAD_LIMIT=1
+    torch still planned with every core and detect never finished on arm64
+    (sandbox run 44221141543, deferred-items 02-16). No caller can set the
+    variable through extra, and no other profile takes a thread count.
     """
     env = dict(SAFE_ENV)
+    if profile == DETECT_PROFILE:
+        count = hardware.worker_threads() if threads is None else threads
+        if not 1 <= count <= hardware.WORKER_THREADS_CAP:
+            msg = f"the detect child takes 1 to {hardware.WORKER_THREADS_CAP} threads"
+            raise ValueError(msg)
+        del env["OMP_THREAD_LIMIT"]
+        env[hardware.THREADS_ENV] = str(count)
+    elif threads is not None:
+        msg = "only the detect child takes a thread count"
+        raise ValueError(msg)
     for key, value in (extra or {}).items():
         if key in SOFFICE_ENV and profile == "soffice":
             if not SOFFICE_PROFILE_VALUE.fullmatch(value):

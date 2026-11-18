@@ -312,3 +312,51 @@ def test_the_soffice_tail_keeps_twelve_lines() -> None:
     assert lines[-1] == "Fontconfig warning 29"
     # The default stays five lines for every other child.
     assert len(child.diagnostic_tail(raw).split(" | ")) == child.TAIL_LINES == 5
+
+
+# -- the thread environment per child (plan 02-16) ----------------------------------------------
+
+
+def test_detect_gets_a_thread_count_and_no_omp_limit() -> None:
+    env = child.child_env(profile="detect", threads=2)
+    assert "OMP_THREAD_LIMIT" not in env
+    assert env["OMP_NUM_THREADS"] == "2"
+    # Everything else is SAFE_ENV unchanged.
+    assert {key: value for key, value in env.items() if key != "OMP_NUM_THREADS"} == {
+        key: value for key, value in child.SAFE_ENV.items() if key != "OMP_THREAD_LIMIT"
+    }
+    assert child.child_env(profile="detect", threads=1)["OMP_NUM_THREADS"] == "1"
+
+
+def test_detect_reads_the_count_in_the_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[int] = []
+
+    def fake() -> int:
+        seen.append(1)
+        return 2
+
+    monkeypatch.setattr(child.hardware, "worker_threads", fake)
+    assert child.child_env(profile="detect")["OMP_NUM_THREADS"] == "2"
+    assert seen == [1]
+
+
+@pytest.mark.parametrize("count", [0, -1, 3, 64])
+def test_detect_refuses_a_count_outside_one_to_the_cap(count: int) -> None:
+    with pytest.raises(ValueError, match="threads"):
+        child.child_env(profile="detect", threads=count)
+
+
+@pytest.mark.parametrize("profile", ["render", "placeholder", "precheck", "sanitize", "soffice", "ocr", None])
+def test_every_other_child_keeps_one_openmp_thread_and_no_count(profile: str | None) -> None:
+    env = child.child_env(profile=profile)
+    assert env["OMP_THREAD_LIMIT"] == "1"
+    assert "OMP_NUM_THREADS" not in env
+    with pytest.raises(ValueError, match="only the detect child"):
+        child.child_env(profile=profile, threads=1)
+
+
+@pytest.mark.parametrize("profile", ["detect", "ocr", "render", None])
+def test_no_caller_hands_a_thread_variable_through_extra(profile: str | None) -> None:
+    for key in ("OMP_NUM_THREADS", "OMP_THREAD_LIMIT"):
+        with pytest.raises(ValueError, match="not allowed"):
+            child.child_env({key: "8"}, profile=profile)

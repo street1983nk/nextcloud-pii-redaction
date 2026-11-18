@@ -214,3 +214,111 @@ def test_hardware_never_raises_on_an_empty_tree(tmp_path: Path) -> None:
     found = hardware.detect(cgroup_root=tmp_path / "none", meminfo=tmp_path / "none", cpu_count=broken)
 
     assert (found.cgroup, found.cores, found.memory_limit_bytes) == ("none", None, None)
+
+
+# -- the thread count of the detection worker (plan 02-16) ------------------------------------
+
+
+def _threads(tmp_path: Path, cpu_max: str | None, affinity: int | None, cap: int = hardware.WORKER_THREADS_CAP) -> int:
+    root = tmp_path / "cg"
+    root.mkdir(exist_ok=True)
+    (root / "memory.max").write_text("max\n", encoding="ascii")
+    if cpu_max is not None:
+        (root / "cpu.max").write_text(f"{cpu_max}\n", encoding="ascii")
+
+    def count() -> int | None:
+        return affinity
+
+    found = hardware.detect(cgroup_root=root, meminfo=tmp_path / "none", cpu_count=count)
+    return hardware.worker_threads(found, cap)
+
+
+@pytest.mark.parametrize(
+    ("cpu_max", "affinity", "expected"),
+    [
+        ("max 100000", 4, 2),  # no quota: the affinity, capped at 2
+        ("max 100000", 1, 1),  # one core in the cpu set
+        ("200000 100000", 8, 2),  # two cores of quota
+        ("100000 100000", 8, 1),  # one core of quota
+        ("150000 100000", 8, 1),  # 1.5 cores: whole cores only
+        ("50000 100000", 8, 1),  # half a core still gets one thread
+        ("0 100000", 8, 2),  # garbage quota: as if there were none
+        (None, 4, 2),  # no cpu.max at all: the affinity, capped
+        (None, None, 1),  # nothing known: one thread
+    ],
+)
+def test_worker_threads_from_cpu_max_and_affinity(
+    tmp_path: Path, cpu_max: str | None, affinity: int | None, expected: int
+) -> None:
+    assert _threads(tmp_path, cpu_max, affinity) == expected
+
+
+def test_worker_threads_cap(tmp_path: Path) -> None:
+    assert hardware.WORKER_THREADS_CAP == 2
+    assert _threads(tmp_path, "300000 100000", 8, cap=4) == 3
+    assert _threads(tmp_path, "max 100000", 8, cap=4) == 4
+    assert _threads(tmp_path, "max 100000", 8, cap=1) == 1
+
+
+def test_worker_threads_default_reads_this_machine() -> None:
+    assert 1 <= hardware.worker_threads() <= hardware.WORKER_THREADS_CAP
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("1", 1),
+        ("2", 2),
+        ("256", 256),
+        ("257", None),
+        ("0", None),
+        ("02", None),
+        ("", None),
+        ("-1", None),
+        (" 2", None),
+        ("2 ", None),
+        ("٢", None),
+        ("two", None),
+    ],
+)
+def test_threads_from_env_takes_only_a_plain_small_number(raw: str, expected: int | None) -> None:
+    assert hardware.threads_from_env({"OMP_NUM_THREADS": raw}) == expected
+
+
+def test_threads_from_env_without_the_variable() -> None:
+    assert hardware.threads_from_env({}) is None
+    assert hardware.threads_from_env({"OMP_THREAD_LIMIT": "1"}) is None
+
+
+class _FakeTorch:
+    def __init__(self, *, interop_started: bool = False) -> None:
+        self.calls: list[tuple[str, int]] = []
+        self.interop_started = interop_started
+
+    def set_num_threads(self, count: int, /) -> None:
+        self.calls.append(("intra", count))
+
+    def set_num_interop_threads(self, count: int, /) -> None:
+        if self.interop_started:
+            msg = "Error: cannot set number of interop threads after parallel work has started"
+            raise RuntimeError(msg)
+        self.calls.append(("interop", count))
+
+
+def test_apply_worker_threads_sets_intra_and_interop() -> None:
+    torch = _FakeTorch()
+    assert hardware.apply_worker_threads(torch, {"OMP_NUM_THREADS": "2"}) == 2
+    assert torch.calls == [("intra", 2), ("interop", 2)]
+
+
+def test_apply_worker_threads_keeps_the_intra_count_when_interop_is_too_late() -> None:
+    torch = _FakeTorch(interop_started=True)
+    assert hardware.apply_worker_threads(torch, {"OMP_NUM_THREADS": "1"}) == 1
+    assert torch.calls == [("intra", 1)]
+
+
+def test_apply_worker_threads_changes_nothing_without_a_count() -> None:
+    torch = _FakeTorch()
+    assert hardware.apply_worker_threads(torch, {}) is None
+    assert hardware.apply_worker_threads(torch, {"OMP_NUM_THREADS": "many"}) is None
+    assert torch.calls == []

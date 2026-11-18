@@ -43,17 +43,18 @@ the lasting checks:
         (on a timeout tail= holds state, threads, cpu_s, wchan, top_threads, stderr= and trace= of the child)
     ZOMBIES after_job=<zombies of the job group after convert()> pgrp=<groups> other_uid_zombies=<n>
         subreaper=<ja|nein>   (a gate: after_job=0)
-    DETECT-STACK name=<variant> dump=<i>/<n> at=<0:00:30|0:01:00|0:01:30|harness> threads=<n>
+    DETECT-STACK name=<variant> dump=<i>/<n> at=<0:00:15|0:00:30|0:00:45|harness> threads=<n>
         stacks=<thread < module:line func < ... || ...>   (one per stack dump of a variant run)
     TORCH-FACTS env=<unjailed|jailed-product> arch= ok= result= torch= aten_threads= aten_interop=
         omp_max_threads= mkl_max_threads= hw_concurrency= backend= openmp= mkldnn_version= num_threads= interop=
         mkldnn= acl= config_acl= mkl= omp_avail= cpu_cap= omp_thread_limit= omp_num_threads=
         matmul512_x20_ms= score_queries_x20_ms= score_queries_first_ms= score_queries_ftz_x20_ms=
         score_queries_ftz_first_ms= ftz= tail=   (a measurement; ms=timeout for a step past BENCH_STEP_S)
-    DETECT-VARIANT name=<unjailed|jailed-sys-cpu-read|jailed-threads-cpu|jailed-product|unjailed-no-omp-limit|
-        jailed-product-no-omp-limit> ok=<ja|nein>
+    DETECT-VARIANT name=<unjailed|jailed-product|control-omp-limit-1> ok=<ja|nein>
         ms_extract=<ms|-> threads=<torch threads> cpu_cap=<...> interop= cpu_count= affinity= present= possible=
-        online= cpuinfo= omp_num_threads= omp_thread_limit= result=<word> tail=<...>   (a measurement)
+        online= cpuinfo= omp_num_threads= omp_thread_limit= result=<word> tail=<...>
+        (a gate for unjailed and jailed-product: done within 60 s, name found, extract <= 5000 ms;
+        control-omp-limit-1 is a negative control, a measurement)
 
 Risks of the template (owner 17.11., "allen Risiken nachgehen"): R1 does the
 copy start without a restart (SOFFICE-STARTS product n=1, a gate; the fresh
@@ -1004,6 +1005,12 @@ async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> 
 # Stands for the fresh output folder of one run in the arguments of a work.
 OUT = "{out}"
 JAILS = ("product", "deny")
+# Profiles that still keep connect() but whose deny-connect run must work too:
+# detect did on amd64 in the sandbox run of 87f5744 (CI 44221141543, ok=ja,
+# only events=socket.__new__ from the urllib3 import) and hung on arm64 only
+# through OMP_THREAD_LIMIT=1, now gone from its environment. ocr stays a
+# measurement until Tesseract is in the image.
+DENY_GATED = ("detect",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1079,8 +1086,16 @@ def really_ran(run: Mapping[str, object]) -> bool:
 # in 44 s), so 300 s is 15 times that; arm64 failed at 900 s anyway, and with a
 # stack every DETECT_DUMP_EVERY_S the dumps show whether it moves. Both runs
 # together then take at most 10 instead of 30 minutes.
-DETECT_TIMEOUT_S = 300.0
-DETECT_DUMP_EVERY_S = 60.0
+#
+# Sandbox run of 87f5744 (CI 44221141543): the hang was OMP_THREAD_LIMIT=1;
+# with the fixed detect environment (child.child_env) a detect run is a gate
+# with DETECT_TIMEOUT_S as its budget, the whole child from start to result
+# line, model load included. Measured in that run without the limit: about
+# 12.5 s per run on arm64 and 12.2 s on amd64 (MARK done; GLiNER2 load about
+# 6 to 7 s of it, extraction 0.14 to 0.23 s). 60 s is about five times that and
+# still a quarter of what one hung run used to cost.
+DETECT_TIMEOUT_S = 60.0
+DETECT_DUMP_EVERY_S = 15.0
 DUMP_SETTLE_S = 2.0
 HARNESS_MARK = "HARNESS dump on timeout"
 TRACE_FRAMES = 12
@@ -1342,7 +1357,8 @@ async def test_each_profile_does_its_work_with_connect_denied(
     profile and in the same jail with deny_connect, a measurement for R2; a
     switch is only safe where product_ok=ja and ok=ja. For every run the gate
     is that it really ran (a result line, no jail failure), so a broken jail
-    or driver cannot pass as a measurement.
+    or driver cannot pass as a measurement. The product run of every work
+    must work; for the profiles in DENY_GATED the deny-connect run as well.
     """
     models = Path(os.environ.get("PII_MODELS", "/models"))
     works = profile_works(
@@ -1384,6 +1400,9 @@ async def test_each_profile_does_its_work_with_connect_denied(
                 f"PROFILE-PRODUCT profile={work.profile} work={work.name} "
                 f"result={product['result']} tail={product['tail'] or '-'}"
             )
+            failed.append(f"{work.profile}/{work.name}")
+        if work.profile in DENY_GATED and "deny" in runs and not runs["deny"]["ok"]:
+            failed.append(f"{work.profile}/{work.name}/deny")
         measured[f"{work.profile}/{work.name}"] = runs
         not_run += [f"{work.name}/{build}" for build, run in runs.items() if not really_ran(run)]
     with capsys.disabled():
@@ -1393,36 +1412,44 @@ async def test_each_profile_does_its_work_with_connect_denied(
     record_measurement("profile_deny_connect", measured)
     report = "\n".join(lines)
     assert not_run == [], report
-    # The profiles that refuse connect() in the product still do their work.
+    # Every product run does its work; detect also with connect() refused.
     assert failed == [], report
 
 
-# -- detect on arm64: measurement variants (sandbox run of 335a80f) ----------------------------
+# -- detect on every architecture: a gate in fixed time, and one negative control -------------
 
-# arm64 stopped after gliner_loaded for 300 s, every stack in gliner2
-# score_queries, one thread busy, stderr "Error in cpuinfo: failed to parse
-# the list of present processors"; amd64 extracted in 0.4 s. Four runs of the
-# same detect work, on both architectures, each a DETECT-VARIANT line and no
-# gate beyond "it really ran": (a) without any jail, (b) the product jail
-# plus a Landlock read right on /sys/devices/system/cpu (a diagnosis variant
-# through jail_layers.py, never a product rule), (c) the product jail with
-# OMP_NUM_THREADS and torch.set_num_threads fixed to os.cpu_count(), (d) the
-# product jail unchanged. 120 s each, so a hang costs at most eight minutes.
+# History (deferred-items 02-16): arm64 detect hung in gliner2 score_queries
+# (sandbox runs cfb428a, 335a80f, c2ac178), in the product jail, with /sys
+# readable and without any jail alike. Sandbox run of 87f5744 (CI
+# 44221141543) found the cause: OMP_THREAD_LIMIT=1 from SAFE_ENV. With it
+# every run hung for its whole limit on arm64, even a 512x512 matmul in
+# torchbench, while torch reported aten_threads=4 and omp_max_threads=4;
+# without it arm64 extracted in 212 ms unjailed and 231 ms in the product
+# jail, amd64 in 137 and 143 ms (about 230 ms with the limit).
 #
-# Sandbox run of c2ac178 (CI 44126012119): amd64 extracted in about 230 ms in
-# all four; arm64 hung 120 s in all four, the unjailed one too (cpuinfo=ok,
-# /sys readable), one thread at 100 % CPU, cpu_cap=SVE128. Jail and /sys are
-# out. Common to all: OMP_THREAD_LIMIT=1 from SAFE_ENV. Two more variants
-# without it, (e) unjailed and (f) the product jail; their environment is
-# SAFE_ENV minus OMP_THREAD_LIMIT, nothing else. A hang there costs two more
-# times 120 s. Every variant dumps the stacks of all threads every
-# VARIANT_DUMP_EVERY_S (30, 60, 90 s, and once more from the harness at
-# 120 s), each dump a DETECT-STACK line.
-VARIANT_TIMEOUT_S = 120.0
-VARIANT_DUMP_EVERY_S = 30.0
+# Now the product environment of detect has no OMP_THREAD_LIMIT and
+# OMP_NUM_THREADS=<n> from the parent (child.child_env), and the work hands
+# n to torch. (a) unjailed and (b) the product jail with that environment
+# are a gate on both architectures: the run ends within DETECT_TIMEOUT_S
+# (start to result line, model load included), finds the name (the work
+# fails with presidio_missed or gliner_missed otherwise) and extracts within
+# EXTRACT_BUDGET_MS. (c) is the negative control: the product jail with
+# OMP_THREAD_LIMIT=1 added again, CONTROL_TIMEOUT_S, no gate. It shows the
+# fix is what makes the difference: arm64 is expected to hang there, amd64
+# to finish. The diagnosis variants of c2ac178 (Landlock read on
+# /sys/devices/system/cpu, threads fixed to the CPU count) and the runs with
+# the limit are gone: on arm64 they cost four times 120 s and no longer
+# answer a question.
+VARIANT_TIMEOUT_S = DETECT_TIMEOUT_S
+# The control: model load takes about 12.5 s, so 45 s separates finishing
+# from hanging and caps the cost of the expected arm64 hang at 45 s.
+CONTROL_TIMEOUT_S = 45.0
+VARIANT_DUMP_EVERY_S = DETECT_DUMP_EVERY_S
+# About 20 times the arm64 extraction of 87f5744 (231 ms with four threads);
+# two threads at most double it.
+EXTRACT_BUDGET_MS = 5000
 STACK_FRAMES = 7
 STACK_CHARS = 2500
-SYS_CPU = "/sys/devices/system/cpu"
 VARIANT_TAIL_CHARS = 1500
 FACT_KEYS = (
     "interop",
@@ -1439,30 +1466,45 @@ FACT_KEYS = (
 
 @dataclass(frozen=True, slots=True)
 class DetectVariant:
-    """One way to run the detect work: its jail, its thread setting (profile_work.py detect <threads>), its env."""
+    """One way to run the detect work: its jail, whether OMP_THREAD_LIMIT=1 is added back, gate or control."""
 
     name: str
     jail: str
-    threads: str = "-"
-    omp_limit: bool = True
+    omp_limit: bool = False
+    gated: bool = True
+
+    @property
+    def timeout_s(self) -> float:
+        return VARIANT_TIMEOUT_S if self.gated else CONTROL_TIMEOUT_S
 
 
 DETECT_VARIANTS = (
     DetectVariant("unjailed", "none"),
-    DetectVariant("jailed-sys-cpu-read", "sys-cpu"),
-    DetectVariant("jailed-threads-cpu", "product", "cpu"),
     DetectVariant("jailed-product", "product"),
-    DetectVariant("unjailed-no-omp-limit", "none", omp_limit=False),
-    DetectVariant("jailed-product-no-omp-limit", "product", omp_limit=False),
+    DetectVariant("control-omp-limit-1", "product", omp_limit=True, gated=False),
 )
 
 
 def variant_env(variant: DetectVariant) -> dict[str, str]:
-    """The child environment of detect; without OMP_THREAD_LIMIT for a variant with omp_limit=False."""
+    """The product environment of detect; the control gets OMP_THREAD_LIMIT=1 on top, nothing else."""
     env = child.child_env(profile="detect")
-    if not variant.omp_limit:
-        env.pop("OMP_THREAD_LIMIT", None)
+    if variant.omp_limit:
+        env["OMP_THREAD_LIMIT"] = "1"
     return env
+
+
+def gate_failure(variant: DetectVariant, run: Mapping[str, object], facts: Mapping[str, str]) -> str | None:
+    """Why a gated variant fails the gate, or None: not ok (timeout, a miss, a crash) or a slow extraction."""
+    if not variant.gated:
+        return None
+    if not run["ok"]:
+        return f"{variant.name}: {str(run['result']).partition(' events=')[0]}"
+    ms = facts.get("ms_extract", "-")
+    if not ms.isdigit():
+        return f"{variant.name}: no EXTRACT line"
+    if int(ms) > EXTRACT_BUDGET_MS:
+        return f"{variant.name}: extract {ms} ms > {EXTRACT_BUDGET_MS} ms"
+    return None
 
 
 def stack_lines(name: str, text: str) -> list[str]:
@@ -1483,15 +1525,12 @@ def stack_lines(name: str, text: str) -> list[str]:
 
 
 def variant_argv(variant: DetectVariant, models: Path, out: Path) -> list[str]:
-    """The command of one variant; sys-cpu is the product jail of detect plus read=SYS_CPU through the driver."""
-    argv = work_argv("detect", str(models), str(out), str(VARIANT_DUMP_EVERY_S), variant.threads)
+    """The command of one variant: the detect work alone or in the product jail of detect."""
+    argv = work_argv("detect", str(models), str(out), str(VARIANT_DUMP_EVERY_S))
     if variant.jail == "none":
         return argv
-    product = jail_argv("detect", argv, read=(str(models),), write=(str(out),))
     if variant.jail == "product":
-        return product
-    if variant.jail == "sys-cpu":
-        return [sys.executable, "-I", str(DRIVER), "variant", f"read={SYS_CPU},seccomp", *product[4:]]
+        return jail_argv("detect", argv, read=(str(models),), write=(str(out),))
     msg = f"unknown jail {variant.jail!r}"
     raise ValueError(msg)
 
@@ -1521,11 +1560,15 @@ def variant_line(variant: DetectVariant, run: Mapping[str, object], trace_text: 
     )
 
 
-async def test_detect_variants_measure_the_arm64_hang(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """DETECT-VARIANT and DETECT-STACK lines for (a) to (f); a measurement, the only gate is that each really ran.
+async def test_detect_finds_the_name_in_time_on_every_architecture(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DETECT-VARIANT and DETECT-STACK lines for (a) to (c); (a) and (b) are a gate, (c) a negative control.
 
-    Not a gate on purpose: arm64 detect hangs (deferred-items, 02-16); a real
-    gate for arm64 detect is due before the release.
+    Gate (plan 02-16, before the release): with the product environment of
+    detect, unjailed and in the product jail, the run ends within
+    VARIANT_TIMEOUT_S, finds the name and extracts within EXTRACT_BUDGET_MS,
+    on amd64 and arm64 alike. The control only has to have really run.
     """
     models = Path(os.environ.get("PII_MODELS", "/models"))
     if not (models / "gliner2").is_dir():
@@ -1534,38 +1577,49 @@ async def test_detect_variants_measure_the_arm64_hang(tmp_path: Path, capsys: py
     stacks: list[str] = []
     measured: dict[str, object] = {}
     not_run: list[str] = []
+    failures: list[str] = []
     for variant in DETECT_VARIANTS:
         out = tmp_path / f"detect-{variant.name}"
         out.mkdir()
         trace = out / TRACE_FILE
         argv = variant_argv(variant, models, out)
-        run = await _run_work(argv, "detect", VARIANT_TIMEOUT_S, trace, variant_env(variant))
+        run = await _run_work(argv, "detect", variant.timeout_s, trace, variant_env(variant))
         text = ""
         with contextlib.suppress(OSError):
             text = trace.read_text(encoding="ascii", errors="replace")
+        facts = trace_facts(text)
         lines.append(variant_line(variant, run, text))
         stacks += stack_lines(variant.name, text)
-        measured[variant.name] = {**run, "facts": trace_facts(text)}
+        measured[variant.name] = {**run, "facts": facts}
         if not really_ran(run):
             not_run.append(variant.name)
+        failure = gate_failure(variant, run, facts)
+        if failure is not None:
+            failures.append(failure)
     with capsys.disabled():
         print()
         for line in [*lines, *stacks]:
             print(line)
     record_measurement("detect_variants", measured)
-    assert not_run == [], "\n".join(lines)
+    report = "\n".join(lines)
+    assert not_run == [], report
+    assert failures == [], f"{failures}\n{report}"
 
 
 # -- torch on each architecture: facts and a micro benchmark in the detect child env ----------
 
-# What the hang is made of, without the models: the TORCH-FACTS line of
-# profile_work.py torchbench, once unjailed and once in the product jail of
-# detect, both with SAFE_ENV (OMP_THREAD_LIMIT=1). Each step has
+# What torch makes of the detect environment, without the models: the
+# TORCH-FACTS line of profile_work.py torchbench, once unjailed and once in
+# the product jail of detect, both with the product environment of detect
+# (OMP_NUM_THREADS=<n>, no OMP_THREAD_LIMIT; the line reports both, and
+# num_threads/aten_threads show that torch took n). Each step has
 # BENCH_STEP_S in the child (a hung step writes ms=timeout, the next one
 # still runs); BENCH_TIMEOUT_S covers the torch import and all steps. Normal
-# cost: a few seconds per run; two hung score_queries steps add 20 s per run.
+# cost: a few seconds per run. With OMP_THREAD_LIMIT=1 (CI 44221141543) all
+# three timed steps hung on arm64; a measurement, the gate is the detect test.
 # The steps run in their own threads: torch.set_flush_denormal and the
-# OpenMP pool are per thread, which is what OMP_THREAD_LIMIT=1 leaves anyway.
+# OpenMP thread count are per thread; a new thread takes OMP_NUM_THREADS from
+# the environment, which is why the parent sets it and not only torch.
 BENCH_ENVS = ("unjailed", "jailed-product")
 BENCH_TIMEOUT_S = 60.0 + len(BENCH_STEPS) * BENCH_STEP_S
 TORCH_FACT_KEYS = (

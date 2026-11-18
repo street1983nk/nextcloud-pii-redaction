@@ -713,49 +713,50 @@ def test_uid_is_a_number() -> None:
         assert diag._uid() == os.getuid()
 
 
-# -- detect on arm64: the measurement variants ---------------------------------------------------
+# -- detect on every architecture: the gate and the negative control ------------------------------
 
 
-def test_the_six_detect_variants_and_their_commands(tmp_path: Path) -> None:
+def test_the_detect_gate_variants_and_their_commands(tmp_path: Path) -> None:
     models, out = tmp_path / "models", tmp_path / "out"
     by_name = {variant.name: variant for variant in diag.DETECT_VARIANTS}
-    assert list(by_name) == [
-        "unjailed",
-        "jailed-sys-cpu-read",
-        "jailed-threads-cpu",
-        "jailed-product",
-        "unjailed-no-omp-limit",
-        "jailed-product-no-omp-limit",
-    ]
-    # Stacks at 30, 60 and 90 s, before the 120 s kill.
+    assert list(by_name) == ["unjailed", "jailed-product", "control-omp-limit-1"]
+    # Two gates, one control; the control costs at most CONTROL_TIMEOUT_S, at most 120 s.
+    assert [variant.gated for variant in diag.DETECT_VARIANTS] == [True, True, False]
+    assert by_name["jailed-product"].timeout_s == diag.VARIANT_TIMEOUT_S == 60.0
+    assert by_name["control-omp-limit-1"].timeout_s == diag.CONTROL_TIMEOUT_S <= 120.0
+    # Stacks at 15, 30 and 45 s, before the 60 s kill.
     assert diag.VARIANT_TIMEOUT_S / diag.VARIANT_DUMP_EVERY_S >= 3
-    work = diag.work_argv("detect", str(models), str(out), str(diag.VARIANT_DUMP_EVERY_S), "-")
+    work = diag.work_argv("detect", str(models), str(out), str(diag.VARIANT_DUMP_EVERY_S))
     # (a) the work itself, no jail.
     assert diag.variant_argv(by_name["unjailed"], models, out) == work
-    # (d) exactly the product jail of detect.
+    # (b) exactly the product jail of detect; (c) the same command, only the environment differs.
     product = jail.jail_argv("detect", work, read=(str(models),), write=(str(out),))
     assert diag.variant_argv(by_name["jailed-product"], models, out) == product
-    # (e) and (f): the commands of (a) and (d); only the environment differs.
-    assert diag.variant_argv(by_name["unjailed-no-omp-limit"], models, out) == work
-    assert diag.variant_argv(by_name["jailed-product-no-omp-limit"], models, out) == product
-    # (c) the product jail, only the thread argument differs.
-    threads = diag.variant_argv(by_name["jailed-threads-cpu"], models, out)
-    assert threads[:4] == product[:4]
-    assert threads[-1] == "cpu"
-    assert threads[:-1] == product[:-1]
-    # (b) the driver with one extra read path and the product seccomp filter, then the product call.
-    sys_cpu = diag.variant_argv(by_name["jailed-sys-cpu-read"], models, out)
-    assert sys_cpu[2:5] == [str(diag.DRIVER), "variant", "read=/sys/devices/system/cpu,seccomp"]
-    assert sys_cpu[5:] == product[4:]
-    assert jail_layers.parse_specs(sys_cpu[4]) == ("read=/sys/devices/system/cpu", "seccomp")
-    if sys.platform != "win32":
-        # The jail takes only absolute POSIX paths; a Windows tmp_path is none.
-        call = jail.parse(sys_cpu[5:])
-        assert call is not None
-        assert call.profile == profiles.PROFILES["detect"]
-        assert call.read == (str(models),)
+    assert diag.variant_argv(by_name["control-omp-limit-1"], models, out) == product
     with pytest.raises(ValueError, match="unknown jail"):
         diag.variant_argv(diag.DetectVariant("x", "bogus"), models, out)
+
+
+def test_the_detect_gate_fails_on_a_timeout_a_miss_or_a_slow_extraction() -> None:
+    gate, control = diag.DETECT_VARIANTS[1], diag.DETECT_VARIANTS[2]
+    ok = {"ok": True, "result": "result=ok events=-", "tail": "", "exit": 0}
+    hung = {"ok": False, "result": "result=fail:timeout events=-", "tail": "", "exit": None}
+    missed = {"ok": False, "result": "result=fail:gliner_missed events=-", "tail": "", "exit": 1}
+    assert diag.gate_failure(gate, ok, {"ms_extract": "231"}) is None
+    assert diag.gate_failure(gate, ok, {"ms_extract": str(diag.EXTRACT_BUDGET_MS)}) is None
+    assert diag.gate_failure(gate, hung, {}) == "jailed-product: result=fail:timeout"
+    assert diag.gate_failure(gate, missed, {}) == "jailed-product: result=fail:gliner_missed"
+    assert diag.gate_failure(gate, ok, {"ms_extract": "-"}) == "jailed-product: no EXTRACT line"
+    slow = diag.gate_failure(gate, ok, {"ms_extract": str(diag.EXTRACT_BUDGET_MS + 1)})
+    assert slow == f"jailed-product: extract {diag.EXTRACT_BUDGET_MS + 1} ms > {diag.EXTRACT_BUDGET_MS} ms"
+    # The negative control never fails the gate, hung or not.
+    assert diag.gate_failure(control, hung, {}) is None
+
+
+def test_detect_is_gated_with_connect_denied_and_runs_in_the_gate_budget() -> None:
+    assert diag.DENY_GATED == ("detect",)
+    assert set(diag.DENY_GATED) <= {name for name, p in profiles.PROFILES.items() if not p.deny_connect}
+    assert diag.DETECT_TIMEOUT_S == diag.VARIANT_TIMEOUT_S
 
 
 TRACE_WITH_FACTS = (
@@ -787,18 +788,18 @@ def test_trace_facts_and_the_variant_line() -> None:
     assert len(line.partition(" tail=")[2]) == diag.VARIANT_TAIL_CHARS
 
 
-def test_the_variant_env_drops_only_the_omp_limit() -> None:
+def test_the_gates_run_the_product_env_and_the_control_adds_only_the_omp_limit() -> None:
     product = diag.child.child_env(profile="detect")
-    assert product["OMP_THREAD_LIMIT"] == "1"
+    assert "OMP_THREAD_LIMIT" not in product
+    assert product["OMP_NUM_THREADS"].isdigit()
     for variant in diag.DETECT_VARIANTS:
         env = diag.variant_env(variant)
         if variant.omp_limit:
-            assert env == product
+            assert env == {**product, "OMP_THREAD_LIMIT": "1"}
         else:
-            assert "OMP_THREAD_LIMIT" not in env
-            assert env == {key: value for key, value in product.items() if key != "OMP_THREAD_LIMIT"}
+            assert env == product
     # The product environment itself is untouched by a variant.
-    assert diag.child.child_env(profile="detect")["OMP_THREAD_LIMIT"] == "1"
+    assert "OMP_THREAD_LIMIT" not in diag.child.child_env(profile="detect")
 
 
 STACK_SAMPLE = """MARK t=0.0s step=start torch=nein rss=-
@@ -970,13 +971,21 @@ def test_the_real_torch_bench_writes_every_step(tmp_path: Path, monkeypatch: pyt
     assert keys == list(diag.TORCH_FACT_KEYS)
 
 
-def test_the_detect_thread_setting() -> None:
-    assert profile_work.thread_count("-") is None
-    assert profile_work.thread_count("cpu") == (os.cpu_count() or 1)
-    with pytest.raises(profile_work.WorkFailed, match="usage"):
-        profile_work.thread_count("4")
-    # A bad thread word ends the run before anything is loaded.
-    assert profile_work.main(["detect", "/models", "/work", "60", "many"]) == 1
+def test_detect_takes_no_thread_argument_any_more() -> None:
+    # The count comes from the environment of the parent; a fifth word is a usage error before anything loads.
+    assert profile_work.main(["detect", "/models", "/work", "60", "cpu"]) == 1
+    assert not hasattr(profile_work, "thread_count")
+
+
+def test_the_work_hands_the_env_count_to_torch(monkeypatch: pytest.MonkeyPatch) -> None:
+    torch = pytest.importorskip("torch")
+    before = torch.get_num_threads()
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    try:
+        profile_work.apply_threads()
+        assert torch.get_num_threads() == 1
+    finally:
+        torch.set_num_threads(before)
 
 
 def test_cpu_facts_is_one_line_with_every_key() -> None:
