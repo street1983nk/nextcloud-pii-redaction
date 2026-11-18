@@ -88,6 +88,7 @@ else
 	case "${SERVER_VERSION}" in
 		stable33) tag='v21.0.15' ;;
 		stable34) tag='v22.0.6' ;;
+		stable35) tag='v23.0.1' ;;
 		*) tag='' ;;
 	esac
 	[ -n "${tag}" ] || fail "groupfolders is neither in the store nor mapped for ${SERVER_VERSION}"
