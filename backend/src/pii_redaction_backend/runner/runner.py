@@ -325,7 +325,7 @@ class Runner:
                     "exit_code": getattr(exc, "exit_code", None),
                     "signal": getattr(exc, "signal", None),
                     "stderr_tail": getattr(exc, "stderr_tail", None) or None,
-                    # ProfileTemplateMissing: missing, unreadable or unsafe_entry, never a path.
+                    # ProfileTemplateMissing: missing, unreadable, unsafe_entry, malformed or conflict, never a path.
                     "reason": exc.reason if isinstance(exc, soffice.ProfileTemplateMissing) else None,
                 },
             )

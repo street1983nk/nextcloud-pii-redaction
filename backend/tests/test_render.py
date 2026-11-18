@@ -96,7 +96,12 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
 
     template = tmp_path / "template"
     (template / "user").mkdir(parents=True)
-    (template / "user" / soffice.TEMPLATE_MARKER).write_bytes(b"<oor:items/>")
+    # A registry like the one LibreOffice writes on its first start (plan 02-17 merges into it).
+    (template / "user" / soffice.TEMPLATE_MARKER).write_bytes(
+        b'<oor:items xmlns:oor="http://openoffice.org/2001/registry">\n'
+        b'<item oor:path="/org.openoffice.Setup/Office"><prop oor:name="ooSetupInstCompleted" oor:op="fuse">'
+        b"<value>true</value></prop></item>\n</oor:items>\n"
+    )
     monkeypatch.setattr(soffice, "PROFILE_TEMPLATE", str(template))
     monkeypatch.setattr(soffice, "PROFILE_ROOT", str(tmp_path))
     monkeypatch.setattr(soffice, "run_child", fake_run_child)
@@ -110,7 +115,11 @@ async def test_convert_hands_libreoffice_a_tmpdir_inside_its_profile(
     assert seen["extra_env"] == {"TMPDIR": str(profile / "tmp")}
     # The template copy is in place before the start (plan 02-16), next to TMPDIR.
     assert seen["profile_folders"] == ["tmp", "user"]
-    assert seen["seeded"] == b"<oor:items/>"
+    # The template copy with the hardening of the job profile (plan 02-17, test_soffice_profile.py).
+    seeded = seen["seeded"]
+    assert isinstance(seeded, bytes)
+    assert b"ooSetupInstCompleted" in seeded
+    assert b"DisableMacrosExecution" in seeded
     assert seen["write"] == (str(tmp_path / "out"), str(profile))
     assert seen["diagnose"] is True
     assert seen["tail_lines"] == child.SOFFICE_TAIL_LINES

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardening of the LibreOffice profile of every job (plan 02-17, SAFE-03, D-02-06).
+  Second layer behind the sanitizer (intake/sanitize.py) and in front of seccomp.
+  Keys and values: LibreOffice core, branch libreoffice-25-2,
+  officecfg/registry/schema/org/openoffice/Office/Common.xcs (Security, Security/Scripting)
+  and Writer.xcs (Content/Update), RESEARCH Pattern 5. The UpdateCheck path is the one
+  hardentools uses; whether the Debian nogui build has the service at all is open (A9).
+  Assumption A3: LibreOffice 25.2 reads these entries from a prepared profile; the
+  layer run b of plan 02-22 proves it.
+  The server does not copy this file over the profile: it adds its entries to the
+  registrymodifications.xcu of the template copy (workers/soffice.py, harden_profile),
+  one entry per line, each key once.
+-->
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableMacrosExecution" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableActiveContent" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisablePythonRuntime" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="DisableOLEAutomation" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="CheckDocumentEvents" oor:op="fuse"><value>true</value></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="AllowedDocumentEventURLs" oor:op="fuse"><value/></prop></item>
+<item oor:path="/org.openoffice.Office.Common/Security"><prop oor:name="LoadExoticFileFormats" oor:op="fuse"><value>0</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item>
+<item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Field" oor:op="fuse"><value>false</value></prop></item>
+<item oor:path="/org.openoffice.Office.Jobs/Jobs/org.openoffice.Office.Jobs:Job['UpdateCheck']/Arguments"><prop oor:name="AutoCheckEnabled" oor:op="fuse"><value>false</value></prop></item>
+</oor:items>
