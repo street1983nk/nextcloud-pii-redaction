@@ -77,6 +77,33 @@ final class SettingsControllerTest extends TestCase {
 		self::assertSame('/index.php/apps/appstore', $data['appsUrl']);
 	}
 
+	public function testTheMissingLayersComeBackAsFixedWords(): void {
+		$data = $this->controller($this->exApp(['state' => 'ok', 'sandboxDegraded' => ['landlock', 'jail']]))->state()->getData();
+		self::assertSame(['landlock', 'jail'], $data['sandboxDegraded']);
+
+		$data = $this->controller($this->exApp(['state' => 'ok', 'sandboxDegraded' => []]))->state()->getData();
+		self::assertSame([], $data['sandboxDegraded']);
+
+		$data = $this->controller($this->exApp(['state' => 'backend_unreachable', 'sandboxDegraded' => null]))->state()->getData();
+		self::assertArrayHasKey('sandboxDegraded', $data);
+		self::assertNull($data['sandboxDegraded']);
+	}
+
+	public function testAJailThatFailsInOperationShowsOnTheNextRecheck(): void {
+		// Each recheck asks for a fresh state, so jail failed of a child with
+		// exit 71 is on the next answer without a cache holding the old one.
+		$exApp = $this->createMock(ExAppService::class);
+		$base = ['state' => 'ok', 'ownVersion' => '0.1.0', 'backendVersion' => '0.1.0', 'checkedAt' => 1_800_000_000, 'companion' => 'ok'];
+		$exApp->expects(self::exactly(2))->method('backendState')->with(true)->willReturnOnConsecutiveCalls(
+			$base + ['sandboxDegraded' => []],
+			$base + ['sandboxDegraded' => ['jail']],
+		);
+		$controller = $this->controller($exApp);
+
+		self::assertSame([], $controller->state()->getData()['sandboxDegraded']);
+		self::assertSame(['jail'], $controller->state()->getData()['sandboxDegraded']);
+	}
+
 	public function testAnErrorStateAsksTheContainerNothingMore(): void {
 		$exApp = $this->exApp(['state' => 'backend_unreachable']);
 		$exApp->expects(self::never())->method('status');

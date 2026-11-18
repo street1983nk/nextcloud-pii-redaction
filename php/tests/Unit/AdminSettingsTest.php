@@ -162,6 +162,21 @@ final class AdminSettingsTest extends TestCase {
 		self::assertSame(50, $admin->getPriority());
 	}
 
+	public function testTheFormPassesTheMissingLayers(): void {
+		$exApp = $this->createMock(ExAppService::class);
+		$exApp->method('backendState')->willReturn([
+			'state' => 'ok',
+			'ownVersion' => '0.1.0',
+			'backendVersion' => '0.1.0',
+			'checkedAt' => 1_800_000_000,
+			'companion' => 'ok',
+			'sandboxDegraded' => ['seccomp', 'jail'],
+		]);
+		$admin = new Admin($exApp, $this->createMock(IDateTimeFormatter::class), $this->createMock(IURLGenerator::class), $this->createMock(ITimeFactory::class), $this->createMock(LoggerInterface::class));
+
+		self::assertSame(['seccomp', 'jail'], $admin->getForm()->getParams()['sandboxDegraded']);
+	}
+
 	public function testAThrowingStateRendersAsUnreachable(): void {
 		$exApp = $this->createMock(ExAppService::class);
 		$exApp->method('backendState')->willThrowException(new \RuntimeException('down'));
@@ -171,7 +186,10 @@ final class AdminSettingsTest extends TestCase {
 
 		$admin = new Admin($exApp, $this->createMock(IDateTimeFormatter::class), $this->createMock(IURLGenerator::class), $time, $this->createMock(LoggerInterface::class));
 
-		self::assertSame('backend_unreachable', $admin->getForm()->getParams()['state']);
+		$parameters = $admin->getForm()->getParams();
+		self::assertSame('backend_unreachable', $parameters['state']);
+		self::assertArrayHasKey('sandboxDegraded', $parameters);
+		self::assertNull($parameters['sandboxDegraded']);
 	}
 
 	public function testTheSectionValues(): void {
