@@ -13,9 +13,10 @@
 #       e2e_encrypted and no job exists; without the flag the same file
 #       starts (the refusal came from the flag and from nothing else)
 #   (f) pdf_signed.pdf waits in confirm with the event signature_notice; a
-#       stranger and a session without the request token cannot confirm; the
-#       POST of the initiator with the request token of the session can, and
-#       the job reaches review with signature_confirmed after signature_notice
+#       stranger (404) and the session of the initiator without or with a
+#       made-up request token (412 CSRF check failed) cannot confirm; the POST
+#       of the same session with its request token can, and the job reaches
+#       review with signature_confirmed after signature_notice
 #   (g) D-02-02: none of the refusals (a) to (e) made a notification. Judged
 #       last, so one run shows every other proof before it.
 #
@@ -308,27 +309,71 @@ head_value() {
 	grep -o "$2=\"[^\"]*\"" "$1" | head -n 1 | cut -d'"' -f2 || true
 }
 
+# cookie_names: the names of the cookies in the jar on one line, never a value.
+cookie_names() {
+	local names=""
+	if [ -s "${JAR}" ]; then
+		names=$(awk -F'\t' 'NF >= 7 { print $6 }' "${JAR}" | sort -u | tr '\n' ' ')
+	fi
+	names="${names% }"
+	printf '%s' "${names:-none}"
+}
+
+# login_reason: why the server refused the login. LoginController stores one
+# word of its closed list in the session and hands it to the next login page
+# as the start state core-loginErrors. Only a word of that list is printed.
+login_reason() {
+	local page="${CI_OUT}/refusals-login-refused.html"
+	curl -s -o "${page}" -c "${JAR}" -b "${JAR}" "${NC_URL}/index.php/login" || true
+	python3 - "${page}" <<'PY'
+import base64, json, re, sys
+KNOWN = {"invalidOrigin", "csrfCheckFailed", "invalidpassword", "userdisabled"}
+try:
+    html = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+    found = re.search(r'id="initial-state-core-loginErrors"[^>]*value="([^"]*)"', html)
+    errors = json.loads(base64.b64decode(found.group(1))) if found else None
+except (OSError, ValueError):
+    errors = None
+if not isinstance(errors, list):
+    print("not told")
+else:
+    print(",".join(e if e in KNOWN else "another message" for e in map(str, errors)) or "none named")
+PY
+}
+
 # session_login <user>: a browser session in the cookie jar, built the way the
-# login form builds it (no basic auth, no OCS-APIRequest).
+# login form builds it (no basic auth, no OCS-APIRequest): the login page for
+# the session cookie, the two same-site cookies and the request token, then
+# the form with the Origin header a browser adds to a POST. The server refuses
+# a form without a trusted Origin before it looks at anything else
+# (core/Controller/LoginController.php, tryLogin: invalidOrigin). A failure
+# names the code of each step, the names of the cookies and the address the
+# form led to, never a password, a token or the value of a cookie.
 session_login() {
-	local user="$1" page="${CI_OUT}/refusals-login.html" answer="${CI_OUT}/refusals-login.headers" token code target
-	rm -f "${JAR}"
-	code=$(curl -s -o "${page}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}/index.php/login")
-	[ "${code}" = "200" ] || fail "the login page answered ${code}"
+	local user="$1" page="${CI_OUT}/refusals-login.html" answer="${CI_OUT}/refusals-login.headers"
+	local origin page_code token code target before
+	rm -f "${JAR}" "${STATE}/session"
+	origin=$(printf '%s' "${NC_URL}" | sed -E 's|^([a-z]+://[^/]+).*$|\1|')
+	page_code=$(curl -s -o "${page}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}/index.php/login") || true
+	[ "${page_code}" = "200" ] || fail "the login page answered '${page_code}' (cookies set: $(cookie_names))"
 	token=$(head_value "${page}" data-requesttoken)
-	[ -n "${token}" ] || fail "the login page carries no request token"
+	[ -n "${token}" ] || fail "the login page (HTTP 200) carries no request token (cookies set: $(cookie_names))"
+	before=$(cookie_names)
 	code=$(curl -s -o /dev/null -D "${answer}" -w '%{http_code}' -c "${JAR}" -b "${JAR}" \
+		-H "Origin: ${origin}" \
 		--data-urlencode "user=${user}" --data-urlencode "password=$(password_of "${user}")" \
-		--data-urlencode "requesttoken=${token}" "${NC_URL}/index.php/login")
+		--data-urlencode "requesttoken=${token}" "${NC_URL}/index.php/login") || true
 	target=$(header_of "${answer}" Location || true)
 	# The address without its query: after a refused login the query names the user.
 	target="${target%%\?*}"
 	case "${code}" in
 		30[23]) ;;
-		*) fail "the login form answered ${code} for ${user}" ;;
+		*) fail "the login form answered '${code}' for ${user} (login page 200, request token found, Origin ${origin}, cookies before the form: ${before}, after it: $(cookie_names), Location '${target}')" ;;
 	esac
 	case "${target}" in
-		*/login | */login/*) fail "the login form sent ${user} back to ${target} (HTTP ${code}): the login was refused" ;;
+		*/login | */login/*)
+			fail "the login of ${user} was refused: the form answered ${code} and led back to ${target} (login page 200, request token found, Origin ${origin}, cookies before the form: ${before}, after it: $(cookie_names), reason of the server: $(login_reason))"
+			;;
 	esac
 }
 
@@ -337,13 +382,14 @@ session_login() {
 # did not happen stops here.
 session_token() {
 	local user="$1" page="${CI_OUT}/refusals-page.html" code token target
-	code=$(curl -s -o "${page}" -D "${page}.headers" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}$2")
+	code=$(curl -s -o "${page}" -D "${page}.headers" -w '%{http_code}' -c "${JAR}" -b "${JAR}" "${NC_URL}$2") || true
 	target=$(header_of "${page}.headers" Location || true)
-	[ "${code}" = "200" ] || fail "the page $2 answered ${code} in the session of ${user} (Location '${target%%\?*}')"
+	[ "${code}" = "200" ] \
+		|| fail "the page $2 answered '${code}' in the session of ${user} (Location '${target%%\?*}', cookies: $(cookie_names))"
 	[ "$(head_value "${page}" data-user)" = "${user}" ] \
-		|| fail "the session is not the session of ${user}: the page names the user '$(head_value "${page}" data-user)'"
+		|| fail "the session is not the session of ${user}: the page names the user '$(head_value "${page}" data-user)' (cookies: $(cookie_names))"
 	token=$(head_value "${page}" data-requesttoken)
-	[ -n "${token}" ] || fail "the page $2 carries no request token"
+	[ -n "${token}" ] || fail "the page $2 (HTTP 200, user ${user}) carries no request token"
 	printf '%s' "${token}"
 }
 
@@ -354,6 +400,22 @@ session_post() {
 	shift 2
 	curl -s -o "${answer}" -D "${answer}.headers" -w '%{http_code}' -X POST -c "${JAR}" -b "${JAR}" \
 		-H 'Accept: application/json' "$@" "${NC_URL}${route}"
+}
+
+# csrf_refused <job> <answer file> <what> [curl args...]: the confirmation in
+# the session of alice that the server has to refuse as a forged request, and
+# for that reason only: 412 with "CSRF check failed" is what SecurityMiddleware
+# answers a logged-in session whose request token is missing or wrong. A
+# session that is not logged in gets 401 and a stranger 404; neither counts.
+csrf_refused() {
+	local job="$1" answer="$2" what="$3" code got
+	shift 3
+	code=$(session_post "${APP_PATH}/review/${job}/confirm" "${answer}" "$@")
+	got=$(field_of "${answer}" message)
+	[ "${code}" = "412" ] \
+		|| fail "confirm of job ${job} ${what} answered ${code}, expected the CSRF refusal 412: $(shown "${answer}")"
+	[ "${got}" = "CSRF check failed" ] \
+		|| fail "confirm of job ${job} ${what} answered 412 with the message '${got}', expected 'CSRF check failed': $(shown "${answer}")"
 }
 
 # -- the files ---------------------------------------------------------------------
@@ -513,7 +575,7 @@ signed_waits() {
 proof signed_waits
 
 signed_refuses() {
-	local job_signed foreign forged code status
+	local job_signed foreign code status made_up='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 	job_signed=$(kept job_signed)
 
 	# A stranger cannot confirm (ci/rights.sh holds the other routes).
@@ -521,29 +583,38 @@ signed_refuses() {
 	code=$(req bob POST "${APP_PATH}/review/${job_signed}/confirm" "${foreign}" "${foreign}.headers")
 	[ "${code}" = "404" ] || fail "confirm of job ${job_signed} as bob answered ${code}, expected 404: $(shown "${foreign}")"
 
-	# The session of alice without the request token cannot either (CSRF). The
-	# page is opened first: the session is a session of alice that could confirm.
+	# The session of alice cannot either, without the request token and with a
+	# made-up one (CSRF). The page is opened before and after: the session is a
+	# session of alice that sees the job, and the refusals did not end it. The
+	# proof after this one confirms in this very session, with its token.
 	session_login alice
 	session_token alice "${APP_PATH}/review/${job_signed}" > /dev/null
-	forged="${CI_OUT}/refusals-confirm-no-token.json"
-	code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${forged}")
-	case "${code}" in
-		2??) fail "confirm of job ${job_signed} without the request token answered ${code}: $(shown "${forged}")" ;;
-	esac
+	csrf_refused "${job_signed}" "${CI_OUT}/refusals-confirm-no-token.json" 'without the request token'
+	csrf_refused "${job_signed}" "${CI_OUT}/refusals-confirm-made-up-token.json" 'with a made-up request token' \
+		-H "requesttoken: ${made_up}"
+	session_token alice "${APP_PATH}/review/${job_signed}" > /dev/null
+	keep session alice
 	status=$(end_of "${job_signed}" "${REFUSAL_SECONDS}" confirm review failed)
 	[ "${status}" = "confirm" ] || fail "job ${job_signed} left confirm without a valid confirmation, it is ${status}"
 	if has_event "${job_signed}" signature_confirmed; then
-		fail "job ${job_signed} carries signature_confirmed after two refused attempts"
+		fail "job ${job_signed} carries signature_confirmed after three refused attempts"
 	fi
-	echo "ok: confirm refused for a stranger (404) and without the request token (HTTP ${code})"
+	echo "ok: confirm refused for a stranger (404) and in the session of alice without and with a made-up request token (412 CSRF check failed)"
 }
 proof signed_refuses
 
-# The initiator confirms with the request token of the session.
+# The initiator confirms with the request token of the session: the session
+# the server refused twice just before, when the proof before this one got that
+# far (the only difference to the refused attempts is the token), a new one
+# otherwise.
 signed_confirms() {
-	local job_signed token confirmed code got cache_control status events_signed notice_at confirmed_at
+	local job_signed token confirmed code got cache_control status events_signed notice_at confirmed_at session='a new session'
 	job_signed=$(kept job_signed)
-	session_login alice
+	if [ -s "${STATE}/session" ]; then
+		session='the session the server refused without the token'
+	else
+		session_login alice
+	fi
 	token=$(session_token alice "${APP_PATH}/review/${job_signed}")
 	confirmed="${CI_OUT}/refusals-confirm.json"
 	code=$(session_post "${APP_PATH}/review/${job_signed}/confirm" "${confirmed}" -H "requesttoken: ${token}")
@@ -565,7 +636,7 @@ signed_confirms() {
 	[ "$(grep -cx signature_confirmed <<<"${events_signed}" || true)" = "1" ] \
 		|| fail "job ${job_signed} carries signature_confirmed more than once: ${events_signed//$'\n'/,}"
 	keep signed_confirmed yes
-	echo "ok: ${SIGNED} confirmed with the request token -> review, events signature_notice then signature_confirmed"
+	echo "ok: ${SIGNED} confirmed with the request token in ${session} -> review, events signature_notice then signature_confirmed"
 }
 proof signed_confirms
 

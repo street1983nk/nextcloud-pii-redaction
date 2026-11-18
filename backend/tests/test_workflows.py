@@ -675,6 +675,21 @@ REFUSAL_NEEDS = (
     ('awaited_event "${job_signed}" signature_notice ||', "does not ask for the event signature_notice"),
     ('grep -nx signature_confirmed <<<"${events_signed}"', "does not ask for the event signature_confirmed"),
     ('-H "requesttoken: ${token}"', "does not confirm with the request token of the session"),
+    # LoginController::tryLogin refuses a form without a trusted Origin
+    # (invalidOrigin) before anything else (CI run 44310663659).
+    ('-H "Origin: ${origin}"', "does not send the Origin header with the login form"),
+    # A session that is not logged in gets 401, a stranger 404: only 412 with
+    # the words of the CSRF check proves that the missing token was the reason.
+    ('[ "${code}" = "412" ]', "does not expect 412 for a confirmation without a valid request token"),
+    ('[ "${got}" = "CSRF check failed" ]', "does not ask whether the CSRF check refused the confirmation"),
+    (
+        'csrf_refused "${job_signed}" "${CI_OUT}/refusals-confirm-no-token.json" \'without the request token\'\n',
+        "does not try the confirmation without the request token",
+    ),
+    ('-H "requesttoken: ${made_up}"', "does not try the confirmation with a made-up request token"),
+    # The positive control of the refusal: the same session confirms with its token.
+    ("keep session alice", "does not hand the refused session to the confirmation"),
+    ('if [ -s "${STATE}/session" ]; then', "does not confirm in the session the server refused"),
     ('[ "$(column_of oc_filecache encrypted)" = "encrypted" ]', "does not ask the database for the column encrypted"),
     ('fail "A6 does not hold', "does not stop when the column encrypted is missing"),
     ("UPDATE oc_filecache SET encrypted = 1 WHERE fileid = ${e2e_folder}", "does not set the E2E flag on the folder"),
@@ -695,6 +710,13 @@ _REFUSED_CALL = re.compile(r"^proof refused (\S+) (\S+)$", re.MULTILINE)
 # A proof behind if, while or ! or before || or &&: bash switches errexit off
 # inside it, and a line that fails in the proof would go unnoticed.
 _PROOF_UNGUARDED = re.compile(r"^\s*(?:if|while|until|!)\s+proof\b|^\s*proof\b[^\n]*(?:\|\||&&)", re.MULTILINE)
+# A message (fail, echo) that carries a request token, a password or the
+# content of the cookie jar: the log of a CI run is public.
+_SECRET_IN_MESSAGE = re.compile(
+    r"^[^\n]*\b(?:fail|echo)\s+\"[^\n]*"
+    r"(?:\$\{token\}|\$\{made_up\}|password_of|\$\{CI_PASS\}|\$\{ADMIN_PASS\}|cat \"\$\{JAR\}\")",
+    re.MULTILINE,
+)
 
 
 def refusal_findings(script: str) -> list[str]:
@@ -710,6 +732,8 @@ def refusal_findings(script: str) -> list[str]:
         findings.append("the script counts no notification as positive control before the refusals")
     if _PROOF_UNGUARDED.search(code):
         findings.append("the script calls a proof where errexit is switched off")
+    if _SECRET_IN_MESSAGE.search(code):
+        findings.append("the script prints a request token, a password or the cookie jar")
     return findings
 
 
@@ -777,6 +801,40 @@ def test_self_the_notification_and_proof_rules_fire() -> None:
         assert refusal_findings(script.replace("proof e2e_refusal\n", unguarded + "\n")) == [
             "the script calls a proof where errexit is switched off"
         ]
+
+
+def test_self_the_session_rules_fire() -> None:
+    script = _ci("refusals.sh")
+    # The fault of CI run 44310663659: the login form without the Origin header.
+    assert refusal_findings(script.replace('\t\t-H "Origin: ${origin}" \\\n', "")) == [
+        "the script does not send the Origin header with the login form"
+    ]
+    # "Anything but 2xx" passes for a session that is not logged in as well.
+    lenient = script.replace('[ "${code}" = "412" ]', '[ "${code}" != "202" ]')
+    assert refusal_findings(lenient) == [
+        "the script does not expect 412 for a confirmation without a valid request token"
+    ]
+    any_reason = script.replace('[ "${got}" = "CSRF check failed" ]', "true")
+    assert refusal_findings(any_reason) == ["the script does not ask whether the CSRF check refused the confirmation"]
+    no_bare = script.replace(
+        'csrf_refused "${job_signed}" "${CI_OUT}/refusals-confirm-no-token.json" \'without the request token\'\n', ""
+    )
+    assert refusal_findings(no_bare) == ["the script does not try the confirmation without the request token"]
+    no_made_up = script.replace(' \\\n\t\t-H "requesttoken: ${made_up}"', "")
+    assert refusal_findings(no_made_up) == ["the script does not try the confirmation with a made-up request token"]
+    # Without the hand-over the confirmation logs in again: no control of the refusal.
+    assert refusal_findings(script.replace("keep session alice\n", "")) == [
+        "the script does not hand the refused session to the confirmation"
+    ]
+    always_new = script.replace('if [ -s "${STATE}/session" ]; then', "if false; then")
+    assert refusal_findings(always_new) == ["the script does not confirm in the session the server refused"]
+    for leak in (
+        '\tfail "the token is ${token}"\n',
+        '\techo "tried $(password_of alice)"\n',
+        '\techo "cookies: $(cat "${JAR}")"\n',
+    ):
+        leaking = script.replace("\tkeep session alice\n", "\tkeep session alice\n" + leak)
+        assert refusal_findings(leaking) == ["the script prints a request token, a password or the cookie jar"]
 
 
 # -- sandbox.yml: the container proofs of phase 2 (plan 02-12) -------------------------
