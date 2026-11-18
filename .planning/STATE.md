@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-17 abgeschlossen (lokal, ungepusht: 04b02bb bis 2fd526b); nächster Plan 02-18"
-last_updated: "2026-11-18T07:48:11.094Z"
-last_activity: 2026-11-18 -- 02-17 abgeschlossen, Kinder precheck/sanitize und gehärtetes LibreOffice-Profil
+stopped_at: "02-18 abgeschlossen (lokal, ungepusht: 4e70caa bis fe749e9); nächster Plan 02-19"
+last_updated: "2026-11-18T08:18:47.615Z"
+last_activity: 2026-11-18 -- 02-18 abgeschlossen, Dateikarte mit Ablehnungsgründen, Signatur-Bestätigung und Makro-Hinweis
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 38
+  completed_plans: 39
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 17 of 25 in current phase (02-01 bis 02-17 abgeschlossen; origin/phase-02 bei c1b6f5f, 02-17 lokal ungepusht; nächster Schritt 02-18)
+Plan: 18 of 25 in current phase (02-01 bis 02-18 abgeschlossen; origin/phase-02 bei 7bcab92, 02-18 lokal ungepusht; nächster Schritt 02-19)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-17 abgeschlossen
+Last activity: 2026-11-18 -- 02-18 abgeschlossen
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 85%
 
 ## Performance Metrics
 
@@ -114,6 +114,7 @@ Recent decisions affecting current work:
 - [Phase 02-02]: transformers 5.22.1, hub 2.4.0, tokenizers 0.23.3 statt 4.57.6 (Owner-Freigabe 1); Lock mit exclude-newer 2026-11-03 für alle Pakete inkl. torch aus dem CPU-Index (Owner-Freigabe 2, Option B); pip-audit mit +cpu-Strip
 - [Phase 02-16]: detect-Kind ohne OMP_THREAD_LIMIT, OMP_NUM_THREADS aus hardware.worker_threads (Deckel 2); ocr behält die Grenze
 - [Phase 02-17]: LibreOffice-Härtung wird in die registrymodifications.xcu der Vorlagenkopie eingefügt, nicht kopiert; conflict/malformed fail-closed
+- [Phase 02-18]: Status-Route und Startzustand der Prüfseite tragen macrosRemoved/signatureConfirmed (nur bool); confirm gilt als offen, wird aber nicht gepollt
 
 ### Pending Todos
 
@@ -136,6 +137,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T07:48:11.078Z
-Stopped at: Completed 02-17-PLAN.md
+Last session: 2026-11-18T08:18:47.593Z
+Stopped at: Completed 02-18-PLAN.md
 Resume file: None
