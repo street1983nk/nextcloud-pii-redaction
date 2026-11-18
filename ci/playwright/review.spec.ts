@@ -280,9 +280,15 @@ test('Prüfseite: Seite 1 nicht abrufbar (Bild 502)', async ({ page }, testInfo)
 	await login(page, who);
 	await page.route(new RegExp(`/apps/pii_redaction/review/${jobId}/page/1(\\?.*)?$`), (route) => route.fulfill({ status: 502, body: '' }));
 
-	await openReview(page, jobId);
+	// Not openReview: the figure with its caption is on the page until the
+	// image answers 502, then the card replaces it. Measuring the frame before
+	// that swap counts a caption that is gone at the next read (run
+	// 44322550281, en-w1280-dark), so the frame is measured in the final state.
+	await page.goto(reviewPath(jobId));
+	await expect(page.locator('#pii-review h2')).toBeVisible();
 	await expect(page.getByRole('button', { name: /Load again|Erneut laden|Recharger$/ })).toBeVisible();
 	await expect(page.locator('#pii-review img')).toHaveCount(0);
+	await expectReadableFrame(page);
 	await expectCardText(page);
 	await screenshot(page, 'pruefseite', 'seite-nicht-abrufbar', testInfo);
 });
