@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-21 abgeschlossen (lokal, ungepusht: 0be8589, de8f787); nächster Plan 02-22"
-last_updated: "2026-11-18T09:55:18.744Z"
-last_activity: 2026-11-18 -- 02-21 abgeschlossen, Container-Beweise Jail und Korpus (CI-Lauf offen)
+stopped_at: "02-22 abgeschlossen (lokal, ungepusht: 044c895, 2e6d2ab); nächster Plan 02-23"
+last_updated: "2026-11-18T10:28:44.882Z"
+last_activity: 2026-11-18 -- 02-22 abgeschlossen, Netzbeweise LibreOffice und RES-02 (CI-Lauf offen)
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 42
+  completed_plans: 43
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 21 of 25 in current phase (02-01 bis 02-21 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-21 lokal ungepusht; Container-Lauf von 02-21 offen bis zum nächsten Push; nächster Schritt 02-22)
+Plan: 22 of 25 in current phase (02-01 bis 02-22 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 bis 02-22 lokal ungepusht; Container-Läufe von 02-21 und 02-22 offen bis zum nächsten Push; nächster Schritt 02-23)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-21 abgeschlossen
+Last activity: 2026-11-18 -- 02-22 abgeschlossen
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [█████████░] 91%
 | Phase 02 P19 | ca. 60 min | 2 tasks | 6 files |
 | Phase 02 P20 | ca. 15 min | 3 tasks | 17 files |
 | Phase 02 P21 | 15 min | 2 tasks | 8 files |
+| Phase 02 P22 | 75 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,8 @@ Recent decisions affecting current work:
 - [Phase 02-20]: sandboxDegraded nur aus festen Wörtern (seccomp, landlock, jail), bei jedem Recheck frisch; seccomp/Landlock teilen eine Abhilfe, Schutzschicht eigenes Fehlerbanner
 - [Phase 02-21]: Korpus im Container kommt vom Runner (ci/make_corpus.py, Mount /corpus:ro, PII_CORPUS), das Test-Image hat kein ci/
 - [Phase 02-21]: Grenzen im Jail-Kind per getrlimit; /proc/self/limits bleibt gesperrt, kein Recht geöffnet
+- [Phase 02-22]: Netzbeweis LibreOffice mit Kanarienserver und Schichtläufen a bis d; Korpus per retarget auf den Kanarienport, auch im Bridge-Container
+- [Phase 02-22]: Presidio lädt bei falschem spaCy-Pfad per spacy.cli.download aus dem Netz; Erkennungs-Kind muss Modellordner vorher prüfen
 
 ### Pending Todos
 
@@ -145,6 +148,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T09:55:09.436Z
-Stopped at: Completed 02-21-PLAN.md
+Last session: 2026-11-18T10:28:36.411Z
+Stopped at: Completed 02-22-PLAN.md
 Resume file: None
