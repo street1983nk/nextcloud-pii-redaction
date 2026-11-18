@@ -228,6 +228,7 @@ Plans:
   3. Jeder Fund trägt eine Stufe hoch, mittel oder niedrig, niedrige werden nie automatisch angenommen; "Herr Müller", "Müller" und "M." bilden eine Entität; Namen, die zugleich Wörter sind, werden gesondert behandelt; Amtsträger erscheinen als eigene Kategorie (Bearbeiter im Vorgang, sonstige Bedienstete), sind aber vorbelegt geschwärzt.
   4. Lange Texte werden mit Überlappung gestückelt; ein Test mit stillem Abschneiden durch ein Modell schlägt als Fehler fehl.
   5. Modelle liegen mit festem sha256 im persistenten Speicher (DE-Stapel beim Einrichten, Admin-Ablage möglich); der RAM-Wächter lässt Erkenner und LibreOffice nie gleichzeitig laufen, der Erkenner bleibt warm, solange Arbeit ansteht, und endet im Leerlauf.
+  6. Das Erkennungskind setzt seine torch-Threadzahl direkt nach dem torch-Import über `hardware.apply_worker_threads` aus dem vom Elternprozess berechneten `OMP_NUM_THREADS` (kein `OMP_THREAD_LIMIT` in seiner Umgebung; der AST-Wächter `test_torch_threads_guard.py` lässt kein Modul mit torch-Import ohne diesen Aufruf durch); das CI-Tor `test_detect_finds_the_name_in_time_on_every_architecture` läuft gegen das echte Erkennungskind auf amd64 und arm64 (Beleg: mit `OMP_THREAD_LIMIT=1` hing detect auf arm64, ohne die Grenze rund 230 ms Extraktion, Sandbox-Lauf 44221141543, deferred-items 02-16).
 
 **Plans**: TBD
 **Research flag**: Keiner ausdrücklich (Spike-Stapel gemessen); offen bleiben Linux-RSS des Stapels im Container und Owner-Entscheid OCR-Zweitkanal je Seite im gründlichen Modus (nach Messung im Testsatz).
