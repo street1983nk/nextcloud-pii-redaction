@@ -151,3 +151,9 @@ None yet.
 Last session: 2026-11-18T10:28:36.411Z
 Stopped at: Completed 02-22-PLAN.md
 Resume file: None
+
+## Quick Tasks Completed
+
+| ID | Date | Task | Status |
+|----|------|------|--------|
+| 261118-gbl | 2026-11-18 | Fix two broken assertions in ExAppServiceTest (CI eb46ef4 PHP gates red) | done, CI proof pending |

@@ -120,7 +120,9 @@ final class ExAppServiceTest extends TestCase {
 	}
 
 	public function testTheHighestLandlockAbiIsStillAWord(): void {
-		$sandbox = ['landlockAbi' => 64] + self::SANDBOX;
+		// array_replace keeps the key order of the contract; assertSame on
+		// arrays compares the order too.
+		$sandbox = array_replace(self::SANDBOX, ['landlockAbi' => 64]);
 		$service = $this->service(self::INFO, fn () => $this->statusAnswer(['sandbox' => $sandbox]));
 		self::assertSame($sandbox, $service->status('root')['sandbox'] ?? null);
 	}
@@ -132,7 +134,10 @@ final class ExAppServiceTest extends TestCase {
 			self::assertSame($child, $service->status('root')['lastChild'] ?? null, $kind);
 		}
 		$service = $this->service(self::INFO, fn () => $this->statusAnswer(['lastChild' => ['kind' => 'rocket', 'rssKb' => 1, 'ms' => 1]]));
-		self::assertNull($service->status('root')['lastChild'] ?? 'not null');
+		$status = $service->status('root');
+		self::assertNotNull($status);
+		self::assertArrayHasKey('lastChild', $status);
+		self::assertNull($status['lastChild']);
 	}
 
 	/**
