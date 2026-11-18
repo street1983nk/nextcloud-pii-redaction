@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "02-18 abgeschlossen (lokal, ungepusht: 4e70caa bis fe749e9); nächster Plan 02-19"
-last_updated: "2026-11-18T08:18:47.615Z"
-last_activity: 2026-11-18 -- 02-18 abgeschlossen, Dateikarte mit Ablehnungsgründen, Signatur-Bestätigung und Makro-Hinweis
+stopped_at: "02-19 abgeschlossen (lokal, ungepusht: 30801ca bis 36067d9); nächster Plan 02-20"
+last_updated: "2026-11-18T09:25:45.678Z"
+last_activity: 2026-11-18 -- 02-19 abgeschlossen, Runner mit Vorprüfung, Signatur-Bestätigung, Bereiniger und Seitendeckel
 progress:
   total_phases: 15
   completed_phases: 1
   total_plans: 46
-  completed_plans: 39
+  completed_plans: 40
   percent: 7
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-11-07)
 ## Current Position
 
 Phase: 2 of 15 (Sicherer Dateieingang und Kindprozess-Sandbox)
-Plan: 18 of 25 in current phase (02-01 bis 02-18 abgeschlossen; origin/phase-02 bei 7bcab92, 02-18 lokal ungepusht; nächster Schritt 02-19)
+Plan: 19 of 25 in current phase (02-01 bis 02-19 abgeschlossen; origin/phase-02 bei 5a1edd2, 02-19 lokal ungepusht; nächster Schritt 02-20)
 Status: Ready to execute
-Last activity: 2026-11-18 -- 02-18 abgeschlossen
+Last activity: 2026-11-18 -- 02-19 abgeschlossen
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 87%
 
 ## Performance Metrics
 
@@ -77,6 +77,7 @@ Progress: [█████████░] 85%
 | Phase 02 P15 | 30 min | 2 tasks | 5 files |
 | Phase 02 P16 | 1 Tag | 2 tasks | 12 files |
 | Phase 02 P17 | 60 min | 2 tasks | 9 files |
+| Phase 02 P19 | ca. 60 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,8 @@ Recent decisions affecting current work:
 - [Phase 02-16]: detect-Kind ohne OMP_THREAD_LIMIT, OMP_NUM_THREADS aus hardware.worker_threads (Deckel 2); ocr behält die Grenze
 - [Phase 02-17]: LibreOffice-Härtung wird in die registrymodifications.xcu der Vorlagenkopie eingefügt, nicht kopiert; conflict/malformed fail-closed
 - [Phase 02-18]: Status-Route und Startzustand der Prüfseite tragen macrosRemoved/signatureConfirmed (nur bool); confirm gilt als offen, wird aber nicht gepollt
+- [Phase 02-19]: expected null im analyze-Claim endet ohne Download als unsupported_format; fehlender Schlüssel oder fremdes Wort verwirft den Claim
+- [Phase 02-19]: andere Abstürze von precheck/sanitize sind damaged; Exit 71 markiert den Jail an jeder Kindstelle (auch soffice, Platzhalter)
 
 ### Pending Todos
 
@@ -137,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-18T08:18:47.593Z
-Stopped at: Completed 02-18-PLAN.md
+Last session: 2026-11-18T09:25:45.658Z
+Stopped at: Completed 02-19-PLAN.md
 Resume file: None
