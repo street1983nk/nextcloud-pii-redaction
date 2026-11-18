@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: "02-23 abgeschlossen; Quick-Task 261118-hs4 setzt Owner-Entscheid A zu D-02-02 um (lokal, ungepusht: a2a5d59, bb328c5); nächster Schritt 02-24"
 last_updated: "2026-11-18T11:27:54.750Z"
-last_activity: 2026-11-18 -- Quick-Task 261118-io7: ci/refusals.sh liest das Schlüsselwort der Meldung aus der Datenbank, Beweise einzeln (CI-Lauf offen)
+last_activity: 2026-11-18 -- Quick-Task 261118-k0t: ci/refusals.sh sendet beim Formular-Login den Origin-Kopf, CSRF-Ablehnung 412 beim Namen (CI-Lauf offen)
 progress:
   total_phases: 15
   completed_phases: 1
@@ -162,3 +162,4 @@ Resume file: None
 | 261118-gbl | 2026-11-18 | Fix two broken assertions in ExAppServiceTest (CI eb46ef4 PHP gates red) | done, CI proof pending |
 | 261118-hs4 | 2026-11-18 | No notification for a refusal of the pre-check (D-02-02, owner decision A) | done, CI proof pending |
 | 261118-io7 | 2026-11-18 | ci/refusals.sh: subject word from the database, every proof on its own (CI run 44300061301 red on all seven legs) | done, CI proof pending |
+| 261118-k0t | 2026-11-18 | ci/refusals.sh: Origin header with the login form, CSRF refusal 412 by name, confirmation in the refused session (CI run 44310663659: 10 of 12 proofs green on all seven legs) | done, CI proof pending |
