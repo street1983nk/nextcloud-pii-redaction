@@ -163,3 +163,4 @@ Resume file: None
 | 261118-hs4 | 2026-11-18 | No notification for a refusal of the pre-check (D-02-02, owner decision A) | done, CI proof pending |
 | 261118-io7 | 2026-11-18 | ci/refusals.sh: subject word from the database, every proof on its own (CI run 44300061301 red on all seven legs) | done, CI proof pending |
 | 261118-k0t | 2026-11-18 | ci/refusals.sh: Origin header with the login form, CSRF refusal 412 by name, confirmation in the refused session (CI run 44310663659: 10 of 12 proofs green on all seven legs) | done, CI proof pending |
+| 261118-lie | 2026-11-18 | Security scans (CodeQL, REUSE, pip-audit) also on phase branches | done, CI proof pending |
