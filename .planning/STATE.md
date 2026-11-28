@@ -167,3 +167,4 @@ Resume file: None
 | 261118-ng9 | 2026-11-18 | Review 502 test measures the frame in the final state (harness race, run 44322550281) | done, CI proof pending |
 | 261128-c7m | 2026-11-28 | Playwright login: one new attempt when the core answers with its error page (SQLite lock in the core login, run 44346938238) | done, CI proof pending |
 | 261128-ene | 2026-11-28 | Sandbox: detect and ocr refuse connect() (detect measured in run 46123496042, ocr closed before tesseract) | done, CI proof pending |
+| 261128-jxe | 2026-11-28 | fetch_corpus names the refused file and the reason (run 46141427114 amd64 refused a corpus file without naming it; arm64 and local check of all 10 files clean) | done, push pending |
