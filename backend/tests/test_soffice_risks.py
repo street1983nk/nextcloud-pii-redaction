@@ -405,24 +405,24 @@ def test_negative_restart_facts_see_setup_and_self_references(tmp_path: Path) ->
 
 
 def test_deny_connect_changes_only_the_flag_and_leaves_the_profiles_alone() -> None:
-    call = jail.parse(["detect", "--read", "/x", "--", "/usr/bin/true"])
-    assert call is not None
+    parsed = jail.parse(["detect", "--read", "/x", "--", "/usr/bin/true"])
+    assert parsed is not None
+    # A profile that would still keep connect(): the variant switches only the flag.
+    call = replace(parsed, profile=replace(parsed.profile, deny_connect=False))
     changed = jail_layers.with_deny_connect(call)
     assert changed.profile.deny_connect is True
     assert replace(changed.profile, deny_connect=False) == call.profile
     assert (changed.read, changed.write, changed.command) == (call.read, call.write, call.command)
-    # The product profiles stay as they are: detect keeps connect(), soffice and render do not.
-    assert profiles.profile_for("detect").deny_connect is False
-    assert profiles.profile_for("soffice").deny_connect is True
-    assert profiles.profile_for("render").deny_connect is True
+    # The product profiles stay as they are: since 28.11. every one refuses connect().
+    assert all(profiles.profile_for(name).deny_connect for name in profiles.PROFILES)
 
 
 @pytest.mark.parametrize("profile", ["render", "precheck", "sanitize", "ocr", "detect"])
 def test_the_deny_connect_jail_installs_seccomp_with_deny_connect(profile: str) -> None:
     # Since 17.11. the product refuses connect() for render, precheck and
-    # sanitize too; for them the variant equals the product. detect and ocr
-    # still differ (negative control below).
-    product_flag = profile in ("render", "precheck", "sanitize")
+    # sanitize, since 28.11. for detect and ocr as well: for every profile the
+    # variant now equals the product (negative control in test_jail.py).
+    product_flag = True
     calls: list[str] = []
     ops = jail.Ops(
         setrlimit=lambda name, _value: calls.append(name),
@@ -477,14 +477,13 @@ def test_the_work_list_names_every_profile_but_soffice(tmp_path: Path) -> None:
     assert covered == set(profiles.PROFILES) - {"soffice"}
 
 
-def test_only_detect_and_ocr_are_still_measured_with_deny_connect() -> None:
-    # render, precheck and sanitize refuse connect() in the product: one run, a gate.
-    for name in ("render", "precheck", "sanitize"):
+def test_every_profile_runs_its_work_once_in_the_product_jail() -> None:
+    # Every profile refuses connect() in the product (detect and ocr since 28.11.):
+    # one run each, in the product jail, a gate.
+    for name in profiles.PROFILES:
         assert diag.jails_for(name) == ("product",)
-    # detect and ocr keep connect(): the product and the variant, a measurement.
-    for name in ("detect", "ocr"):
-        assert diag.jails_for(name) == ("product", "deny")
     assert set(diag.CONNECT_REFUSED) == {name for name, p in profiles.PROFILES.items() if p.deny_connect}
+    assert set(diag.CONNECT_REFUSED) == set(profiles.PROFILES)
 
 
 def test_the_product_work_line() -> None:
@@ -754,7 +753,8 @@ def test_the_detect_gate_fails_on_a_timeout_a_miss_or_a_slow_extraction() -> Non
 
 
 def test_detect_is_gated_with_connect_denied_and_runs_in_the_gate_budget() -> None:
-    assert diag.DENY_GATED == ("detect",)
+    # No profile keeps connect() any more, so no deny-connect run is gated separately.
+    assert diag.DENY_GATED == ()
     assert set(diag.DENY_GATED) <= {name for name, p in profiles.PROFILES.items() if not p.deny_connect}
     assert diag.DETECT_TIMEOUT_S == diag.VARIANT_TIMEOUT_S
 

@@ -119,8 +119,12 @@ def _profile(
 # first (owner 17.11., secure-phase SOCKET-CONNECT); render, precheck and
 # sanitize after the sandbox run of df2d2e5 (R2, PROFILE-DENY-CONNECT: ok=ja
 # and product_ok=ja with no audit event on amd64 and arm64; owner 17.11.).
-# detect and ocr keep connect() until a run measures their real work without
-# it (that run had no models for detect and no tesseract for ocr).
+# detect after the sandbox run 46123496042 of 4fd4b05 (PROFILE-DENY-CONNECT
+# detect/detect: ok with presidio, spaCy and GLiNER2 loaded, amd64 and arm64;
+# owner 28.11.). ocr is closed as well, owner 28.11.: the image has no
+# tesseract yet, so its first real run (phase 12) has to work under the
+# refusal, the product gate of test_container_soffice.py. No profile keeps
+# connect() any more.
 
 PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
     {
@@ -146,10 +150,12 @@ PROFILES: Final[Mapping[str, Profile]] = types.MappingProxyType(
             deny_connect=True,
         ),
         # Tesseract on one page image.
-        "ocr": _profile("ocr", wall_s=120, address_space=GIB, file_size=512 * MIB, python_child=False),
+        "ocr": _profile(
+            "ocr", wall_s=120, address_space=GIB, file_size=512 * MIB, python_child=False, deny_connect=True
+        ),
         # The detector loads torch: no address space limit (CLAUDE.md), half an
         # hour for a long document, it writes only findings.
-        "detect": _profile("detect", wall_s=1800, address_space=None, file_size=64 * MIB),
+        "detect": _profile("detect", wall_s=1800, address_space=None, file_size=64 * MIB, deny_connect=True),
     }
 )
 

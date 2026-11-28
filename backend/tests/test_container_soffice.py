@@ -64,8 +64,10 @@ empty, a gate). R2 would the other profiles still work without connect()?
 Sandbox run of df2d2e5 measured render, precheck and sanitize: ok on amd64 and
 arm64, so the owner switched them (17.11.); their product jail refuses
 connect() now (SOCKET-CONNECT refused EACCES, a gate) and their work must run
-in it (PROFILE-WORK, a gate). detect and ocr stay a measurement
-(PROFILE-DENY-CONNECT; its control SOCKET-CONNECT-DENY is a gate).
+in it (PROFILE-WORK, a gate). detect followed on 28.11. after the sandbox run
+46123496042 (PROFILE-DENY-CONNECT ok with the models loaded) and ocr with it,
+closed before Tesseract is in the image; both now run as PROFILE-WORK in the
+product jail (a gate; its control SOCKET-CONNECT-DENY stays a gate).
 
 Why a fresh profile restarts and a copy should not, from the LibreOffice
 25.2.3.2 sources: desktop/source/app/app.cxx cleanExtensionCache() returns
@@ -959,18 +961,18 @@ def deny_connect_argv(
     return [sys.executable, "-I", str(DRIVER), "deny-connect", *product[4:]]
 
 
-# The profiles whose product jail refuses connect() (owner 17.11.): a gate in
-# the container. detect and ocr keep connect() and are only described.
-CONNECT_REFUSED = ("soffice", "render", "precheck", "sanitize")
+# The profiles whose product jail refuses connect(): a gate in the container.
+# soffice, render, precheck and sanitize since 17.11.; detect and ocr since
+# 28.11. (owner, after sandbox run 46123496042), so now every profile.
+CONNECT_REFUSED = ("soffice", "render", "precheck", "sanitize", "detect", "ocr")
 
 
 async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> None:
     """SOCKET-CONNECT <who>=<ok|refused|absent> for every profile as it stands, and SOCKET-CONNECT-DENY.
 
-    soffice, render, precheck and sanitize: the product jail, whose seccomp
-    filter refuses connect() for every family: each must answer "refused
-    EACCES" (owner decisions 17.11.). detect and ocr keep connect() for now:
-    their answers describe the state (R2). SOCKET-CONNECT-DENY is the same
+    Every profile: the product jail, whose seccomp filter refuses connect()
+    for every family: each must answer "refused EACCES" (owner decisions
+    17.11. and, for detect and ocr, 28.11.). SOCKET-CONNECT-DENY is the same
     probe in each profile with deny_connect on: every one must answer
     "refused EACCES", or the PROFILE-DENY-CONNECT measurement would not mean
     what it says.
@@ -994,7 +996,7 @@ async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> 
     assert answers["test-process"] == "ok", answers
     for who, answer in answers.items():
         assert answer == "ok" or answer.startswith("refused"), (who, answer)
-    assert set(CONNECT_REFUSED) <= set(PROFILES), CONNECT_REFUSED
+    assert set(CONNECT_REFUSED) == set(PROFILES), CONNECT_REFUSED
     for name in CONNECT_REFUSED:
         assert answers[name] == "refused EACCES", (name, answers)
     assert set(denied.values()) == {"refused EACCES"}, denied
@@ -1005,12 +1007,11 @@ async def test_soffice_reaches_no_socket(capsys: pytest.CaptureFixture[str]) -> 
 # Stands for the fresh output folder of one run in the arguments of a work.
 OUT = "{out}"
 JAILS = ("product", "deny")
-# Profiles that still keep connect() but whose deny-connect run must work too:
-# detect did on amd64 in the sandbox run of 87f5744 (CI 44221141543, ok=ja,
-# only events=socket.__new__ from the urllib3 import) and hung on arm64 only
-# through OMP_THREAD_LIMIT=1, now gone from its environment. ocr stays a
-# measurement until Tesseract is in the image.
-DENY_GATED = ("detect",)
+# Profiles that keep connect() but whose deny-connect run must work too. detect
+# was one (sandbox runs of 87f5744 and 4fd4b05, CI 44221141543 and 46123496042)
+# until 28.11.; since then every profile refuses connect() in the product jail,
+# jails_for() runs each once there and the product gate holds, so none is left.
+DENY_GATED: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

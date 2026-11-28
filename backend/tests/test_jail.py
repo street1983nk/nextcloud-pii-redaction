@@ -4,6 +4,7 @@ import ast
 import json
 import socket
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -219,10 +220,11 @@ def test_only_libreoffice_gets_a_socket_path(name: str) -> None:
 
 # Owner decisions 17.11.: soffice (secure-phase SOCKET-CONNECT), render,
 # precheck and sanitize (R2, sandbox run of df2d2e5) reach no socket, the HaRP
-# socket included. detect and ocr keep connect() until their work is measured
-# without it (that run had no working detect and no tesseract).
-CONNECT_REFUSED = frozenset({"soffice", "render", "precheck", "sanitize"})
-CONNECT_KEPT = frozenset({"detect", "ocr"})
+# socket included. Owner 28.11.: detect too (sandbox run 46123496042 of 4fd4b05,
+# its work ran with connect() refused, models loaded) and ocr, closed before
+# Tesseract is in the image. No profile keeps connect().
+CONNECT_REFUSED = frozenset({"soffice", "render", "precheck", "sanitize", "detect", "ocr"})
+CONNECT_KEPT: frozenset[str] = frozenset()
 
 
 def test_the_two_sets_cover_every_profile() -> None:
@@ -237,12 +239,17 @@ def test_connect_is_refused_exactly_where_the_owner_decided(name: str) -> None:
     assert ("seccomp", name in CONNECT_REFUSED) in recorder.calls
 
 
-@pytest.mark.parametrize("name", sorted(CONNECT_KEPT))
-def test_negative_detect_and_ocr_keep_connect(name: str) -> None:
-    kept, soffice = Recorder(), Recorder()
-    jail.main([name, "--", "/bin/true"], kept.ops())
-    jail.main(["soffice", "--", "/usr/bin/soffice"], soffice.ops())
-    assert ("seccomp", True) in soffice.calls
+@pytest.mark.parametrize("name", ["detect", "ocr"])
+def test_negative_a_profile_without_the_flag_would_keep_connect(name: str) -> None:
+    # Control for the test above: the jail hands on exactly the flag of the
+    # profile, so the same call with deny_connect switched off installs the
+    # filter without the refusal. No product profile looks like this any more.
+    call = jail.parse([name, "--", "/bin/true"])
+    assert call is not None
+    kept, product = Recorder(), Recorder()
+    jail.run(replace(call, profile=replace(call.profile, deny_connect=False)), kept.ops())
+    jail.run(call, product.ops())
+    assert ("seccomp", True) in product.calls
     assert ("seccomp", True) not in kept.calls
     assert ("seccomp", False) in kept.calls
 
