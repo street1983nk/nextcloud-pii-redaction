@@ -303,3 +303,77 @@ def test_wrong_arguments_are_exit_2(capsys: pytest.CaptureFixture[str]) -> None:
     assert fc().main([]) == 2
     assert fc().main(["a", "b"]) == 2
     assert "usage" in capsys.readouterr().err
+
+
+# -- the refusal names the file and the reason (run 46141427114: amd64 refused, nobody could tell which file) --
+
+
+def _refusal(tmp_path: Path, capsys: pytest.CaptureFixture[str], opener: Any) -> str:
+    assert fc().main([str(tmp_path)], opener) == 2
+    return capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("served", "reason"),
+    [
+        (b"evil bytes", "checksum"),  # same size, other bytes
+        (b"short", "size 5 of 10"),
+        (b"x" * 1000, "larger than 10"),
+    ],
+)
+def test_a_refused_body_names_the_file_and_the_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], served: bytes, reason: str
+) -> None:
+    good = b"good bytes"
+    later = _doc("b.pdf", b"later")
+    doc = _doc("a.pdf", good)
+    _table(monkeypatch, later, doc)
+    err = _refusal(tmp_path, capsys, FakeOpener({later.url: b"later", doc.url: served}))
+    assert "a.pdf" in err
+    assert reason in err
+    assert "b.pdf" not in err
+
+
+def test_a_foreign_final_host_is_named_without_the_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    doc = _doc("a.pdf", b"bytes")
+    _table(monkeypatch, doc)
+    opener = FakeOpener({doc.url: b"bytes"}, final_url={doc.url: "https://evil.example/secret/path?q=1"})
+    err = _refusal(tmp_path, capsys, opener)
+    assert "a.pdf" in err
+    assert "host evil.example" in err
+    assert "secret" not in err
+
+
+def test_a_table_url_outside_the_allowlist_is_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _table(monkeypatch, _doc("a.pdf", b"bytes", host="evil.example"))
+    err = _refusal(tmp_path, capsys, FakeOpener({}))
+    assert "a.pdf" in err
+    assert "host evil.example" in err
+
+
+def test_a_redirect_to_a_foreign_host_names_the_host() -> None:
+    handler = fc().AllowlistRedirects()
+    req = urllib.request.Request("https://dserver.bundestag.de/x.pdf")
+    with pytest.raises(fc().Refused, match=r"redirect to host evil\.example$"):
+        handler.redirect_request(req, None, 302, "Found", {}, "https://evil.example/login?next=x")
+
+
+def test_a_network_error_names_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _table(monkeypatch, _doc("a.pdf", b"x"))
+    err = _refusal(tmp_path, capsys, BrokenOpener())
+    assert "a.pdf could not be fetched (OSError)" in err
+
+
+def test_control_a_clean_run_writes_nothing_to_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    doc = _doc("a.pdf", b"bytes")
+    _table(monkeypatch, doc)
+    assert fc().main([str(tmp_path)], FakeOpener({doc.url: b"bytes"})) == 0
+    assert capsys.readouterr().err == ""
