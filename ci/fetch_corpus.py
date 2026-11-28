@@ -27,7 +27,8 @@ match. A file that is already there with the right hash is kept (the cache of
 sandbox.yml); sandbox.yml calls the script on every run, so a cached file is
 hashed again each time. manifest.json lists the table for the container test.
 
-Standard library only. Errors go to stderr, exit 2.
+Standard library only. A refusal or an error names the file and the reason on
+stderr (of a URL only its host, never path or query), exit 2.
 """
 
 import hashlib
@@ -158,7 +159,19 @@ DOCUMENTS: Final = (
 
 
 class Refused(Exception):
-    """A host, a size or a hash that is not allowed."""
+    """A host, a size or a hash that is not allowed; str() is the reason, safe for a public log."""
+
+
+def host_of(url: str) -> str:
+    """Only the host of url, lowercased.
+
+    Path and query can carry tokens of a login page a redirect points to, and
+    stderr ends up in a public CI log, so a message never prints more than the host.
+    """
+    try:
+        return (urllib.parse.urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return "?"
 
 
 def host_allowed(url: str) -> bool:
@@ -181,7 +194,7 @@ class AllowlistRedirects(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
         if not host_allowed(newurl):
-            raise Refused
+            raise Refused(f"redirect to host {host_of(newurl)}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -210,7 +223,7 @@ def copy_limited(source: BinaryIO, target: Path, limit: int) -> tuple[str, int]:
         while block := source.read(BLOCK):
             size += len(block)
             if size > limit:
-                raise Refused
+                raise Refused(f"larger than {limit} bytes")
             digest.update(block)
             handle.write(block)
     return digest.hexdigest(), size
@@ -226,17 +239,19 @@ def fetch(document: Document, outdir: Path, opener: Any) -> None:
     if cached(document, outdir):
         return
     if not host_allowed(document.url):
-        raise Refused
+        raise Refused(f"host {host_of(document.url)}")
     target = outdir / document.name
     target.unlink(missing_ok=True)
     partial = target.with_name(target.name + ".tmp")
     try:
         with opener.open(request(document), timeout=TIMEOUT_S) as response:
             if not host_allowed(response.geturl()):
-                raise Refused
+                raise Refused(f"final host {host_of(response.geturl())}")
             digest, size = copy_limited(response, partial, document.size)
-        if size != document.size or digest != document.sha256:
-            raise Refused
+        if size != document.size:
+            raise Refused(f"size {size} of {document.size} bytes")
+        if digest != document.sha256:
+            raise Refused("checksum")
         os.replace(partial, target)
     finally:
         partial.unlink(missing_ok=True)
@@ -262,16 +277,19 @@ def main(argv: list[str], opener: Any = None) -> int:
         return 2
     outdir = Path(argv[0])
     opener = opener if opener is not None else default_opener()
+    current = "outdir"  # what a message names: the file being worked on
     try:
         outdir.mkdir(parents=True, exist_ok=True)
         for document in DOCUMENTS:
+            current = document.name
             fetch(document, outdir, opener)
+        current = MANIFEST
         write_manifest(outdir, DOCUMENTS)
-    except Refused:
-        sys.stderr.write("a corpus file was refused (host, size or checksum)\n")
+    except Refused as refusal:
+        sys.stderr.write(f"{current} was refused ({refusal})\n")
         return 2
     except OSError as error:
-        sys.stderr.write(f"a corpus file could not be fetched ({type(error).__name__})\n")
+        sys.stderr.write(f"{current} could not be fetched ({type(error).__name__})\n")
         return 2
     return 0
 
