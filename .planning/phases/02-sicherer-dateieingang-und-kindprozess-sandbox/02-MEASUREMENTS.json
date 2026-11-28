@@ -1,0 +1,1212 @@
+{
+  "amd64": {
+    "a1_frpc_environ": "denied",
+    "a2_landlock": {
+      "abi": 8,
+      "landlock": "active"
+    },
+    "corpus_jail": {
+      "refused": 34,
+      "slow": [],
+      "total_s": 22.3,
+      "words": {
+        "cfb_encrypted.docx": "encrypted_document",
+        "dup_case.docx": "unsafe_content",
+        "dup_dot.docx": "unsafe_content",
+        "dup_exact.docx": "unsafe_content",
+        "dup_nfc.docx": "unsafe_content",
+        "ext_altchunk.docx": "ok",
+        "ext_image.docx": "ok",
+        "ext_includepicture.docx": "ok",
+        "ext_template.docx": "ok",
+        "harmless.docx": "ok",
+        "harmless.odt": "ok",
+        "harmless.pdf": "ok",
+        "macro_vba.docx": "ok",
+        "odt_basic.odt": "ok",
+        "odt_encrypted.odt": "encrypted_document",
+        "odt_ext_image.odt": "ok",
+        "pdf_300_pages.pdf": "ok",
+        "pdf_301_pages.pdf": "too_many_pages",
+        "pdf_flate_bomb.pdf": "too_large",
+        "pdf_huge_image.pdf": "too_large",
+        "pdf_huge_mediabox.pdf": "too_large",
+        "pdf_objects_500001.pdf": "too_large",
+        "pdf_owner_only.pdf": "ok",
+        "pdf_page_loop.pdf": "damaged",
+        "pdf_prefix.pdf": "damaged",
+        "pdf_signed.pdf": "confirm",
+        "pdf_user_password.pdf": "encrypted_pdf",
+        "traversal_abs.docx": "unsafe_content",
+        "traversal_backslash.docx": "unsafe_content",
+        "traversal_dotdot.docx": "unsafe_content",
+        "traversal_drive.docx": "unsafe_content",
+        "traversal_nul.docx": "unsafe_content",
+        "truncated.docx": "damaged",
+        "truncated.pdf": "damaged",
+        "wrong_docx_as_pdf.pdf": "wrong_type",
+        "wrong_odt_as_docx.docx": "wrong_type",
+        "wrong_pdf_as_docx.docx": "wrong_type",
+        "xml_billion_laughs.docx": "unsafe_content",
+        "xml_doctype_only.docx": "unsafe_content",
+        "xml_param_entity.docx": "unsafe_content",
+        "xml_xxe_file.docx": "unsafe_content",
+        "xml_xxe_http.docx": "unsafe_content",
+        "zip_entries_10001.docx": "too_large",
+        "zip_lying_size.docx": "damaged",
+        "zip_overlap.docx": "unsafe_content",
+        "zip_prefix.docx": "unsafe_content",
+        "zip_ratio_bomb.docx": "unsafe_content"
+      },
+      "wrong": []
+    },
+    "detect_variants": {
+      "control-omp-limit-1": {
+        "exit": 0,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "DEFAULT",
+          "cpu_count": "4",
+          "cpuinfo": "EACCES",
+          "interop": "2",
+          "ms_extract": "219",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "1",
+          "online": "EACCES",
+          "possible": "EACCES",
+          "present": "EACCES",
+          "torch_threads": "2"
+        },
+        "ok": true,
+        "result": "result=ok events=socket.__new__",
+        "tail": "Error in cpuinfo: failed to parse processor information from <path> | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+        "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.3s step=offline_configured torch=nein rss=- ; t=1.2s step=threads_set torch=ja rss=- ; t=3.1s step=presidio_imported torch=ja rss=- ; t=4.3s step=spacy_loaded torch=ja rss=- ; t=4.5s step=presidio_analyzed torch=ja rss=- ; t=4.7s step=gliner_imported torch=ja rss=- ; t=11.2s step=gliner_loaded torch=ja rss=- ; t=11.5s step=gliner_extracted torch=ja rss=- ; t=11.7s step=done torch=ja rss=- dumps=0 last_dump=-"
+      },
+      "jailed-product": {
+        "exit": 0,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "DEFAULT",
+          "cpu_count": "4",
+          "cpuinfo": "EACCES",
+          "interop": "2",
+          "ms_extract": "145",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "online": "EACCES",
+          "possible": "EACCES",
+          "present": "EACCES",
+          "torch_threads": "2"
+        },
+        "ok": true,
+        "result": "result=ok events=socket.__new__",
+        "tail": "Error in cpuinfo: failed to parse processor information from <path> | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+        "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.3s step=offline_configured torch=nein rss=- ; t=1.2s step=threads_set torch=ja rss=- ; t=3.2s step=presidio_imported torch=ja rss=- ; t=4.4s step=spacy_loaded torch=ja rss=- ; t=4.6s step=presidio_analyzed torch=ja rss=- ; t=4.8s step=gliner_imported torch=ja rss=- ; t=11.3s step=gliner_loaded torch=ja rss=- ; t=11.4s step=gliner_extracted torch=ja rss=- ; t=11.6s step=done torch=ja rss=- dumps=0 last_dump=-"
+      },
+      "unjailed": {
+        "exit": 0,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "AVX512",
+          "cpu_count": "4",
+          "cpuinfo": "ok",
+          "interop": "2",
+          "ms_extract": "139",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "online": "0-3",
+          "possible": "0-3",
+          "present": "0-3",
+          "torch_threads": "2"
+        },
+        "ok": true,
+        "result": "result=ok events=socket.__new__,socket.bind",
+        "tail": "[transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+        "trace": "marks=t=0.0s step=start torch=nein rss=21208kB ; t=0.3s step=offline_configured torch=nein rss=42796kB ; t=1.2s step=threads_set torch=ja rss=241856kB ; t=3.1s step=presidio_imported torch=ja rss=408020kB ; t=4.3s step=spacy_loaded torch=ja rss=1311204kB ; t=4.5s step=presidio_analyzed torch=ja rss=1315856kB ; t=4.7s step=gliner_imported torch=ja rss=1315924kB ; t=8.4s step=gliner_loaded torch=ja rss=2761364kB ; t=8.5s step=gliner_extracted torch=ja rss=2796264kB ; t=8.7s step=done torch=ja rss=1168768kB dumps=0 last_dump=-"
+      }
+    },
+    "dumpable_server_environ": "denied",
+    "jail_reads_detect": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_ocr": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_precheck": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_render": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_sanitize": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_soffice": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "lo_network_a": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_vba.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_basic.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_b": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_bridge_s": 1.6,
+    "lo_network_c": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_d": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 3,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "offline_positive_control": {
+      "email": false,
+      "error": "-",
+      "event_names": [
+        "socket.getaddrinfo"
+      ],
+      "exit": 0,
+      "ms": 494,
+      "net_events": 2,
+      "person": false
+    },
+    "offline_stack_jailed": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 12112,
+      "net_events": 0,
+      "person": true
+    },
+    "offline_stack_jailed_raise": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 11980,
+      "net_events": 0,
+      "person": true
+    },
+    "offline_stack_unjailed": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 9159,
+      "net_events": 0,
+      "person": true
+    },
+    "positive_control": "triggered",
+    "positive_control_connections": {
+      "ext_altchunk.docx": 0,
+      "ext_image.docx": 0,
+      "ext_includepicture.docx": 0,
+      "ext_template.docx": 0,
+      "odt_ext_image.odt": 3
+    },
+    "positive_control_macro": "absent",
+    "profile_deny_connect": {
+      "detect/detect": {
+        "deny": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=socket.__new__",
+          "tail": "Error in cpuinfo: failed to parse processor information from <path> | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+          "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.3s step=offline_configured torch=nein rss=- ; t=1.2s step=threads_set torch=ja rss=- ; t=3.2s step=presidio_imported torch=ja rss=- ; t=4.4s step=spacy_loaded torch=ja rss=- ; t=4.7s step=presidio_analyzed torch=ja rss=- ; t=4.8s step=gliner_imported torch=ja rss=- ; t=11.4s step=gliner_loaded torch=ja rss=- ; t=11.5s step=gliner_extracted torch=ja rss=- ; t=11.7s step=done torch=ja rss=- dumps=0 last_dump=-"
+        },
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=socket.__new__",
+          "tail": "Error in cpuinfo: failed to parse processor information from <path> | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+          "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.3s step=offline_configured torch=nein rss=- ; t=1.2s step=threads_set torch=ja rss=- ; t=3.1s step=presidio_imported torch=ja rss=- ; t=4.5s step=spacy_loaded torch=ja rss=- ; t=4.8s step=presidio_analyzed torch=ja rss=- ; t=5.0s step=gliner_imported torch=ja rss=- ; t=11.5s step=gliner_loaded torch=ja rss=- ; t=11.6s step=gliner_extracted torch=ja rss=- ; t=11.8s step=done torch=ja rss=- dumps=0 last_dump=-"
+        }
+      },
+      "precheck/precheck": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "render/placeholder": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "render/render": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "sanitize/sanitize": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      }
+    },
+    "sandbox_jail": "ok",
+    "sandbox_landlock": "active",
+    "sandbox_landlock_abi": 8,
+    "sandbox_seccomp": "active",
+    "socket_connect": {
+      "detect": "ok",
+      "ocr": "ok",
+      "precheck": "refused EACCES",
+      "render": "refused EACCES",
+      "sanitize": "refused EACCES",
+      "soffice": "refused EACCES",
+      "test-process": "ok"
+    },
+    "socket_connect_deny": {
+      "detect": "refused EACCES",
+      "ocr": "refused EACCES",
+      "precheck": "refused EACCES",
+      "render": "refused EACCES",
+      "sanitize": "refused EACCES",
+      "soffice": "refused EACCES"
+    },
+    "soffice_docx_ms": 751,
+    "soffice_product": {
+      "exit": 0,
+      "ms": 751,
+      "pdf": true,
+      "signal": null,
+      "template": "ok"
+    },
+    "soffice_starts": {
+      "after_cleanup": [],
+      "before_cleanup": [
+        "OSL_PIPE_10001_SingleOfficeIPC_7f1176656dd08897402a3333cd3c7cf:sock"
+      ],
+      "product": 1
+    },
+    "soffice_starts_control": {
+      "exit": 0,
+      "n": 2,
+      "pdf": true
+    },
+    "soffice_template": {
+      "bytes": 166686,
+      "dirs": 10,
+      "files": 14,
+      "mentions_path": "nein",
+      "other": 0,
+      "owner": "0:0",
+      "writable": 0
+    },
+    "soffice_template_restart": {
+      "buildid": "match",
+      "bundled": "0",
+      "mentions": "-",
+      "setup_completed": "ja",
+      "shared": "1"
+    },
+    "soffice_vmhwm_kb": {
+      "docx_300_pages": 221008,
+      "harmless_docx": 221120
+    },
+    "soffice_vmpeak_kb": {
+      "docx_300_pages": 368924,
+      "harmless_docx": 368924
+    },
+    "torch_facts": {
+      "jailed-product": {
+        "bench": {
+          "acl": "nein",
+          "aten_interop": "2",
+          "aten_threads": "2",
+          "backend": "OpenMP",
+          "config_acl": "nein",
+          "cpu_cap": "DEFAULT",
+          "ftz": "ja",
+          "hw_concurrency": "4",
+          "interop": "2",
+          "matmul": "15.4",
+          "mkl": "ja",
+          "mkl_max_threads": "2",
+          "mkldnn": "ja",
+          "mkldnn_version": "v3.13.3",
+          "num_threads": "2",
+          "omp_avail": "ja",
+          "omp_max_threads": "2",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "openmp": "201511",
+          "score_queries": "57.2",
+          "score_queries_first_ms": "4.5",
+          "score_queries_ftz": "55.3",
+          "score_queries_ftz_first_ms": "4.8",
+          "torch": "2.15.0+cpu"
+        },
+        "exit": 0,
+        "ok": true,
+        "result": "result=ok events=-",
+        "tail": "Error in cpuinfo: failed to parse processor information from <path>",
+        "trace": "-"
+      },
+      "unjailed": {
+        "bench": {
+          "acl": "nein",
+          "aten_interop": "2",
+          "aten_threads": "2",
+          "backend": "OpenMP",
+          "config_acl": "nein",
+          "cpu_cap": "AVX512",
+          "ftz": "ja",
+          "hw_concurrency": "4",
+          "interop": "2",
+          "matmul": "13.8",
+          "mkl": "ja",
+          "mkl_max_threads": "2",
+          "mkldnn": "ja",
+          "mkldnn_version": "v3.13.3",
+          "num_threads": "2",
+          "omp_avail": "ja",
+          "omp_max_threads": "2",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "openmp": "201511",
+          "score_queries": "45.5",
+          "score_queries_first_ms": "3.6",
+          "score_queries_ftz": "46.8",
+          "score_queries_ftz_first_ms": "4.3",
+          "torch": "2.15.0+cpu"
+        },
+        "exit": 0,
+        "ok": true,
+        "result": "result=ok events=-",
+        "tail": "",
+        "trace": "-"
+      }
+    },
+    "unlink_risk": {
+      "answers": {
+        "file-in-subdir/none": "ok",
+        "file-in-subdir/product": "EACCES",
+        "file/none": "ok",
+        "file/product": "EACCES",
+        "socket-copy/none": "ok",
+        "socket-copy/product": "EACCES"
+      },
+      "facts": "TMP-FACTS uid=10001 tmp=0:0:1777 sticky=ja exapp=10001:10001:0666:sock access_w=/tmp:ok,/var/tmp:ok"
+    }
+  },
+  "arm64": {
+    "a1_frpc_environ": "denied",
+    "a2_landlock": {
+      "abi": 8,
+      "landlock": "active"
+    },
+    "corpus_jail": {
+      "refused": 34,
+      "slow": [],
+      "total_s": 26.4,
+      "words": {
+        "cfb_encrypted.docx": "encrypted_document",
+        "dup_case.docx": "unsafe_content",
+        "dup_dot.docx": "unsafe_content",
+        "dup_exact.docx": "unsafe_content",
+        "dup_nfc.docx": "unsafe_content",
+        "ext_altchunk.docx": "ok",
+        "ext_image.docx": "ok",
+        "ext_includepicture.docx": "ok",
+        "ext_template.docx": "ok",
+        "harmless.docx": "ok",
+        "harmless.odt": "ok",
+        "harmless.pdf": "ok",
+        "macro_vba.docx": "ok",
+        "odt_basic.odt": "ok",
+        "odt_encrypted.odt": "encrypted_document",
+        "odt_ext_image.odt": "ok",
+        "pdf_300_pages.pdf": "ok",
+        "pdf_301_pages.pdf": "too_many_pages",
+        "pdf_flate_bomb.pdf": "too_large",
+        "pdf_huge_image.pdf": "too_large",
+        "pdf_huge_mediabox.pdf": "too_large",
+        "pdf_objects_500001.pdf": "too_large",
+        "pdf_owner_only.pdf": "ok",
+        "pdf_page_loop.pdf": "damaged",
+        "pdf_prefix.pdf": "damaged",
+        "pdf_signed.pdf": "confirm",
+        "pdf_user_password.pdf": "encrypted_pdf",
+        "traversal_abs.docx": "unsafe_content",
+        "traversal_backslash.docx": "unsafe_content",
+        "traversal_dotdot.docx": "unsafe_content",
+        "traversal_drive.docx": "unsafe_content",
+        "traversal_nul.docx": "unsafe_content",
+        "truncated.docx": "damaged",
+        "truncated.pdf": "damaged",
+        "wrong_docx_as_pdf.pdf": "wrong_type",
+        "wrong_odt_as_docx.docx": "wrong_type",
+        "wrong_pdf_as_docx.docx": "wrong_type",
+        "xml_billion_laughs.docx": "unsafe_content",
+        "xml_doctype_only.docx": "unsafe_content",
+        "xml_param_entity.docx": "unsafe_content",
+        "xml_xxe_file.docx": "unsafe_content",
+        "xml_xxe_http.docx": "unsafe_content",
+        "zip_entries_10001.docx": "too_large",
+        "zip_lying_size.docx": "damaged",
+        "zip_overlap.docx": "unsafe_content",
+        "zip_prefix.docx": "unsafe_content",
+        "zip_ratio_bomb.docx": "unsafe_content"
+      },
+      "wrong": []
+    },
+    "detect_variants": {
+      "control-omp-limit-1": {
+        "exit": null,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "DEFAULT",
+          "cpu_count": "4",
+          "cpuinfo": "EACCES",
+          "interop": "2",
+          "ms_extract": "-",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "1",
+          "online": "EACCES",
+          "possible": "EACCES",
+          "present": "EACCES",
+          "torch_threads": "2"
+        },
+        "ok": false,
+        "result": "result=fail:timeout events=-",
+        "tail": "state=R_(running) vmhwm=4067352_kB vmrss=2912456_kB threads=8 cpu_s=45.1 wchan=0 top_threads=python:R:45.0s:0,python:S:0.1s:futex_do_wait,python:S:0.0s:futex_do_wait,python:S:0.0s:futex_do_wait,python:S:0.0s:futex_do_wait,python:S:0.0s:futex_do_wait,python:S:0.0s:futex_do_wait,python:S:0.0s:futex_do_wait stderr=Error in cpuinfo: failed to parse the list of present processors in <path> | Error in cpuinfo: failed to parse both lists of possible and present processors | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn( trace=marks=t=0.0s step=start torch=nein rss=- ; t=0.4s step=offline_configured torch=nein rss=- ; t=1.4s step=threads_set torch=ja rss=- ; t=3.8s step=presidio_imported torch=ja rss=- ; t=5.1s step=spacy_loaded torch=ja rss=- ; t=5.3s step=presidio_analyzed torch=ja rss=- ; t=5.6s step=gliner_imported torch=ja rss=- ; t=11.3s step=gliner_loaded torch=ja rss=- dumps=4 last_dump=Thread 0x0000fff493ed24e0 < gliner2/layers.py:487 score_queries < gliner2/layers.py:557 score_queries < gliner2/models/span/model.py:621 _compute_span_scores_core < gliner2/models/span/model.py:605 compute_span_scores_batched < gliner2/inference/runtime.py:774 _compute_direct_span_logits_batched < gliner2/inference/runtime.py:465 _extract_from_batch < gliner2/inference/runtime.py:351 batch_extract < torch/utils/_contextlib.py:158 inference_mode < gliner2/inference/runtime.py:1621 extract < gliner2/inference/runtime.py:1765 extract_entities < tests/profile_work.py:339 _detect",
+        "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.4s step=offline_configured torch=nein rss=- ; t=1.4s step=threads_set torch=ja rss=- ; t=3.8s step=presidio_imported torch=ja rss=- ; t=5.1s step=spacy_loaded torch=ja rss=- ; t=5.3s step=presidio_analyzed torch=ja rss=- ; t=5.6s step=gliner_imported torch=ja rss=- ; t=11.3s step=gliner_loaded torch=ja rss=- dumps=4 last_dump=Thread 0x0000fff493ed24e0 < gliner2/layers.py:487 score_queries < gliner2/layers.py:557 score_queries < gliner2/models/span/model.py:621 _compute_span_scores_core < gliner2/models/span/model.py:605 compute_span_scores_batched < gliner2/inference/runtime.py:774 _compute_direct_span_logits_batched < gliner2/inference/runtime.py:465 _extract_from_batch < gliner2/inference/runtime.py:351 batch_extract < torch/utils/_contextlib.py:158 inference_mode < gliner2/inference/runtime.py:1621 extract < gliner2/inference/runtime.py:1765 extract_entities < tests/profile_work.py:339 _detect"
+      },
+      "jailed-product": {
+        "exit": 0,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "DEFAULT",
+          "cpu_count": "4",
+          "cpuinfo": "EACCES",
+          "interop": "2",
+          "ms_extract": "357",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "online": "EACCES",
+          "possible": "EACCES",
+          "present": "EACCES",
+          "torch_threads": "2"
+        },
+        "ok": true,
+        "result": "result=ok events=socket.__new__",
+        "tail": "Error in cpuinfo: failed to parse the list of present processors in <path> | Error in cpuinfo: failed to parse both lists of possible and present processors | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+        "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.4s step=offline_configured torch=nein rss=- ; t=1.4s step=threads_set torch=ja rss=- ; t=3.8s step=presidio_imported torch=ja rss=- ; t=5.0s step=spacy_loaded torch=ja rss=- ; t=5.3s step=presidio_analyzed torch=ja rss=- ; t=5.5s step=gliner_imported torch=ja rss=- ; t=11.3s step=gliner_loaded torch=ja rss=- ; t=11.6s step=gliner_extracted torch=ja rss=- ; t=11.8s step=done torch=ja rss=- dumps=0 last_dump=-"
+      },
+      "unjailed": {
+        "exit": 0,
+        "facts": {
+          "affinity": "4:0-3",
+          "cpu_cap": "SVE128",
+          "cpu_count": "4",
+          "cpuinfo": "ok",
+          "interop": "2",
+          "ms_extract": "362",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "online": "0-3",
+          "possible": "0-3",
+          "present": "0-3",
+          "torch_threads": "2"
+        },
+        "ok": true,
+        "result": "result=ok events=socket.__new__,socket.bind",
+        "tail": "[transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+        "trace": "marks=t=0.0s step=start torch=nein rss=20492kB ; t=0.4s step=offline_configured torch=nein rss=42052kB ; t=1.4s step=threads_set torch=ja rss=246152kB ; t=3.8s step=presidio_imported torch=ja rss=410876kB ; t=5.0s step=spacy_loaded torch=ja rss=1313932kB ; t=5.3s step=presidio_analyzed torch=ja rss=1318316kB ; t=5.6s step=gliner_imported torch=ja rss=1318368kB ; t=11.3s step=gliner_loaded torch=ja rss=2865956kB ; t=11.7s step=gliner_extracted torch=ja rss=2907108kB ; t=11.9s step=done torch=ja rss=1974764kB dumps=0 last_dump=-"
+      }
+    },
+    "dumpable_server_environ": "denied",
+    "jail_reads_detect": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_ocr": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_precheck": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_render": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_sanitize": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "jail_reads_soffice": {
+      "client_key": "denied",
+      "control": "read",
+      "foreign_file": "denied",
+      "foreign_listing": "denied",
+      "frpc_environ": "denied",
+      "frpc_toml": "denied",
+      "proc_self_limits": "denied",
+      "server_environ": "denied",
+      "state_db": "missing"
+    },
+    "lo_network_a": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_vba.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_basic.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_b": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_bridge_s": 1.8,
+    "lo_network_c": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "lo_network_d": {
+      "ext_altchunk.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_image.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_includepicture.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "ext_template.docx": {
+        "connections": 0,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "macro_marker.odt": {
+        "connections": 0,
+        "macro": "absent",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "odt_ext_image.odt": {
+        "connections": 3,
+        "macro": "-",
+        "outcome": "ok",
+        "pdf": true
+      },
+      "zombies": 0
+    },
+    "offline_positive_control": {
+      "email": false,
+      "error": "-",
+      "event_names": [
+        "socket.getaddrinfo"
+      ],
+      "exit": 0,
+      "ms": 593,
+      "net_events": 2,
+      "person": false
+    },
+    "offline_stack_jailed": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 12712,
+      "net_events": 0,
+      "person": true
+    },
+    "offline_stack_jailed_raise": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 12714,
+      "net_events": 0,
+      "person": true
+    },
+    "offline_stack_unjailed": {
+      "email": true,
+      "error": "-",
+      "event_names": [],
+      "exit": 0,
+      "ms": 12419,
+      "net_events": 0,
+      "person": true
+    },
+    "positive_control": "triggered",
+    "positive_control_connections": {
+      "ext_altchunk.docx": 0,
+      "ext_image.docx": 0,
+      "ext_includepicture.docx": 0,
+      "ext_template.docx": 0,
+      "odt_ext_image.odt": 3
+    },
+    "positive_control_macro": "absent",
+    "profile_deny_connect": {
+      "detect/detect": {
+        "deny": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=socket.__new__",
+          "tail": "Error in cpuinfo: failed to parse the list of present processors in <path> | Error in cpuinfo: failed to parse both lists of possible and present processors | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+          "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.4s step=offline_configured torch=nein rss=- ; t=1.5s step=threads_set torch=ja rss=- ; t=4.0s step=presidio_imported torch=ja rss=- ; t=5.2s step=spacy_loaded torch=ja rss=- ; t=5.5s step=presidio_analyzed torch=ja rss=- ; t=5.7s step=gliner_imported torch=ja rss=- ; t=11.6s step=gliner_loaded torch=ja rss=- ; t=12.0s step=gliner_extracted torch=ja rss=- ; t=12.2s step=done torch=ja rss=- dumps=0 last_dump=-"
+        },
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=socket.__new__",
+          "tail": "Error in cpuinfo: failed to parse the list of present processors in <path> | Error in cpuinfo: failed to parse both lists of possible and present processors | [transformers] You are using a model of type <q> to instantiate a model of type <q>. This may be expected if you are loading a checkpoint that shares a subset o | <path> | warnings.warn(",
+          "trace": "marks=t=0.0s step=start torch=nein rss=- ; t=0.4s step=offline_configured torch=nein rss=- ; t=1.5s step=threads_set torch=ja rss=- ; t=3.9s step=presidio_imported torch=ja rss=- ; t=5.3s step=spacy_loaded torch=ja rss=- ; t=5.5s step=presidio_analyzed torch=ja rss=- ; t=5.8s step=gliner_imported torch=ja rss=- ; t=12.0s step=gliner_loaded torch=ja rss=- ; t=12.4s step=gliner_extracted torch=ja rss=- ; t=12.6s step=done torch=ja rss=- dumps=0 last_dump=-"
+        }
+      },
+      "precheck/precheck": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "render/placeholder": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "render/render": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      },
+      "sanitize/sanitize": {
+        "product": {
+          "exit": 0,
+          "ok": true,
+          "result": "result=ok events=-",
+          "tail": "",
+          "trace": "-"
+        }
+      }
+    },
+    "sandbox_jail": "ok",
+    "sandbox_landlock": "active",
+    "sandbox_landlock_abi": 8,
+    "sandbox_seccomp": "active",
+    "socket_connect": {
+      "detect": "ok",
+      "ocr": "ok",
+      "precheck": "refused EACCES",
+      "render": "refused EACCES",
+      "sanitize": "refused EACCES",
+      "soffice": "refused EACCES",
+      "test-process": "ok"
+    },
+    "socket_connect_deny": {
+      "detect": "refused EACCES",
+      "ocr": "refused EACCES",
+      "precheck": "refused EACCES",
+      "render": "refused EACCES",
+      "sanitize": "refused EACCES",
+      "soffice": "refused EACCES"
+    },
+    "soffice_docx_ms": 1336,
+    "soffice_product": {
+      "exit": 0,
+      "ms": 1336,
+      "pdf": true,
+      "signal": null,
+      "template": "ok"
+    },
+    "soffice_starts": {
+      "after_cleanup": [],
+      "before_cleanup": [
+        "OSL_PIPE_10001_SingleOfficeIPC_7f1176656dd08897402a3333cd3c7cf:sock"
+      ],
+      "product": 1
+    },
+    "soffice_starts_control": {
+      "exit": 0,
+      "n": 2,
+      "pdf": true
+    },
+    "soffice_template": {
+      "bytes": 166686,
+      "dirs": 10,
+      "files": 14,
+      "mentions_path": "nein",
+      "other": 0,
+      "owner": "0:0",
+      "writable": 0
+    },
+    "soffice_template_restart": {
+      "buildid": "match",
+      "bundled": "0",
+      "mentions": "-",
+      "setup_completed": "ja",
+      "shared": "1"
+    },
+    "soffice_vmhwm_kb": {
+      "docx_300_pages": 223380,
+      "harmless_docx": 223368
+    },
+    "soffice_vmpeak_kb": {
+      "docx_300_pages": 373608,
+      "harmless_docx": 373608
+    },
+    "torch_facts": {
+      "jailed-product": {
+        "bench": {
+          "acl": "ja",
+          "aten_interop": "2",
+          "aten_threads": "2",
+          "backend": "OpenMP",
+          "config_acl": "nein",
+          "cpu_cap": "DEFAULT",
+          "ftz": "ja",
+          "hw_concurrency": "4",
+          "interop": "2",
+          "matmul": "59.7",
+          "mkl": "nein",
+          "mkl_max_threads": "-",
+          "mkldnn": "ja",
+          "mkldnn_version": "v3.13.3",
+          "num_threads": "2",
+          "omp_avail": "ja",
+          "omp_max_threads": "2",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "openmp": "201511",
+          "score_queries": "166.9",
+          "score_queries_first_ms": "10.5",
+          "score_queries_ftz": "164.8",
+          "score_queries_ftz_first_ms": "9.6",
+          "torch": "2.15.0+cpu"
+        },
+        "exit": 0,
+        "ok": true,
+        "result": "result=ok events=-",
+        "tail": "<path> | Error in cpuinfo: failed to parse the list of possible processors in <path> | Error in cpuinfo: failed to parse the list of present processors in <path> | Error in cpuinfo: failed to parse both lists of possible and present processors",
+        "trace": "-"
+      },
+      "unjailed": {
+        "bench": {
+          "acl": "ja",
+          "aten_interop": "2",
+          "aten_threads": "2",
+          "backend": "OpenMP",
+          "config_acl": "nein",
+          "cpu_cap": "SVE128",
+          "ftz": "ja",
+          "hw_concurrency": "4",
+          "interop": "2",
+          "matmul": "59.3",
+          "mkl": "nein",
+          "mkl_max_threads": "-",
+          "mkldnn": "ja",
+          "mkldnn_version": "v3.13.3",
+          "num_threads": "2",
+          "omp_avail": "ja",
+          "omp_max_threads": "2",
+          "omp_num_threads": "2",
+          "omp_thread_limit": "-",
+          "openmp": "201511",
+          "score_queries": "160.9",
+          "score_queries_first_ms": "10.4",
+          "score_queries_ftz": "160.3",
+          "score_queries_ftz_first_ms": "8.9",
+          "torch": "2.15.0+cpu"
+        },
+        "exit": 0,
+        "ok": true,
+        "result": "result=ok events=-",
+        "tail": "",
+        "trace": "-"
+      }
+    },
+    "unlink_risk": {
+      "answers": {
+        "file-in-subdir/none": "ok",
+        "file-in-subdir/product": "EACCES",
+        "file/none": "ok",
+        "file/product": "EACCES",
+        "socket-copy/none": "ok",
+        "socket-copy/product": "EACCES"
+      },
+      "facts": "TMP-FACTS uid=10001 tmp=0:0:1777 sticky=ja exapp=10001:10001:0666:sock access_w=/tmp:ok,/var/tmp:ok"
+    }
+  },
+  "run": "https://github.com/street1983nk/nextcloud-pii-redaction/actions/runs/46123496042",
+  "sha": "4fd4b05da277ab5d1cde3ee13e3f5cd0bb033685"
+}
