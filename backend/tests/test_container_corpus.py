@@ -413,6 +413,7 @@ async def test_negative_soffice_over_a_small_cap_ends_with_a_reason_and_leaves_n
     assert docx, "the real corpus holds no DOCX"
     source = real_corpus.root / docx[0]
     measured: dict[str, dict[str, Any]] = {}
+    tails: dict[str, str] = {}
     lines: list[str] = []
     # The control first: it proves the probe works and the limit reaches soffice.bin.
     for label, cap, job_id in (("control", CONTROL_CAP, CONTROL_JOB), ("capped", TEST_CAP, CAPPED_JOB)):
@@ -432,6 +433,7 @@ async def test_negative_soffice_over_a_small_cap_ends_with_a_reason_and_leaves_n
             "leftovers": leftovers(job_id),
             "jail_marks": run.jail_marks,
         }
+        tails[label] = watched.tail
         lines.append(probe_line(label, cap, measured[label]))
         if watched.tail:
             lines.append(f"SOFFICE-CAP-PROBE-TAIL run={label} tail={watched.tail.replace(chr(10), ' | ')[:600]}")
@@ -447,6 +449,12 @@ async def test_negative_soffice_over_a_small_cap_ends_with_a_reason_and_leaves_n
     assert capped["result"] == "failed", report
     assert capped["reason"] == "render_failed", report
     assert capped["soffice"] not in {None, "pdf"}, report
+    # The failure is soffice's own, not the probe's: no Python traceback (the probe is the only Python
+    # in front of soffice), and where soffice.bin was seen, it ran under exactly this cap. Run
+    # 46150036977 was green with a probe that died on EPERM before soffice started.
+    assert "Traceback" not in tails["capped"], report
+    assert "not allowed to raise maximum limit" not in tails["capped"], report
+    assert capped["as_limit"] in {DASH, str(TEST_CAP)}, report
     for entry in (control, capped):
         assert entry["zombies"] == 0, report
         assert entry["leftovers"] == [], report

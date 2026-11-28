@@ -159,6 +159,21 @@ def test_the_capped_command_is_the_product_command_behind_the_probe(tmp_path: Pa
     assert capped[4:] == product
 
 
+def test_the_capped_run_after_the_control_has_exactly_one_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The negative test patches soffice.command for the control (4 GiB) and then for the capped run (256 MiB).
+    # A wrapper around the already patched command would put a second probe behind the first, which then
+    # tries to raise the hard limit again and dies with EPERM before soffice starts (sandbox run 46150036977).
+    product = soffice.command(tmp_path / "a.docx", tmp_path / "out", "990391")
+    for cap in (4096 * 1024 * 1024, 256 * 1024 * 1024):
+        monkeypatch.setattr(soffice, "command", capped_command(cap))
+    capped = soffice.command(tmp_path / "a.docx", tmp_path / "out", "990391")
+    assert capped.count(str(CAP_PROBE)) == 1
+    assert capped[1:4] == ["-I", str(CAP_PROBE), str(256 * 1024 * 1024)]
+    assert capped[4:] == product
+
+
 # -- the harness: the real Runner, the real check children in process -----------------------
 
 
