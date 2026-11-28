@@ -73,6 +73,11 @@ def test_the_derived_names() -> None:
     assert cc().derived_name("BMBF_BuFI-2024_Hauptband.pdf", "odt") == "BMBF_BuFI-2024_Hauptband_pdf.odt"
 
 
+def test_the_time_limit_fits_the_arm64_bufi_conversion() -> None:
+    """arm64 needs about 10 to 11 min per format for the 451-page BuFI PDF (run 46150036977)."""
+    assert cc().TIMEOUT_S == 1800.0
+
+
 def test_the_command_imports_the_pdf_into_writer_and_exports_the_format(tmp_path: Path) -> None:
     argv = cc().command(tmp_path / "a.pdf", tmp_path / "out", tmp_path / "profile", "docx:MS Word 2007 XML")
     assert argv[0] == "/usr/bin/soffice"
