@@ -72,6 +72,8 @@ MIB: Final = 1024 * 1024
 TEST_CAP: Final = 256 * MIB
 CONTROL_CAP: Final = 4096 * MIB
 CAP_PROBE: Final = Path(__file__).with_name("probes") / "as_cap.py"
+# The product command, taken before any test patches it (capped_command).
+PRODUCT_COMMAND: Final = soffice.command
 RESULTS: Final = frozenset({"review", "failed", "confirm"})
 DASH: Final = "-"
 
@@ -388,11 +390,15 @@ async def test_the_real_corpus_goes_through_the_product_path_and_soffice_is_meas
 
 
 def capped_command(cap: int) -> Any:
-    """soffice.command with the probe in front: the same soffice, under RLIMIT_AS cap."""
-    original = soffice.command
+    """soffice.command with the probe in front: the same soffice, under RLIMIT_AS cap.
+
+    Always the product command of import time, never whatever soffice.command is now: the
+    negative test patches it once per run, and a wrapper around the control wrapper would put
+    a second probe behind the first that raises the hard limit again and dies on EPERM.
+    """
 
     def command(src: Path, outdir: Path, job_id: str) -> list[str]:
-        return [sys.executable, "-I", str(CAP_PROBE), str(cap), *original(src, outdir, job_id)]
+        return [sys.executable, "-I", str(CAP_PROBE), str(cap), *PRODUCT_COMMAND(src, outdir, job_id)]
 
     return command
 
