@@ -106,15 +106,20 @@ def test_the_process_count_limit_is_never_set() -> None:
     assert "never set" in source
 
 
-def test_connect_is_refused_for_soffice_render_precheck_and_sanitize() -> None:
+def test_connect_is_refused_for_every_profile() -> None:
     # Owner decisions 17.11.: soffice first (secure-phase SOCKET-CONNECT), then
-    # render, precheck and sanitize (R2, sandbox run of df2d2e5: their work ran
-    # with deny_connect on amd64 and arm64). detect and ocr keep connect(): that
-    # run had no working detect (FileNotFoundError of the test setup) and no
-    # tesseract, so nothing shows yet that their work runs without it.
+    # render, precheck and sanitize (R2, sandbox run of df2d2e5). Owner 28.11.:
+    # detect too, after the sandbox run 46123496042 of 4fd4b05 (PROFILE-DENY-CONNECT
+    # detect/detect ok with the models loaded, amd64 and arm64), and ocr closed as
+    # well: the image has no tesseract yet, so its first real run (phase 12) must
+    # work under the refusal, the product gate of test_container_soffice.py.
     denied = {name for name, profile in PROFILES.items() if profile.deny_connect}
-    assert denied == {"soffice", "render", "precheck", "sanitize"}
-    assert set(PROFILES) - denied == {"detect", "ocr"}
+    assert denied == set(PROFILES)
+
+
+def test_the_comment_names_the_measurement_that_closed_detect() -> None:
+    source = (Path(__file__).parents[1] / "src/pii_redaction_backend/sandbox/profiles.py").read_text(encoding="utf-8")
+    assert "46123496042" in source
 
 
 def test_only_libreoffice_may_create_a_socket_and_only_in_tmp() -> None:
