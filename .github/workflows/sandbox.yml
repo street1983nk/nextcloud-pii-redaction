@@ -10,6 +10,9 @@ name: Sandbox and network proof
 # The test stage is built locally (push: false, load: true) and never reaches a
 # registry. Models come from ci/fetch_models.py with fixed hashes into the
 # runner cache and are mounted read only (D-02-09: models only in the CI cache).
+# The real public documents of plan 02-24 come the same way from
+# ci/fetch_corpus.py; they and the DOCX and ODT made from them are mounted read
+# only and never uploaded (test corpora never leave the runner).
 # Nothing here lets an empty or failing run pass: no swallowed exit code, no
 # step allowed to fail, no pass for "no tests collected" (tests/test_workflows.py).
 on:
@@ -33,7 +36,9 @@ jobs:
   container-suite:
     name: Container suite ${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    # 120 and not 60 since plan 02-24: the PDF import of the real corpus and
+    # sixteen product runs of it come on top of the container proofs.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +83,40 @@ jobs:
         if: steps.models.outputs.cache-hit != 'true'
         run: python3 ci/fetch_models.py ci/out/models
 
+      # The real corpus of plan 02-24 (owner 28.11.2026: the address space cap
+      # of soffice comes from real public documents): ten files with fixed URL,
+      # size and sha256 into the runner cache, never into the repository, the
+      # image or an artifact. The script runs on every run, so a cached file is
+      # hashed again each time. The licence of the three PDFs is not settled:
+      # runtime download only, never distributed (ci/fetch_corpus.py).
+      - name: Restore the real corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ci/out/real-corpus
+          key: real-corpus-${{ hashFiles('ci/fetch_corpus.py') }}
+
+      - name: Fetch the real corpus with fixed hashes
+        run: |
+          python3 ci/fetch_corpus.py ci/out/real-corpus
+          test -f ci/out/real-corpus/manifest.json
+          echo "REAL_CORPUS=${GITHUB_WORKSPACE}/ci/out/real-corpus" >> "${GITHUB_ENV}"
+
+      # Step 2 of plan 02-24: the three PDFs as DOCX and ODT, made by the
+      # LibreOffice of the test image outside the sandbox (a foreign tool, not
+      # the code under test: ci/convert_corpus.py) in a throwaway container
+      # without network. The files stay in RUNNER_TEMP and are never uploaded;
+      # a failed conversion is written down and fails test_container_corpus.py.
+      - name: Convert the PDFs of the real corpus outside the sandbox
+        run: |
+          derived="${RUNNER_TEMP}/real-derived"
+          sudo install -d -o 10001 -g 10001 -m 0755 "${derived}"
+          docker run --rm --network none --user 10001:10001 --entrypoint /app/.venv/bin/python \
+            -v "${REAL_CORPUS}:/real-corpus:ro" -v "${derived}:/real-derived" \
+            -v "${GITHUB_WORKSPACE}/ci/convert_corpus.py:/opt/convert_corpus.py:ro" \
+            pii-sandbox:test -I /opt/convert_corpus.py /real-corpus /real-derived
+          test -f "${derived}/manifest.json"
+          echo "REAL_DERIVED=${derived}" >> "${GITHUB_ENV}"
+
       # HaRP mounts the FRP client certificate at /certs/frp; here the three
       # files are canaries with the rights HaRP gives them (uid 10001, 0600).
       - name: Prepare the canary certificate folder
@@ -109,6 +148,7 @@ jobs:
             -e HP_SHARED_KEY="${CANARY_HP}" -e HP_FRP_ADDRESS=127.0.0.1 -e HP_FRP_PORT=8782 \
             -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
             -v "${CORPUS}:/corpus:ro" \
+            -v "${REAL_CORPUS}:/real-corpus:ro" -v "${REAL_DERIVED}:/real-derived:ro" \
             pii-sandbox:test
           answer=""
           for _ in $(seq 60); do
@@ -123,7 +163,7 @@ jobs:
 
       - name: Run the container tests
         run: |
-          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models -e PII_CORPUS=/corpus sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
+          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models -e PII_CORPUS=/corpus -e PII_REAL_CORPUS=/real-corpus -e PII_REAL_DERIVED=/real-derived sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
 
       # Read only, for the soffice diagnosis of plan 02-16: Landlock writes a
       # denial to the kernel audit only from ABI 7 (Linux 6.15) on and only
@@ -201,6 +241,15 @@ jobs:
           path: ${{ runner.temp }}/measurements/
           if-no-files-found: warn
           retention-days: 14
+
+      # Step 4 of plan 02-24 for this architecture alone: the cap its values
+      # would give, every value in the log. The value in sandbox/profiles.py
+      # comes from both architectures together (ci/soffice_cap.py on the merged
+      # 02-MEASUREMENTS.json), after the owner has seen them.
+      - name: Derive the soffice cap of this architecture
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: python3 ci/soffice_cap.py --arch "${ARCH}" "${RUNNER_TEMP}/measurements/measurements.json"
 
       - name: Container logs and cleanup
         if: always()

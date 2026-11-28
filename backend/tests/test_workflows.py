@@ -955,3 +955,75 @@ def test_self_the_tolerance_rules_fire() -> None:
     assert any("without PII_IN_CONTAINER" in problem for problem in tolerance_problems(bare))
     notice = "bridge step misses '::notice::bridge test absent'"
     assert notice in tolerance_problems(source.replace("::notice::bridge", "bridge"))
+
+
+# -- sandbox.yml: the real corpus of plan 02-24 (owner 28.11.2026) -------------------------
+
+REAL_FETCH = "python3 ci/fetch_corpus.py ci/out/real-corpus"
+REAL_CONVERT = "pii-sandbox:test -I /opt/convert_corpus.py /real-corpus /real-derived"
+REAL_MOUNTS = '-v "${REAL_CORPUS}:/real-corpus:ro" -v "${REAL_DERIVED}:/real-derived:ro"'
+REAL_ENV = "-e PII_REAL_CORPUS=/real-corpus -e PII_REAL_DERIVED=/real-derived"
+REAL_CAP = 'python3 ci/soffice_cap.py --arch "${ARCH}" "${RUNNER_TEMP}/measurements/measurements.json"'
+
+
+def _steps(source: str) -> list[str]:
+    """The text of every step of the jobs, split at its "- name:" line."""
+    return re.split(r"(?m)^ {6}- name: ", source)[1:]
+
+
+def real_corpus_problems(source: str) -> list[str]:
+    """Fetched on every run, converted without network, mounted read only, named to the tests, never uploaded."""
+    found: list[str] = []
+    steps = _steps(source)
+    fetch = [step for step in steps if REAL_FETCH in step]
+    if len(fetch) != 1:
+        found.append("the real corpus is not fetched exactly once")
+    elif re.search(r"(?m)^ {8}if:", fetch[0]):
+        found.append("the fetch of the real corpus is skipped on a cache hit, so the cache is never hashed again")
+    convert = [step for step in steps if REAL_CONVERT in step]
+    if len(convert) != 1 or "docker run --rm --network none" not in convert[0]:
+        found.append("the PDFs are not converted in a container without network")
+    if source.count(REAL_MOUNTS) != 1:
+        found.append("the real corpus is not mounted read only into the server container")
+    runs = [line for line in source.splitlines() if "docker exec" in line and line.endswith("-m container /app/tests")]
+    if not runs or any(REAL_ENV not in line for line in runs):
+        found.append("the container tests are not told where the real corpus is")
+    for step in steps:
+        if "actions/upload-artifact@" in step and "real" in step:
+            found.append("an artifact names the real corpus")
+    cap = [step for step in steps if REAL_CAP in step]
+    if len(cap) != 1 or re.search(r"(?m)^ {8}if:", cap[0]):
+        found.append("the cap of the architecture is not derived after the measurement")
+    order = [source.find(needle) for needle in (REAL_FETCH, REAL_CONVERT, REAL_MOUNTS, REAL_ENV, REAL_CAP)]
+    if -1 not in order and order != sorted(order):
+        found.append("the real corpus steps run out of order")
+    return found
+
+
+def test_the_real_corpus_reaches_the_measurement_and_never_leaves_the_runner() -> None:
+    assert real_corpus_problems(SANDBOX.read_text(encoding="utf-8")) == []
+
+
+def test_self_the_real_corpus_rules_fire() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    skipped = source.replace(
+        f"        run: |\n          {REAL_FETCH}",
+        f"        if: steps.real.outputs.cache-hit != 'true'\n        run: |\n          {REAL_FETCH}",
+    )
+    assert real_corpus_problems(skipped) == [
+        "the fetch of the real corpus is skipped on a cache hit, so the cache is never hashed again"
+    ]
+    online = source.replace("docker run --rm --network none --user", "docker run --rm --user")
+    assert real_corpus_problems(online) == ["the PDFs are not converted in a container without network"]
+    writable = source.replace(
+        '"${REAL_CORPUS}:/real-corpus:ro" -v "${REAL_DERIVED}:/real-derived:ro"',
+        '"${REAL_CORPUS}:/real-corpus" -v "${REAL_DERIVED}:/real-derived:ro"',
+    )
+    assert real_corpus_problems(writable) == ["the real corpus is not mounted read only into the server container"]
+    unnamed = source.replace(f" {REAL_ENV} sbx", " sbx")
+    assert real_corpus_problems(unnamed) == ["the container tests are not told where the real corpus is"]
+    uploaded = source.replace("path: ${{ runner.temp }}/measurements/", "path: ${{ runner.temp }}/real-derived/")
+    assert real_corpus_problems(uploaded) == ["an artifact names the real corpus"]
+    no_cap = source.replace(REAL_CAP, "true")
+    assert real_corpus_problems(no_cap) == ["the cap of the architecture is not derived after the measurement"]
+    assert real_corpus_problems(source.replace(REAL_FETCH, "true")) == ["the real corpus is not fetched exactly once"]
