@@ -117,6 +117,24 @@ jobs:
           test -f "${derived}/manifest.json"
           echo "REAL_DERIVED=${derived}" >> "${GITHUB_ENV}"
 
+      # The soffice diagnosis of quick 261128-qaa (owner 28.11.2026): the images
+      # of every derived file counted and sized, and copies of the 1800107
+      # conversions with 1x1 images (ci/soffice_diag.py), in a throwaway
+      # container without network. Both architectures, since it takes seconds;
+      # the soffice runs of the diagnosis are amd64 only (job budget, see
+      # tests/test_container_soffice_diag.py). The folder stays in RUNNER_TEMP
+      # and is never uploaded.
+      - name: Inventory the images of the derived files and make the tiny copies
+        run: |
+          diag="${RUNNER_TEMP}/real-diag"
+          sudo install -d -o 10001 -g 10001 -m 0755 "${diag}"
+          docker run --rm --network none --user 10001:10001 --entrypoint /app/.venv/bin/python \
+            -v "${REAL_DERIVED}:/real-derived:ro" -v "${diag}:/real-diag" \
+            -v "${GITHUB_WORKSPACE}/ci/soffice_diag.py:/opt/soffice_diag.py:ro" \
+            pii-sandbox:test -I /opt/soffice_diag.py /real-derived /real-diag
+          test -f "${diag}/manifest.json"
+          echo "REAL_DIAG=${diag}" >> "${GITHUB_ENV}"
+
       # HaRP mounts the FRP client certificate at /certs/frp; here the three
       # files are canaries with the rights HaRP gives them (uid 10001, 0600).
       - name: Prepare the canary certificate folder
@@ -149,6 +167,7 @@ jobs:
             -v "${CERTS}:/certs/frp:ro" -v "${GITHUB_WORKSPACE}/ci/out/models:/models:ro" \
             -v "${CORPUS}:/corpus:ro" \
             -v "${REAL_CORPUS}:/real-corpus:ro" -v "${REAL_DERIVED}:/real-derived:ro" \
+            -v "${REAL_DIAG}:/real-diag:ro" \
             pii-sandbox:test
           answer=""
           for _ in $(seq 60); do
@@ -163,7 +182,7 @@ jobs:
 
       - name: Run the container tests
         run: |
-          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models -e PII_CORPUS=/corpus -e PII_REAL_CORPUS=/real-corpus -e PII_REAL_DERIVED=/real-derived sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
+          docker exec -e PII_IN_CONTAINER=1 -e PII_CANARY_SECRET="${CANARY_SECRET}" -e PII_CANARY_HP="${CANARY_HP}" -e PII_CANARY_KEY="${CANARY_KEY}" -e PII_MODELS=/models -e PII_CORPUS=/corpus -e PII_REAL_DIAG=/real-diag -e PII_REAL_CORPUS=/real-corpus -e PII_REAL_DERIVED=/real-derived sbx /app/.venv/bin/python -m pytest -q -rs -p no:cacheprovider -m container /app/tests
 
       # Read only, for the soffice diagnosis of plan 02-16: Landlock writes a
       # denial to the kernel audit only from ABI 7 (Linux 6.15) on and only

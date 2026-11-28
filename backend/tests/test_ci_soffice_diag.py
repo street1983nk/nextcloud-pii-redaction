@@ -16,6 +16,7 @@ import struct
 import zipfile
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pymupdf
 import pytest
@@ -68,14 +69,16 @@ STORED, DEFLATED = zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED
 
 def test_dimensions_of_png_jpeg_and_gif() -> None:
     assert sd().dimensions(png(3, 2)) == (3, 2)
-    baseline = jpeg(30, 17)
+    # MuPDF writes a progressive JPEG (SOF2, C2); the same header marked baseline (SOF0, C0) is the other case.
+    progressive = jpeg(30, 17)
+    assert progressive.count(b"\xff\xc2") == 1
+    assert progressive.count(b"\xff\xc0") == 0
+    baseline = progressive.replace(b"\xff\xc2", b"\xff\xc0")
     assert sd().dimensions(baseline) == (30, 17)
+    assert sd().dimensions(progressive) == (30, 17)
     # An APP1 segment (Exif) in front of the frame header.
     app1 = b"\xff\xe1" + struct.pack(">H", 2 + 10) + b"Exif\x00\x00abcd"
     assert sd().dimensions(baseline[:2] + app1 + baseline[2:]) == (30, 17)
-    # The same frame header marked progressive (SOF2).
-    assert baseline.count(b"\xff\xc0") == 1
-    assert sd().dimensions(baseline.replace(b"\xff\xc0", b"\xff\xc2")) == (30, 17)
     assert sd().dimensions(gif(5, 7)) == (5, 7)
 
 
@@ -238,7 +241,7 @@ def test_the_prefixes_are_those_of_convert_corpus_and_only_1800107_is_stripped()
 # -- 8: main -------------------------------------------------------------------------------
 
 
-def _derived(root: Path, entries: list[dict[str, object]] | None = None, *, write: bool = True) -> Path:
+def _derived(root: Path, entries: list[dict[str, Any]] | None = None, *, write: bool = True) -> Path:
     """A derived folder like ci/convert_corpus.py writes it."""
     root.mkdir()
     packages = {
@@ -311,7 +314,7 @@ def _broken(case: str, root: Path) -> Path:
         (root / "manifest.json").write_text("{not json", encoding="utf-8")
         return root
     ok = {"result": "ok", "bytes": 1, "images": 1, "ms": 1}
-    full = [
+    full: list[dict[str, Any]] = [
         {"name": "1800107_pdf.docx", "source": "1800107.pdf", "format": "docx"} | ok,
         {"name": "1800107_pdf.odt", "source": "1800107.pdf", "format": "odt"} | ok,
         {"name": "1913500_pdf.odt", "source": "1913500.pdf", "format": "odt"} | ok,
