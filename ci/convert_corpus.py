@@ -44,7 +44,12 @@ from pathlib import Path
 from typing import Final
 
 SOFFICE: Final = "/usr/bin/soffice"
-TIMEOUT_S: Final = 600.0
+# 28.11.2026, run 46150036977 (commit bddb6a1): arm64 timed out at 600 s on the 451-page
+# BuFI PDF for docx and odt, amd64 took 190 s / 226 s. arm64 is about 3 times slower, so
+# about 10 to 11 min per format. Realistic worst case, only the two BuFI conversions at the
+# limit: about 23 + 60 + 3 build + 8 tests = about 95 min, under timeout-minutes 120 of
+# sandbox.yml.
+TIMEOUT_S: Final = 1800.0
 MANIFEST: Final = "manifest.json"
 PDF_IMPORT: Final = "writer_pdf_import"
 # Target format, the export filter of LibreOffice, and the folder of the package that holds the images.
