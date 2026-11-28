@@ -165,3 +165,4 @@ Resume file: None
 | 261118-k0t | 2026-11-18 | ci/refusals.sh: Origin header with the login form, CSRF refusal 412 by name, confirmation in the refused session (CI run 44310663659: 10 of 12 proofs green on all seven legs) | done, CI proof pending |
 | 261118-lie | 2026-11-18 | Security scans (CodeQL, REUSE, pip-audit) also on phase branches | done, CI proof pending |
 | 261118-ng9 | 2026-11-18 | Review 502 test measures the frame in the final state (harness race, run 44322550281) | done, CI proof pending |
+| 261128-c7m | 2026-11-28 | Playwright login: one new attempt when the core answers with its error page (SQLite lock in the core login, run 44346938238) | done, CI proof pending |

@@ -6,7 +6,7 @@
 // expect.poll only. Answers forged with page.route carry values of the closed
 // lists below only (T-01-16-03); the real path of every state is proven by
 // ci/flow.sh and the check scripts of plan 17.
-import { expect, request, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, request, test, type APIRequestContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -653,12 +653,52 @@ export function folderPath(folder: string): string {
 	return `${FILES_PATH}?dir=${encodeURIComponent(`/${folder}`)}`;
 }
 
-/** Fill the login form the page shows right now and wait until it is gone. */
-export async function submitLogin(page: Page, who: User): Promise<void> {
+const LOGIN_URL = /\/login(\?|$)/;
+
+/**
+ * The heading of the error page the Nextcloud core renders when the login request itself
+ * fails with 500, in the three languages of the projects. Seen in CI on SQLite: POST
+ * /index.php/login answered 500 with "database is locked" in nextcloud.log (lock in
+ * PublicKeyTokenMapper::invalidate, core, not this app; debug ci-erster-lauf-phase01.md,
+ * run 44346938238).
+ */
+const CORE_ERROR_HEADING = /^\s*(Interner Serverfehler|Internal Server Error|Erreur interne du serveur)\s*$/;
+
+async function sendLoginForm(page: Page, who: User): Promise<void> {
 	await page.locator('#user').fill(who.name);
 	await page.locator('#password').fill(who.password);
 	await page.locator('form[name="login"] [type="submit"], button[type="submit"]').first().click();
-	await expect(page).not.toHaveURL(/\/login(\?|$)/);
+}
+
+/** After sending the form: true when the core error page shows, false once the login is left. */
+async function coreErrorAfterLogin(page: Page): Promise<boolean> {
+	const heading = page.getByRole('heading', { name: CORE_ERROR_HEADING });
+	let shown = false;
+	await expect(async () => {
+		shown = (await heading.count()) > 0;
+		expect(shown || !LOGIN_URL.test(page.url())).toBe(true);
+	}).toPass();
+	return shown;
+}
+
+/**
+ * Fill the login form the page shows right now and wait until it is gone.
+ *
+ * Exactly one new attempt, and only when the core answers the login with its own error
+ * page; a wrong password or any other reason fails as before. The attempt is written to
+ * the report as an annotation of the test, so a flaky core stays visible.
+ */
+export async function submitLogin(page: Page, who: User): Promise<void> {
+	await sendLoginForm(page, who);
+	if (await coreErrorAfterLogin(page)) {
+		const note = `the Nextcloud core answered the login of ${who.name} with its error page; one new attempt`;
+		// Visible in the CI log in every case, and in the report when a test is running.
+		console.log(`login-retry: ${note}`);
+		test.info().annotations.push({ type: 'login-retry', description: note });
+		await page.goto('/index.php/login');
+		await sendLoginForm(page, who);
+	}
+	await expect(page).not.toHaveURL(LOGIN_URL);
 }
 
 export async function login(page: Page, who: User): Promise<void> {
