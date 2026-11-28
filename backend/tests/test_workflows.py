@@ -1027,3 +1027,56 @@ def test_self_the_real_corpus_rules_fire() -> None:
     no_cap = source.replace(REAL_CAP, "true")
     assert real_corpus_problems(no_cap) == ["the cap of the architecture is not derived after the measurement"]
     assert real_corpus_problems(source.replace(REAL_FETCH, "true")) == ["the real corpus is not fetched exactly once"]
+
+
+# -- sandbox.yml: the soffice diagnosis of quick 261128-qaa (owner 28.11.2026) ---------------
+
+REAL_DIAG_RUN = "pii-sandbox:test -I /opt/soffice_diag.py /real-derived /real-diag"
+REAL_DIAG_MOUNT = '-v "${REAL_DIAG}:/real-diag:ro"'
+REAL_DIAG_ENV = "-e PII_REAL_DIAG=/real-diag"
+REAL_DIAG_DERIVED = '-v "${REAL_DERIVED}:/real-derived:ro"'
+REAL_DIAG_STEP = "      - name: Inventory the images of the derived files and make the tiny copies\n"
+
+
+def real_diag_problems(source: str) -> list[str]:
+    """Inventory on every run without network, the diag folder read only in the server container and named."""
+    found: list[str] = []
+    steps = _steps(source)
+    diag = [step for step in steps if REAL_DIAG_RUN in step]
+    if len(diag) != 1 or "docker run --rm --network none" not in diag[0] or REAL_DIAG_DERIVED not in diag[0]:
+        found.append("the inventory does not run exactly once in a container without network")
+    elif re.search(r"(?m)^ {8}if:", diag[0]):
+        found.append("the inventory step is skipped on some runs")
+    if source.count(REAL_DIAG_MOUNT) != 1:
+        found.append("the diag folder is not mounted read only into the server container")
+    runs = [line for line in source.splitlines() if "docker exec" in line and line.endswith("-m container /app/tests")]
+    if not runs or any(f"{REAL_DIAG_ENV} {REAL_ENV}" not in line for line in runs):
+        found.append("the container tests are not told where the diag folder is")
+    order = [source.find(needle) for needle in (REAL_CONVERT, REAL_DIAG_RUN, REAL_DIAG_MOUNT, REAL_DIAG_ENV)]
+    if -1 not in order and order != sorted(order):
+        found.append("the diag steps run out of order")
+    return found
+
+
+def test_the_diag_folder_is_made_without_network_and_mounted_read_only() -> None:
+    assert real_diag_problems(SANDBOX.read_text(encoding="utf-8")) == []
+
+
+def test_self_the_diag_rules_fire() -> None:
+    source = SANDBOX.read_text(encoding="utf-8")
+    run = "docker run --rm --network none --user 10001:10001 --entrypoint /app/.venv/bin/python \\\n"
+    online_step = f"{run}            {REAL_DIAG_DERIVED}"
+    assert source.count(online_step) == 1
+    online = source.replace(online_step, online_step.replace("--network none ", ""))
+    assert real_diag_problems(online) == ["the inventory does not run exactly once in a container without network"]
+    assert source.count(REAL_DIAG_STEP) == 1
+    skipped = source.replace(REAL_DIAG_STEP, f"{REAL_DIAG_STEP}        if: matrix.arch == 'amd64'\n")
+    assert real_diag_problems(skipped) == ["the inventory step is skipped on some runs"]
+    writable = source.replace(REAL_DIAG_MOUNT, '-v "${REAL_DIAG}:/real-diag"')
+    assert real_diag_problems(writable) == ["the diag folder is not mounted read only into the server container"]
+    unnamed = source.replace(f"{REAL_DIAG_ENV} ", "")
+    assert real_diag_problems(unnamed) == ["the container tests are not told where the diag folder is"]
+    missing = source.replace(REAL_DIAG_RUN, "true")
+    assert real_diag_problems(missing) == ["the inventory does not run exactly once in a container without network"]
+    early = source.replace(REAL_DIAG_RUN, "true").replace(REAL_FETCH, f"{REAL_FETCH}\n          # {REAL_DIAG_RUN}")
+    assert "the diag steps run out of order" in real_diag_problems(early)
